@@ -50,8 +50,8 @@ using namespace std;
 //      Monday, June 16, 2014 12:00:00 AM
 
 #define DISKSPD_RELEASE_TAG ""
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.11" DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2014/09/12"
+#define DISKSPD_NUMERIC_VERSION_STRING "2.0.12" DISKSPD_RELEASE_TAG
+#define DISKSPD_DATE_VERSION_STRING "2014/09/17"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
