@@ -47,69 +47,82 @@ CmdLineParser::~CmdLineParser()
 {
 }
 
-// get size in bytes from a string (it can end with K, M, G for KB, MB, GB)
-// FUTURE EXTENSION: it can be optimized (remove strdup)
-//
-UINT64 CmdLineParser::_GetSizeInBytes(const char *pszSize) const
+// Get size in bytes from a string (it can end with K, M, G for KB, MB, GB and b for block)
+bool CmdLineParser::_GetSizeInBytes(const char *pszSize, UINT64& ullSize) const
 {
-    if (nullptr == pszSize || '\0' == *pszSize)
+    bool fOk = true;
+    UINT64 ullResult = 0;
+    bool fLastCharacterFound = false;
+    for (char ch = *pszSize; fOk && (ch != '\0'); ch = *(++pszSize))
     {
-        return 0;
+        if (fLastCharacterFound)
+        {
+            fOk = false;
+        }
+        else if ((ch >= '0') && (ch <= '9'))
+        {
+            if (ullResult <= (MAXUINT64 - (ch - '0')) / 10)
+            {
+                ullResult = ((ullResult * 10) + (ch - '0'));
+            }
+            else
+            {
+                fOk = false;
+            }
+
+        }
+        else
+        {
+            ch = static_cast<char>(toupper(ch));
+            if ((ch == 'B') || (ch == 'K') || (ch == 'M') || (ch == 'G'))
+            {
+                UINT64 ullMultiplier = 0;
+                if (ch == 'B')          { ullMultiplier = _dwBlockSize; }
+                else if (ch == 'K')     { ullMultiplier = 1024; }
+                else if (ch == 'M')     { ullMultiplier = 1024 * 1024; }
+                else if (ch == 'G')     { ullMultiplier = 1024 * 1024 * 1024; }
+
+                if (ullResult <= MAXUINT64 / ullMultiplier)
+                {
+                    ullResult = ullResult * ullMultiplier;
+                    fLastCharacterFound = true;
+                }
+                else
+                {
+                    // overflow
+                    fOk = false;
+                }
+            }
+            else
+            {
+                fOk = false;
+                fprintf(stderr, "Invalid size specifier '%c'. Valid ones are: K - KB, M - MB, G - GB, B - block\n", ch);
+            }
+        }
     }
 
-    UINT64 ullSize = 0;
-
-    size_t l = strlen(pszSize);
-    if ('K' == toupper(pszSize[l - 1]))
+    if (fOk)
     {
-        char *s = _strdup(pszSize);
-        s[l - 1] = '\0';
-        ullSize = _atoi64(s) << 10;
-        free(s);
+        ullSize = ullResult;
     }
-    else if ('M' == toupper(pszSize[l - 1]))
-    {
-        char *s = _strdup(pszSize);
-        s[l - 1] = '\0';
-        ullSize = _atoi64(s) << 20;
-        free(s);
-    }
-    else if ('G' == toupper(pszSize[l - 1]))
-    {
-        char *s = _strdup(pszSize);
-        s[l - 1] = '\0';
-        ullSize = _atoi64(s) << 30;
-        free(s);
-    }
-    else if ('B' == toupper(pszSize[l - 1]))
-    {
-        char *s = _strdup(pszSize);
-        s[l - 1] = '\0';
-        ullSize = _atoi64(s) * _dwBlockSize;
-        free(s);
-    }
-    else
-    {
-        ullSize = _atoi64(pszSize);
-    }
-    //FUTURE EXTENSION: better checking of the value and suffixes
-
-    return ullSize;
+    return fOk;
 }
 
-void CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath)
+bool CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath)
 {
+    bool fOk = true;
     size_t iComma = sArg.find(',');
     if (iComma == sArg.npos)
     {
-        cb = _GetSizeInBytes(sArg.c_str());
+        fOk = _GetSizeInBytes(sArg.c_str(), cb);
         sPath = "";
     }
     else
     {
-        cb = _GetSizeInBytes(sArg.substr(0, iComma).c_str());
+        fOk = _GetSizeInBytes(sArg.substr(0, iComma).c_str(), cb);
         sPath = sArg.substr(iComma + 1);
     }
+    return fOk;
 }
 
 void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
@@ -125,65 +138,72 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("\n");
     printf("Available options:\n");
     printf("  -?                 display usage information\n");
-    printf("  -a#[,#[...]]       advanced CPU affinity - affinitize threads to CPUs provided after -a\n");
-    printf("                       in a round-robin manner within current KGroup (CPU count starts with 0); the same CPU\n");
-    printf("                       can be listed more than once and the number of CPUs can be different\n");
-    printf("                       than the number of files or threads (cannot be used with -n)\n");
-    printf("  -ag                group affinity - affinitize threads in a round-robin manner across KGroups\n");
-    printf("  -b<size>[K|M|G]    block size in bytes/KB/MB/GB [default=64K]\n");
-    printf("  -B<offs>[K|M|G|b]  base file offset in bytes/KB/MB/GB/blocks [default=0]\n");
+    printf("  -a#[,#[...]]       advanced CPU affinity - affinitize threads to CPUs provided after -a in a round-robin\n");
+    printf("                       manner within current Processor Group (CPU count starts with 0); the same CPU can\n");
+    printf("                       be listed more than once and the number of CPUs can be different than the number\n");
+    printf("                       of files or threads\n");
+    printf("                       [default: round-robin within the current Processor Group starting at CPU 0,\n");
+    printf("                          use -n to disable default affinity]\n"); 
+    printf("  -ag                group affinity - affinitize threads in a round-robin manner across Processor\n");
+    printf("                       Groups, starting at group 0\n");
+    printf("  -b<size>[K|M|G]    block size in bytes or KiB/MiB/GiB [default=64K]\n");
+    printf("  -B<offs>[K|M|G|b]  base target offset in bytes or KiB/MiB/GiB/blocks [default=0]\n");
     printf("                       (offset from the beginning of the file)\n");
     printf("  -c<size>[K|M|G|b]  create files of the given size.\n");
-    printf("                       Size can be stated in bytes/KB/MB/GB/blocks\n");
+    printf("                       Size can be stated in bytes or KiB/MiB/GiB/blocks\n");
     printf("  -C<seconds>        cool down time - duration of the test after measurements finished [default=0s].\n");
-    printf("  -D<bucketDuration> Print IOPS standard deviations. The deviations are calculated for samples of duration <bucketDuration>.\n");
-    printf("                       <bucketDuration> is given in milliseconds and the default value is 1000.\n");
+    printf("  -D<milliseconds>   Capture IOPs statistics in intervals of <milliseconds>; these are per-thread\n");
+    printf("                       per-target: text output provides IOPs standard deviation, XML provides the full\n");
+    printf("                       IOPs time series in addition. [default=1000, 1 second].\n");
     printf("  -d<seconds>        duration (in seconds) to run test [default=10s]\n");
-    printf("  -f<size>[K|M|G|b]  file size - this parameter can be used to use only the part of the file/disk/partition\n");
-    printf("                       for example to test only the first sectors of disk\n");
+    printf("  -f<size>[K|M|G|b]  target size - use only the first <size> bytes or KiB/MiB/GiB/blocks of the file/disk/partition,\n");
+    printf("                       for example to test only the first sectors of a disk\n");
     printf("  -fr                open file with the FILE_FLAG_RANDOM_ACCESS hint\n");
     printf("  -fs                open file with the FILE_FLAG_SEQUENTIAL_SCAN hint\n");
-    printf("  -F<count>          total number of threads (cannot be used with -t)\n");
-    printf("  -g<bytes per ms>   throughput per thread is throttled to given bytes per millisecond\n");
+    printf("  -F<count>          total number of threads (conflicts with -t)\n");
+    printf("  -g<bytes per ms>   throughput per-thread per-target throttled to given bytes per millisecond\n");
     printf("                       note that this can not be specified when using completion routines\n");
-    printf("  -h                 disable both software and hardware caching\n");
-    printf("  -i<count>          number of IOs (burst size) before thinking. must be specified with -j\n");
-    printf("  -j<duration>       time to think in ms before issuing a burst of IOs (burst size). must be specified with -i\n");
+    printf("                       [default inactive]\n"); 
+    printf("  -h                 disable both software caching and hardware write caching. Equivalent to\n");
+    printf("                       FILE_FLAG_NO_BUFFERING and FILE_FLAG_WRITE_THROUGH\n");
+    printf("                       [default: caching is enabled, also see -S]\n"); 
+    printf("  -i<count>          number of IOs per burst; see -j [default: inactive]\n");
+    printf("  -j<milliseconds>   interval in <milliseconds> between issuing IO bursts; see -i [default: inactive]\n");
     printf("  -I<priority>       Set IO priority to <priority>. Available values are: 1-very low, 2-low, 3-normal (default)\n");
     printf("  -l                 Use large pages for IO buffers\n");
     printf("  -L                 measure latency statistics\n");
-    printf("  -n                 disable affinity (cannot be used with -a)\n");
-    printf("  -o<count>          number of overlapped I/O requests per file per thread\n");
+    printf("  -n                 disable default affinity (-a)\n");
+    printf("  -o<count>          number of outstanding I/O requests per target per thread\n");
     printf("                       (1=synchronous I/O, unless more than 1 thread is specified with -F)\n");
     printf("                       [default=2]\n");
-    printf("  -p                 start async (overlapped) I/O operations with the same offset\n");
-    printf("                       (makes sense only with -o2 or grater)\n");
-    printf("  -P<count>          enable printing a progress dot after each <count> completed I/O operations\n");
-    printf("                       (counted separately by each thread) [default count=65536]\n");
-    printf("  -r<align>[K|M|G|b] random I/O aligned to <align> bytes (doesn't make sense with -s).\n");
-    printf("                       <align> can be stated in bytes/KB/MB/GB/blocks\n");
-    printf("                       [default access=sequential, default alignment=block size]\n");
+    printf("  -p                 start parallel sequential I/O operations with the same offset\n");
+    printf("                       (ignored if -r is specified, makes sense only with -o2 or greater)\n");
+    printf("  -P<count>          enable printing a progress dot after each <count> [default=65536]\n");
+    printf("                       completed I/O operations, counted separately by each thread \n");
+    printf("  -r<align>[K|M|G|b] random I/O aligned to <align> in bytes/KiB/MiB/GiB/blocks (overrides -s)\n");
     printf("  -R<text|xml>       output format. Default is text.\n");
-    printf("  -s<size>[K|M|G|b]  stride size (offset between starting positions of subsequent I/O operations)\n");
-    printf("  -S                 disable OS caching\n");
-    printf("  -t<count>          number of threads per file (cannot be used with -F)\n");
-    printf("  -T<offs>[K|M|G|b]  stride between I/O operations performed on the same file by different threads\n");
+    printf("  -s<size>[K|M|G|b]  sequential stride size, offset between subsequent I/O operations\n");
+    printf("                       (ignored if -r specified)\n");
+    printf("                       [default access=sequential, default stride=block size]\n");
+    printf("  -S                 disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n");
+    printf("                       [default: caching is enabled, also see -h]\n");
+    printf("  -t<count>          number of threads per target (conflicts with -F)\n");
+    printf("  -T<offs>[K|M|G|b]  starting stride between I/O operations performed on the same target by different threads\n");
     printf("                       [default=0] (starting offset = base file offset + (thread number * <offs>)\n");
-    printf("                       it makes sense only with -t or -F\n");
+    printf("                       makes sense only with #threads > 1\n");
     printf("  -v                 verbose mode\n");
-    printf("  -w<percentage>     percentage of write requests (-w and -w0 are equivalent).\n");
+    printf("  -w<percentage>     percentage of write requests (-w and -w0 are equivalent and result in a read-only workload).\n");
     printf("                     absence of this switch indicates 100%% reads\n");
-    printf("                       IMPORTANT: Your data will be destroyed without a warning\n");
-    printf("  -W<seconds>        warm up time - duration of the test before measurements start [default=5s].\n");
+    printf("                       IMPORTANT: a write test will destroy existing data without a warning\n");
+    printf("  -W<seconds>        warm up time - duration of the test before measurements start [default=5s]\n");
     printf("  -x                 use completion routines instead of I/O Completion Ports\n");
-    printf("  -X<path>           use an XML file for configuring the workload. Cannot be used with other parameters.\n");
-    printf("  -z                 set random seed [default=0 if parameter not provided, GetTickCount() if value not provided]\n");
+    printf("  -X<filepath>       use an XML file for configuring the workload. Cannot be used with other parameters.\n");
+    printf("  -z[seed]           set random seed [with no -z, seed=0; with plain -z, seed is based on system run time]\n");
     printf("\n");
     printf("Write buffers:\n");
     printf("  -Z                        zero buffers used for write tests\n");
-    printf("  -Z<size>[K|M|G|b]         use a global <size> buffer filled with random data as a source for write operations.\n");
-    printf("  -Z<size>[K|M|G|b],<file>  use a global <size> buffer filled with data from <file> as a source for write operations.\n");
-    printf("                              If <file> is smaller than <size>, its content will be repeated multiple times in the buffer.\n");
+    printf("  -Z<size>[K|M|G|b]         use a <size> buffer filled with random data as a source for write operations.\n");
+    printf("  -Z<size>[K|M|G|b],<file>  use a <size> buffer filled with data from <file> as a source for write operations.\n");
     printf("\n");
     printf("  By default, the write buffers are filled with a repeating pattern (0, 1, 2, ..., 255, 0, 1, ...)\n");
     printf("\n");
@@ -194,15 +214,14 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("                       (creates a notification event if <eventname> does not exist)\n");
     printf("  -yr<eventname>     waits on event <eventname> before starting the run (including warmup)\n");
     printf("                       (creates a notification event if <eventname> does not exist)\n");
-    printf("  -yp<eventname>     allows to stop the run when event <eventname> is set; it also binds CTRL+C to this event\n");
+    printf("  -yp<eventname>     stops the run when event <eventname> is set; CTRL+C is bound to this event\n");
     printf("                       (creates a notification event if <eventname> does not exist)\n");
     printf("  -ye<eventname>     sets event <eventname> and quits\n");
     printf("\n");
     printf("Event Tracing:\n");
-    printf("  -ep                   use paged memory for NT Kernel Logger (by default it uses non-paged memory)\n");
-    printf("  -eq                   use perf timer\n");
-    printf("  -es                   use system timer (default)\n");
-    printf("  -ec                   use cycle count\n");
+    printf("  -e<q|c|s>             Use query perf timer (qpc), cycle count, or system timer respectively.\n");
+    printf("                          [default = q, query perf timer (qpc)]\n");
+    printf("  -ep                   use paged memory for the NT Kernel Logger [default=non-paged memory]\n");
     printf("  -ePROCESS             process start & end\n");
     printf("  -eTHREAD              thread start & end\n");
     printf("  -eIMAGE_LOAD          image load\n");
@@ -354,16 +373,6 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
     int nParamCnt = argc - 1;
     const char** args = argv + 1;
 
-    // find block size (other parameters may be stated in terms of blocks)
-    for (int x = 1; x<argc; ++x)
-    {
-        if ((nullptr != argv[x]) && (('-' == argv[x][0]) || ('/' == argv[x][0])) && ('b' == argv[x][1]) && ('\0' != argv[x][2]))
-        {
-            _dwBlockSize = (DWORD)_GetSizeInBytes(&argv[x][2]);
-            break;
-        }
-    }
-
     // create targets
     vector<Target> vTargets;
     int iFirstFile = -1;
@@ -375,6 +384,31 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             Target target;
             target.SetPath(argv[i]);
             vTargets.push_back(target);
+        }
+    }
+
+    // find block size (other parameters may be stated in terms of blocks)
+    for (int x = 1; x < argc; ++x)
+    {
+        if ((nullptr != argv[x]) && (('-' == argv[x][0]) || ('/' == argv[x][0])) && ('b' == argv[x][1]) && ('\0' != argv[x][2]))
+        {
+            _dwBlockSize = 0;
+            UINT64 ullBlockSize;
+            if (_GetSizeInBytes(&argv[x][2], ullBlockSize))
+            {
+                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                {
+                    // TODO: UINT64->DWORD
+                    i->SetBlockSizeInBytes((DWORD)ullBlockSize);
+                }
+            }
+            else
+            {
+                fprintf(stderr, "Invalid block size passed to -b\n");
+                exit(1);
+            }
+            _dwBlockSize = (DWORD)ullBlockSize;
+            break;
         }
     }
 
@@ -415,30 +449,24 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             break;
 
         case 'b':    //block size
-            {
-                UINT64 cb = _GetSizeInBytes(arg + 1);
-                if (cb > 0)
-                {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
-                    {
-                        // TODO: UINT64->DWORD
-                        i->SetBlockSizeInBytes((DWORD)cb);
-                    }
-                }
-                else
-                {
-                    fError = true;
-                }
-            }
+            // nop - block size has been taken care of before the loop
             break;
 
         case 'B':    //base file offset (offset from the beggining of the file), cannot be used with 'random'
             if (*(arg + 1) != '\0')
             {
-                UINT64 cb = _GetSizeInBytes(arg + 1);
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                UINT64 cb;
+                if (_GetSizeInBytes(arg + 1, cb))
                 {
-                    i->SetBaseFileOffsetInBytes(cb);
+                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    {
+                        i->SetBaseFileOffsetInBytes(cb);
+                    }
+                }
+                else
+                {
+                    fprintf(stderr, "Invalid base file offset passed to -B\n");
+                    fError = true;
                 }
             }
             else
@@ -450,11 +478,19 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         case 'c':    //create file of the given size
             if (*(arg + 1) != '\0')
             {
-                UINT64 cb = _GetSizeInBytes(arg + 1);
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                UINT64 cb;
+                if (_GetSizeInBytes(arg + 1, cb))
                 {
-                    i->SetFileSize(cb);
-                    i->SetCreateFile(true);
+                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    {
+                        i->SetFileSize(cb);
+                        i->SetCreateFile(true);
+                    }
+                }
+                else
+                {
+                    fprintf(stderr, "Invalid file size passed to -c\n");
+                    fError = true;
                 }
             }
             else
@@ -529,10 +565,18 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             {
                 if (*(arg + 1) != '\0')
                 {
-                    UINT64 cb = _GetSizeInBytes(arg + 1);
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    UINT64 cb;
+                    if (_GetSizeInBytes(arg + 1, cb))
                     {
-                        i->SetMaxFileSize(cb);
+                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        {
+                            i->SetMaxFileSize(cb);
+                        }
+                    }
+                    else
+                    {
+                        fprintf(stderr, "Invalid max file size passed to -f\n");
+                        fError = true;
                     }
                 }
                 else
@@ -687,15 +731,22 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'r':    //random access
             {
-                UINT64 cb = _GetSizeInBytes(arg + 1);
-                if (cb < 1)
+                UINT64 cb = _dwBlockSize;
+                if (*(arg + 1) != '\0')
                 {
-                    cb = _dwBlockSize;
+                    if (!_GetSizeInBytes(arg + 1, cb) || (cb == 0))
+                    {
+                        fprintf(stderr, "Invalid alignment passed to -r\n");
+                        fError = true;
+                    }
                 }
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                if (!fError)
                 {
-                    i->SetRandomAlignmentInBytes(cb);
-                    i->SetUseRandomAlignment(true);
+                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    {
+                        i->SetRandomAlignmentInBytes(cb);
+                        i->SetUseRandomAlignment(true);
+                    }
                 }
             }
             break;
@@ -723,11 +774,19 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         case 's':    //stride size
             if (*(arg + 1) != '\0')
             {
-                UINT64 cb = _GetSizeInBytes(arg + 1);
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                UINT64 cb;
+                if (_GetSizeInBytes(arg + 1, cb))
                 {
-                    i->SetStrideSizeInBytes(cb);
-                    i->SetEnableCustomStrideSize(true);
+                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    {
+                        i->SetStrideSizeInBytes(cb);
+                        i->SetEnableCustomStrideSize(true);
+                    }
+                }
+                else
+                {
+                    fprintf(stderr, "Invalid stride size passed to -s\n");
+                    fError = true;
                 }
             }
             else
@@ -767,8 +826,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'T':    //offsets between threads reading the same file
             {
-                UINT64 cb = _GetSizeInBytes(arg + 1);
-                if (cb > 0)
+                UINT64 cb;
+                if (_GetSizeInBytes(arg + 1, cb) && (cb > 0))
                 {
                     for (auto i = vTargets.begin(); i != vTargets.end(); i++)
                     {
@@ -777,6 +836,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 }
                 else
                 {
+                    fprintf(stderr, "Invalid offset passed to -T\n");
                     fError = true;
                 }
             }
@@ -896,7 +956,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         case 'z':    //random seed
             if (*(arg + 1) == '\0')
             {
-                timeSpan.SetRandSeed(GetTickCount());
+                timeSpan.SetRandSeed((ULONG)GetTickCount64());
             }
             else
             {
@@ -924,8 +984,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             {
                 UINT64 cb = 0;
                 string sPath;
-                _GetRandomDataWriteBufferData(string(arg + 1), cb, sPath);
-                if (cb > 0)
+                if (_GetRandomDataWriteBufferData(string(arg + 1), cb, sPath) && (cb > 0))
                 {
                     for (auto i = vTargets.begin(); i != vTargets.end(); i++)
                     {
@@ -935,6 +994,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 }
                 else
                 {
+                    fprintf(stderr, "Invalid size passed to -Z\n");
                     fError = true;
                 }
             }

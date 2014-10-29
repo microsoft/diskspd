@@ -1709,6 +1709,7 @@ cleanup:
     {
         if (nullptr != *i)
         {
+#pragma prefast(suppress:6001, "Prefast does not understand this vector will only contain validly allocated buffer pointers")
             VirtualFree(*i, 0, MEM_RELEASE);
         }
     }
