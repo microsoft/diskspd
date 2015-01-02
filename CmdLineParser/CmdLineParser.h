@@ -48,8 +48,8 @@ private:
     bool _ParseAffinity(const char *arg, TimeSpan *pTimeSpan);
 
     void _DisplayUsageInfo(const char *pszFilename) const;
-    UINT64 _GetSizeInBytes(const char *pszSize) const;
-    void _GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath);
+    bool _GetSizeInBytes(const char *pszSize, UINT64& ullSize) const;
+    bool _GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath);
 
     // variables that used to be global
     DWORD _dwBlockSize;         // block size; other parameters may be stated in blocks

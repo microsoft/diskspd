@@ -226,7 +226,7 @@ void ResultParser::_PrintTarget(Target target, bool fUseThreadsPerFile, bool fCo
 
     if (target.GetDisableAllCache())
     {
-        _Print("\t\tsoftware and hardware cache disabled\n");
+        _Print("\t\tsoftware and hardware write cache disabled\n");
     }
 
     if (target.GetDisableOSCache())
@@ -236,7 +236,7 @@ void ResultParser::_PrintTarget(Target target, bool fUseThreadsPerFile, bool fCo
 
     if (!target.GetDisableAllCache() && !target.GetDisableOSCache())
     {
-        _Print("\t\tusing software and hardware cache\n");
+        _Print("\t\tusing software and hardware write cache\n");
     }
 
     if (target.GetZeroWriteBuffers())
