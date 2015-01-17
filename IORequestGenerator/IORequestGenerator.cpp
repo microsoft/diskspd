@@ -581,42 +581,125 @@ bool IORequestGenerator::_GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMA
 /*****************************************************************************/
 // calculate the offset of the next I/O operation
 //
-// TODO: refactor to take a target instead of this group of params
-__inline static UINT64 getNextFileOffset(UINT64 ullBaseFileOffset, UINT64 ullRandBlockCount,
-    UINT64 ullRandom, DWORD dwBlockSize, 
-    UINT64 ullStrideSize, UINT64 ullFileSize, UINT64 *ullFilePos, UINT64 ullOffset, BOOL bParallelAsyncIO)
+
+__inline UINT64 IORequestGenerator::GetNextFileOffset(ThreadParameters& tp, size_t targetNum, UINT64 prevOffset)
 {
-    UINT64 ullResult = 0;
+    Target &target = tp.vTargets[targetNum];
 
-    // calculate new file offset
-    if( ullRandom > 0 )
+    UINT64 blockAlignment = target.GetBlockAlignmentInBytes();
+    UINT64 baseFileOffset = target.GetBaseFileOffsetInBytes();
+    UINT64 blockSize = target.GetBlockSizeInBytes();
+    UINT64 nextBlockOffset;
+
+    // increment/produce - note, logically relative to base offset
+    if (target.GetUseRandomAccessPattern())
     {
-        ullResult = ullBaseFileOffset + ((rand64() % ullRandBlockCount) * ullRandom);
-
-        assert(ullResult + dwBlockSize <= ullFileSize);
+        nextBlockOffset = rand64();
+        nextBlockOffset -= (nextBlockOffset % blockAlignment);
     }
-    else if (!bParallelAsyncIO)
+    else if (target.GetUseParallelAsyncIO())
     {
-        *ullFilePos += ullStrideSize;
-        if (*ullFilePos + dwBlockSize > ullFileSize)
-        {
-            *ullFilePos = ullBaseFileOffset;
-        }
-        ullResult = *ullFilePos;
+        nextBlockOffset = prevOffset - baseFileOffset + blockAlignment;
+    }
+    else if (target.GetUseInterlockedSequential())
+    {
+        nextBlockOffset = InterlockedAdd64((PLONGLONG) &tp.pullSharedSequentialOffsets[targetNum], blockAlignment) - blockAlignment;
+    }
+    else // normal sequential access pattern
+    {
+        nextBlockOffset = (tp.vullPrivateSequentialOffsets[targetNum] += blockAlignment);
+    }
+
+    // now apply bounds for IO offset
+    // aligned target size is the closed interval of byte offsets at which it is legal to issue IO
+    // ISSUE IMPROVEMENT: much of this should be precalculated. It belongs within Target, which will
+    //      need discovery of target sizing moved from its current just-in-time at thread launch.
+    UINT64 alignedTargetSize = tp.vullFileSizes[targetNum] - baseFileOffset - blockSize;
+    if (target.GetUseRandomAccessPattern() ||
+        target.GetUseInterlockedSequential())
+    {
+        // these access patterns occur on blockaligned boundaries relative to base
+        // convert aligned target size to the open interval
+        alignedTargetSize = ((alignedTargetSize / blockAlignment) + 1) * blockAlignment;
+        nextBlockOffset %= alignedTargetSize;
     }
     else
     {
-        if (ullOffset + ullStrideSize + dwBlockSize > ullFileSize)
+        // parasync and seq bases are potentially modified by threadstride and loop back to the
+        // file base offset + increment which will return them to their initial base offset.
+        if (nextBlockOffset > alignedTargetSize)
         {
-            ullResult = ullBaseFileOffset;
-        }
-        else
-        {
-            ullResult = ullOffset + ullStrideSize;
+            nextBlockOffset = (IORequestGenerator::GetThreadBaseFileOffset(tp, targetNum) - baseFileOffset) % blockAlignment;
+            tp.vullPrivateSequentialOffsets[targetNum] = nextBlockOffset;
         }
     }
 
-    return ullResult;
+    // Convert into the next full offset
+    nextBlockOffset += baseFileOffset;
+
+#ifndef NDEBUG
+    // Don't overrun the end of the file
+    UINT64 fileSize = tp.vullFileSizes[targetNum];
+    assert(nextBlockOffset + blockSize <= fileSize);
+#endif
+
+    return nextBlockOffset;
+}
+
+__inline UINT64 IORequestGenerator::GetThreadBaseFileOffset(ThreadParameters& tp, size_t targetNum)
+{
+    const Target &target = tp.vTargets[targetNum];
+
+    UINT64 baseFileOffset = target.GetBaseFileOffsetInBytes();
+    UINT64 nextBlockOffset;
+
+    if (target.GetUseRandomAccessPattern())
+    {
+        nextBlockOffset = IORequestGenerator::GetNextFileOffset(tp, targetNum, 0);
+    }
+    else
+    {
+        // interlocked sequential   - thread stride is always zero, enforced during profile validation
+        // parallel async           - apply thread stride
+        // sequential               - apply thread stride
+        nextBlockOffset = baseFileOffset + tp.ulRelativeThreadNo * target.GetThreadStrideInBytes();
+    }
+
+    return nextBlockOffset;
+}
+
+__inline UINT64 IORequestGenerator::GetStartingFileOffset(ThreadParameters& tp, size_t targetNum)
+{
+    const Target &target = tp.vTargets[targetNum];
+
+    UINT64 baseFileOffset = target.GetBaseFileOffsetInBytes();
+    UINT64 nextBlockOffset;
+
+    if (target.GetUseRandomAccessPattern())
+    {
+        nextBlockOffset = IORequestGenerator::GetNextFileOffset(tp, targetNum, 0);
+    }
+    else
+    {
+        // interlocked sequential   - getnext starts the clock from zero, thread independent
+        // parallel async           - getthreadbase, thread dependent
+        // sequential               - "", and initialize private counter
+        if (target.GetUseInterlockedSequential())
+        {
+            nextBlockOffset = IORequestGenerator::GetNextFileOffset(tp, targetNum, 0);
+        }
+        else
+        {
+            nextBlockOffset = IORequestGenerator::GetThreadBaseFileOffset(tp, targetNum);
+
+            if (!target.GetUseParallelAsyncIO())
+            {
+                tp.vullPrivateSequentialOffsets[targetNum] = nextBlockOffset - baseFileOffset;
+            }
+        }
+    }
+
+    return nextBlockOffset;
 }
 
 /*****************************************************************************/
@@ -780,17 +863,7 @@ __inline static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hC
             }
 
             //restart the I/O operation that just completed
-            li.QuadPart = getNextFileOffset(pTarget->GetBaseFileOffsetInBytes(),
-                pTarget->GetRandomAlignmentInBytes() > 0 ? p->vcAlignedRandomBlocks[iTarget] : 0,
-                pTarget->GetRandomAlignmentInBytes(),
-                pTarget->GetBlockSizeInBytes(),
-                pTarget->GetStrideSizeInBytes(),
-                p->vullFileSizes[iTarget],
-                &p->vullFilePosition[iTarget],
-                li.QuadPart,
-                pTarget->GetUseParallelAsyncIO());
-
-            assert(pTarget->GetRandomAlignmentInBytes() == 0 || ((li.QuadPart - pTarget->GetBaseFileOffsetInBytes()) % pTarget->GetRandomAlignmentInBytes() == 0));
+            li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, iTarget, li.QuadPart);
 
             pCompletedOvrp->Offset = li.LowPart;
             pCompletedOvrp->OffsetHigh = li.HighPart;
@@ -882,17 +955,7 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
     li.HighPart = pOverlapped->OffsetHigh;
     li.LowPart = pOverlapped->Offset;
 
-    li.QuadPart = getNextFileOffset(pTarget->GetBaseFileOffsetInBytes(),
-                                    pTarget->GetRandomAlignmentInBytes() > 0 ? p->vcAlignedRandomBlocks[iTarget] : 0,
-                                    pTarget->GetRandomAlignmentInBytes(),
-                                    pTarget->GetBlockSizeInBytes(),
-                                    pTarget->GetStrideSizeInBytes(),
-                                    p->vullFileSizes[iTarget],
-                                    &p->vullFilePosition[iTarget],
-                                    li.QuadPart,
-                                    pTarget->GetUseParallelAsyncIO());
-
-    assert(pTarget->GetRandomAlignmentInBytes() == 0|| ((li.QuadPart - pTarget->GetBaseFileOffsetInBytes()) % pTarget->GetRandomAlignmentInBytes() == 0));
+    li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, iTarget, li.QuadPart);
 
     pOverlapped->Offset = li.LowPart;
     pOverlapped->OffsetHigh = li.HighPart;
@@ -1132,8 +1195,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         const char *fname = nullptr;    //filename (can point to physFN)
         char physFN[32];                //disk/partition name
 
-        UINT64 fsize = 0;   //file size
-
         if (NULL == filename || NULL == *(filename))
         {
             PrintError("FATAL ERROR: invalid filename\n");
@@ -1168,12 +1229,12 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         //set file flags
         DWORD dwFlags = FILE_ATTRIBUTE_NORMAL;
 
-        if (pTarget->GetSequentialScan())
+        if (pTarget->GetSequentialScanHint())
         {
             dwFlags |= FILE_FLAG_SEQUENTIAL_SCAN;
         }
 
-        if (pTarget->GetRandomAccess())
+        if (pTarget->GetRandomAccessHint())
         {
             dwFlags |= FILE_FLAG_RANDOM_ACCESS;
         }
@@ -1237,22 +1298,10 @@ DWORD WINAPI threadFunc(LPVOID cookie)
             }
         }
 
-        {
-            // base file offset is calculated using thread stride size and thread number
-            if (pTarget->GetRandomAlignmentInBytes() == 0)
-            {
-                DWORD dwThreadsPerFile = p->pTimeSpan->GetThreadCount() > 0 ? p->pTimeSpan->GetThreadCount() : 1;
-                UINT64 ullBaseFileOffset = pTarget->GetBaseFileOffsetInBytes() + (p->ulThreadNo % dwThreadsPerFile) * pTarget->GetThreadStrideInBytes();
-                pTarget->SetBaseFileOffsetInBytes(ullBaseFileOffset);
-                //FUTURE EXTENSION: base offset shouldn't be modified (changes its meaning)
-            }
-
-            printfv(p->pProfile->GetVerbose(), "thread %u base file offset: %I64u (starting in block: %I64u)\n",
-                p->ulThreadNo, pTarget->GetBaseFileOffsetInBytes(), pTarget->GetBaseFileOffsetInBytes() / pTarget->GetBlockSizeInBytes());
-        }
-
         // obtain file/disk/partition size
         {
+            UINT64 fsize = 0;   //file size
+
             //check if it is a disk
             if (fPhysical)
             {
@@ -1295,20 +1344,10 @@ DWORD WINAPI threadFunc(LPVOID cookie)
                 PrintError("Warning - file size is less than MaxFileSize\n");
             }
 
-            if (fsize < pTarget->GetBaseFileOffsetInBytes() + pTarget->GetBlockSizeInBytes())
-            {
-                PrintError("The file is too small. File: '%s' size: %I64u, base offset: %I64u block size: %u\n",
-                           pTarget->GetPath().c_str(),
-                           fsize,
-                           pTarget->GetBaseFileOffsetInBytes(),
-                           pTarget->GetBlockSizeInBytes());
-                fOk = false;
-                goto cleanup;
-            }
-
             if (pTarget->GetMaxFileSize() > 0)
             {
-                // user wants to use only a part of the file
+                // user wants to use only a part of the target
+                // if smaller, of course use the entire content
                 p->vullFileSizes.push_back(pTarget->GetMaxFileSize() > fsize ? fsize : pTarget->GetMaxFileSize());
             }
             else
@@ -1316,12 +1355,38 @@ DWORD WINAPI threadFunc(LPVOID cookie)
                 // the whole file will be used
                 p->vullFileSizes.push_back(fsize);
             }
-        }
 
-        //if user asks for random access, calculate number of aligned blocks per each file
-        if (pTarget->GetRandomAlignmentInBytes() > 0)
-        {
-            p->vcAlignedRandomBlocks.push_back((p->vullFileSizes[iTarget] - pTarget->GetBaseFileOffsetInBytes() - pTarget->GetBlockSizeInBytes()) / pTarget->GetRandomAlignmentInBytes() + 1);
+            UINT64 startingFileOffset = IORequestGenerator::GetThreadBaseFileOffset(*p, iTarget);
+
+            // test whether the file is large enough for this thread to do work
+            if (startingFileOffset + pTarget->GetBlockSizeInBytes() >= p->vullFileSizes[iTarget])
+            {
+                PrintError("The file is too small. File: '%s' relative thread %u size: %I64u, base offset: %I64u block size: %u\n",
+                    pTarget->GetPath().c_str(),
+                    p->ulRelativeThreadNo,
+                    fsize,
+                    pTarget->GetBaseFileOffsetInBytes(),
+                    pTarget->GetBlockSizeInBytes());
+                fOk = false;
+                goto cleanup;
+            }
+
+            if (pTarget->GetUseRandomAccessPattern())
+            {
+                printfv(p->pProfile->GetVerbose(), "thread %u starting: file '%s' relative thread %u random pattern\n",
+                    p->ulThreadNo,
+                    pTarget->GetPath().c_str(),
+                    p->ulRelativeThreadNo);
+            }
+            else
+            {
+                printfv(p->pProfile->GetVerbose(), "thread %u starting: file '%s' relative thread %u file offset: %I64u (starting in block: %I64u)\n",
+                    p->ulThreadNo,
+                    pTarget->GetPath().c_str(),
+                    p->ulRelativeThreadNo,
+                    startingFileOffset,
+                    startingFileOffset / pTarget->GetBlockSizeInBytes());
+            }
         }
 
         // allocate memory for a data buffer
@@ -1344,8 +1409,8 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     LARGE_INTEGER li;        //used for setting file positions, etc.
     DWORD dwIOCnt = 0;        //number of completed I/O operations since last progress dot
 
-    p->vullFilePosition.clear();
-    p->vullFilePosition.resize(p->vTargets.size());
+    p->vullPrivateSequentialOffsets.clear();
+    p->vullPrivateSequentialOffsets.resize(p->vTargets.size());
     p->pResults->vTargetResults.clear();
     p->pResults->vTargetResults.resize(p->vTargets.size());
     for (size_t i = 0; i < p->vullFileSizes.size(); i++)
@@ -1370,7 +1435,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         DWORD dwBytesTransferred = 0;
 
         //advance file pointer to base file offset
-        li.QuadPart = pTarget->GetBaseFileOffsetInBytes();
+        li.QuadPart = IORequestGenerator::GetStartingFileOffset(*p, 0);
         printfv(p->pProfile->GetVerbose(), "t[%u] initial I/O op at %I64u (starting in block: %I64u)\n", 
             p->ulThreadNo, 
             li.QuadPart,
@@ -1411,8 +1476,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
 
         assert(nullptr != p->vhTargets[0] );
         assert(pTarget->GetBlockSizeInBytes() > 0);
-
-        p->vullFilePosition[0] = pTarget->GetBaseFileOffsetInBytes();
 
         ThroughputMeter throughputMeter;
         DWORD dwSleepTime;
@@ -1500,64 +1563,18 @@ DWORD WINAPI threadFunc(LPVOID cookie)
                 }
             }
 
-            //get next offset
-            if (pTarget->GetRandomAlignmentInBytes() > 0)
+            li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, 0, li.QuadPart);
+
+            printfv(p->pProfile->GetVerbose(), "t[%u] new I/O op at %I64u (starting in block: %I64u)\n",
+                    p->ulThreadNo, 
+                    li.QuadPart,
+                    li.QuadPart / pTarget->GetBlockSizeInBytes());
+
+            if (!SetFilePointerEx(p->vhTargets[0], li, NULL, FILE_BEGIN))
             {
-                li.QuadPart = pTarget->GetBaseFileOffsetInBytes() + ((rand64() % p->vcAlignedRandomBlocks[0]) * pTarget->GetRandomAlignmentInBytes());
-
-                printfv(p->pProfile->GetVerbose(), "t[%u] new I/O op at %I64u (starting in block: %I64u)\n",
-                        p->ulThreadNo, 
-                        li.QuadPart,
-                        li.QuadPart / pTarget->GetBlockSizeInBytes());
-
-                if (!SetFilePointerEx(p->vhTargets[0], li, NULL, FILE_BEGIN))
-                {
-                    PrintError("thread %u: Error setting file pointer\n", p->ulThreadNo);
-                    fOk = false;
-                    goto cleanup;
-                }
-            }
-            else
-            {
-                p->vullFilePosition[0] += dwBytesTransferred;
-
-                //rewind the file if there is not enough data left
-                if( p->vullFilePosition[0] - dwBytesTransferred + pTarget->GetStrideSizeInBytes() + pTarget->GetBlockSizeInBytes() > p->vullFileSizes[0] )
-                {
-                    //rewind
-                    li.QuadPart = pTarget->GetBaseFileOffsetInBytes();
-
-                    printfv(p->pProfile->GetVerbose(), "t[%u] new I/O op at %I64u (starting in block: %I64u)\n",
-                        p->ulThreadNo,
-                        li.QuadPart,
-                        li.QuadPart / pTarget->GetBlockSizeInBytes());
-
-                    if( !SetFilePointerEx(p->vhTargets[0], li, NULL, FILE_BEGIN) )
-                    {
-                        PrintError("Error setting file pointer. Error code: %d.\n", GetLastError());
-                        fOk = false;
-                        goto cleanup;
-                    }
-                    p->vullFilePosition[0] = pTarget->GetBaseFileOffsetInBytes();
-                }
-                //advance file pointer
-                else
-                {
-                    li.QuadPart = pTarget->GetStrideSizeInBytes() - pTarget->GetBlockSizeInBytes();
-
-                    printfv(p->pProfile->GetVerbose(), "t[%u] new I/O op at %I64u (starting in block: %I64u)\n",
-                        p->ulThreadNo,
-                        p->vullFilePosition[0] + li.QuadPart,
-                        (p->vullFilePosition[0] + li.QuadPart) / pTarget->GetBlockSizeInBytes());
-
-                    if (!SetFilePointerEx(p->vhTargets[0], li, NULL, FILE_CURRENT))
-                    {
-                        PrintError("Error setting file pointer. Error code: %d.\n", GetLastError());
-                        fOk = false;
-                        goto cleanup;
-                    }
-                    p->vullFilePosition[0] += li.QuadPart;
-                }
+                PrintError("thread %u: Error setting file pointer\n", p->ulThreadNo);
+                fOk = false;
+                goto cleanup;
             }
 
             assert(!g_bError);  // at this point we shouldn't be seeing initialization error
@@ -1606,13 +1623,19 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         for (unsigned int iFile = 0; iFile < p->vTargets.size(); iFile++)
         {
             Target *pTarget = &p->vTargets[iFile];
-
-            li.QuadPart = pTarget->GetBaseFileOffsetInBytes();
-            p->vullFilePosition[iFile] = li.QuadPart;
+            
+            li.QuadPart = IORequestGenerator::GetStartingFileOffset(*p, iFile);
             p->vFirstOverlappedIdForTargetId.push_back(iOverlapped);
 
             for (DWORD iRequest = 0; iRequest < pTarget->GetRequestCount(); ++iRequest)
             {
+                // on increment, get next except in the case of parallel async, which all start at the initial offset.
+                // note that we must only do this when needed, since it will advance global state.
+                if (iRequest != 0 && !pTarget->GetUseParallelAsyncIO())
+                {
+                    li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, iFile, li.QuadPart);
+                }
+
                 p->vOverlappedIdToTargetId.push_back(iFile);
                 if (!p->pTimeSpan->GetCompletionRoutines())
                 {
@@ -1623,22 +1646,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
                     //in case of completion routines hEvent field is not used,
                     //so we can use it to pass a pointer to the thread parameters
                     p->vOverlapped[iOverlapped].hEvent = (HANDLE)p;
-                }
-
-                //first offset is always set to base file offset (even in case of random access)
-                
-                if (!pTarget->GetUseParallelAsyncIO() && pTarget->GetRandomAlignmentInBytes() == 0)
-                {
-                    li.QuadPart = p->vullFilePosition[iFile];
-                    // don't increase after the last operation; pullFilePos holds beginning of the last operation 
-                    if (iRequest < pTarget->GetRequestCount() - 1)
-                    {
-                        p->vullFilePosition[iFile] += pTarget->GetStrideSizeInBytes();
-                        if (p->vullFilePosition[iFile] + pTarget->GetBlockSizeInBytes() > p->vullFileSizes[iFile])
-                        {
-                            p->vullFilePosition[iFile] = pTarget->GetBaseFileOffsetInBytes();
-                        }
-                    }
                 }
 
                 printfv(p->pProfile->GetVerbose(), "t[%u:%u] initial I/O op at %I64u (starting in block: %I64u)\n",
@@ -2023,72 +2030,6 @@ void IORequestGenerator::_InitializeGlobalParameters()
     g_pActiveGroupsAndProcs = NULL; // structure with KGroup info
 }
 
-bool IORequestGenerator::_ValidateProfile(const Profile& profile) const
-{
-    bool fOk = true;
-    auto vTimeSpans = profile.GetTimeSpans();
-    for (auto pTimeSpan = vTimeSpans.begin(); pTimeSpan != vTimeSpans.end(); pTimeSpan++)
-    {
-        if (pTimeSpan->GetDisableAffinity() && pTimeSpan->GetAffinityAssignments().size() > 0)
-        {
-            PrintError("ERROR: -n and -a parameters cannot be used together\n");
-            fOk = false;
-        }
-
-        auto vTargets = pTimeSpan->GetTargets();
-        for (auto pTarget = vTargets.begin(); pTarget != vTargets.end(); pTarget++)
-        {
-            if (pTarget->GetThroughputInBytesPerMillisecond() > 0 && pTimeSpan->GetCompletionRoutines())
-            {
-                PrintError("ERROR: -g throughput control can not be used with -x completion routines\n");
-                fOk = false;
-            }
-
-            if (pTimeSpan->GetThreadCount()> 0 && pTarget->GetThreadsPerFile() > 1)
-            {
-                PrintError("ERROR: -F and -t parameters cannot be used together\n");
-                fOk = false;
-            }
-
-            //  If burst size is specified think time must be specified and If think time is specified burst size should be non zero
-            if ((pTarget->GetThinkTime() == 0 && pTarget->GetBurstSize() > 0) || (pTarget->GetThinkTime() > 0 && pTarget->GetBurstSize() == 0))
-            {
-                PrintError("ERROR: need to specify -j<think time> with -i<burst size>\n");
-                fOk = false;
-            }
-
-            if (pTarget->GetRandomAlignmentInBytes() > 0 && pTarget->GetEnableCustomStrideSize())
-            {
-                PrintError("WARNING: -s is ignored if -r is provided\n");
-            }
-
-            if (pTarget->GetRandomAlignmentInBytes() > 0 && pTarget->GetThreadStrideInBytes() > 0)
-            {
-                PrintError("WARNING: -T is ignored if -r is provided\n");
-                // although ullThreadStride==0 is a valid value, it's interpreted as "not provided" for this warning
-            }
-
-            if (pTarget->GetRandomAlignmentInBytes() == 0 && pTimeSpan->GetRandSeed() > 0)
-            {
-                PrintError("WARNING: -z is ignored if -r is not provided\n");
-                // although ulRandSeed==0 is a valid value, it's interpreted as "not provided" for this warning
-            }
-
-            if (pTarget->GetRandomDataWriteBufferSize() > 0)
-            {
-                if (pTarget->GetRandomDataWriteBufferSize() < pTarget->GetBlockSizeInBytes())
-                {
-                    PrintError("ERROR: custom write buffer (-Z) is smaller than the block size. Write buffer size: %I64u block size: %u\n",
-                        pTarget->GetRandomDataWriteBufferSize(),
-                        pTarget->GetBlockSizeInBytes());
-                    fOk = false;
-                }
-            }
-        }
-    }
-    return fOk;
-}
-
 bool IORequestGenerator::_PrecreateFiles(Profile& profile) const
 {
     bool fOk = true;
@@ -2114,7 +2055,7 @@ bool IORequestGenerator::_PrecreateFiles(Profile& profile) const
     return fOk;
 }
 
-bool IORequestGenerator::GenerateRequests(Profile profile, IResultParser& resultParser, PRINTF pPrintOut, PRINTF pPrintError, PRINTF pPrintVerbose, struct Synchronization *pSynch)
+bool IORequestGenerator::GenerateRequests(Profile& profile, IResultParser& resultParser, PRINTF pPrintOut, PRINTF pPrintError, PRINTF pPrintVerbose, struct Synchronization *pSynch)
 {
     g_pfnPrintOut = pPrintOut;
     g_pfnPrintError = pPrintError;
@@ -2123,7 +2064,7 @@ bool IORequestGenerator::GenerateRequests(Profile profile, IResultParser& result
     bool fOk = _PrecreateFiles(profile);
     if (fOk)
     {
-        vector<TimeSpan> vTimeSpans(profile.GetTimeSpans());
+        const vector<TimeSpan>& vTimeSpans = profile.GetTimeSpans();
         vector<Results> vResults(vTimeSpans.size());
         for (size_t i = 0; fOk && (i < vTimeSpans.size()); i++)
         {
@@ -2183,14 +2124,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     if (!_LoadDLLs())
     {
         PrintError("Error loading NtQuerySystemInformation\n");
-        return false;
-    }
-
-    //
-    // Check additional restrictions and conditions on the passed parameters
-    //
-    if (!_ValidateProfile(profile))
-    {
         return false;
     }
 
@@ -2289,6 +2222,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     volatile bool fAccountingOn = false;
     UINT64 ullStartTime;    //start time
     UINT64 ullTimeDiff;  //elapsed test time (in units returned by QueryPerformanceCounter)
+    vector<UINT64> vullSharedSequentialOffsets(vTargets.size(), 0);
 
     results.vThreadResults.clear();
     results.vThreadResults.resize(cThreads);
@@ -2303,21 +2237,49 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             return false;
         }
 
+        UINT32 ulRelativeThreadNo = 0;
+
         if (timeSpan.GetThreadCount() > 0)
         {
+            // fixed thread mode: all threads operate on all files
+            // and receive the entire seq index array.
+            // relative thread number is the same as thread number.
             cookie->vTargets = vTargets;
+            cookie->pullSharedSequentialOffsets = &vullSharedSequentialOffsets[0];
+            ulRelativeThreadNo = iThread;
         }
         else
         {
             size_t cAssignedThreads = 0;
-            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+            size_t cBaseThread = 0;
+            auto psi = vullSharedSequentialOffsets.begin();
+            for (auto i = vTargets.begin();
+                 i != vTargets.end();
+                 i++, psi++)
             {
+                // per-file thread mode: groups of threads operate on individual files
+                // and receive the specific seq index for their file (note: singular).
+                // loop up through the targets to assign thread n to the appropriate file.
+                // relative thread number is file-relative, so keep track of the base
+                // thread number for the file and calculate relative to that.
+                //
+                // ex: two files, two threads per file
+                //  t0: rt0 for f0 (cAssigned = 2, cBase = 0)
+                //  t1: rt1 for f0 (cAssigned = 2, cBase = 0)
+                //  t2: rt0 for f1 (cAssigned = 4, cBase = 2)
+                //  t3: rt1 for f1 (cAssigned = 4, cBase = 2)
+
                 cAssignedThreads += i->GetThreadsPerFile();
                 if (iThread < cAssignedThreads)
                 {
                     cookie->vTargets.push_back(*i);
+                    cookie->pullSharedSequentialOffsets = &(*psi);
+                    ulRelativeThreadNo = (iThread - cBaseThread) % i->GetThreadsPerFile();
+
+                    printfv(profile.GetVerbose(), "thread %u is relative thread %u for %s\n", iThread, ulRelativeThreadNo, i->GetPath().c_str());
                     break;
                 }
+                cBaseThread += i->GetThreadsPerFile();
             }
         }
 
@@ -2326,6 +2288,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         cookie->hStartEvent = hStartEvent;
         cookie->hEndEvent = hEndEvent;
         cookie->ulThreadNo = iThread;
+        cookie->ulRelativeThreadNo = ulRelativeThreadNo;
         cookie->pfAccountingOn = &fAccountingOn;
         cookie->pullStartTime = &ullStartTime;
         cookie->ulRandSeed = timeSpan.GetRandSeed() + iThread;  // each thread has a different random seed
@@ -2383,7 +2346,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //FUTURE EXTENSION: lower priority so the worker threads will initialize (-2)
     //FUTURE EXTENSION: raise priority so this thread will run after the time end
 
-
     if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, hStartEvent) && (NULL != pSynch->hStartEvent))
     {
         if (WAIT_OBJECT_0 != WaitForSingleObject(pSynch->hStartEvent, INFINITE))
@@ -2404,7 +2366,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     BOOL bSynchStop = STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, hStopEvent) && (NULL != pSynch->hStopEvent);
     BOOL bBreak = FALSE;
     PEVENT_TRACE_PROPERTIES pETWSession = NULL;
-
 
     printfv(profile.GetVerbose(), "starting warm up...\n");
     //
@@ -2703,12 +2664,12 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 vector<struct IORequestGenerator::CreateFileParameters> IORequestGenerator::_GetFilesToPrecreate(const Profile& profile) const
 {
     vector<struct CreateFileParameters> vFilesToCreate;
-    vector<TimeSpan> vTimeSpans(profile.GetTimeSpans());
+    const vector<TimeSpan>& vTimeSpans = profile.GetTimeSpans();
     map<string, vector<struct CreateFileParameters>> filesMap;
-    for (auto timeSpan : vTimeSpans)
+    for (const auto& timeSpan : vTimeSpans)
     {
         vector<Target> vTargets(timeSpan.GetTargets());
-        for (auto target : vTargets)
+        for (const auto& target : vTargets)
         {
             struct CreateFileParameters createFileParameters;
             createFileParameters.sPath = target.GetPath();

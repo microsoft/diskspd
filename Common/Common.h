@@ -50,8 +50,8 @@ using namespace std;
 //      Monday, June 16, 2014 12:00:00 AM
 
 #define DISKSPD_RELEASE_TAG ""
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.14" DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2014/09/26"
+#define DISKSPD_NUMERIC_VERSION_STRING "2.0.15" DISKSPD_RELEASE_TAG
+#define DISKSPD_DATE_VERSION_STRING "2015/01/09"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -356,12 +356,12 @@ public:
     Target() :
         _dwBlockSize(64 * 1024),
         _dwRequestCount(2),
-        _fUseRandomAlignment(false),
-        _ullRandom(0),
-        _ullStrideSize(64 * 1024),
-        _fCustomStrideSize(false),
+        _ullBlockAlignment(64 * 1024),
+        _fBlockAlignmentValid(false),
+        _fUseRandomAccessPattern(false),
         _ullBaseFileOffset(0),
         _fParallelAsyncIO(false),
+        _fInterlockedSequential(false),
         _fDisableOSCache(false),
         _fDisableAllCache(false),
         _fZeroWriteBuffers(false),
@@ -376,8 +376,8 @@ public:
         _dwBurstSize(0),
         _dwThinkTime(0),
         _fThinkTime(false),
-        _fSequentialScan(false),
-        _fRandomAccess(false),
+        _fSequentialScanHint(false),
+        _fRandomAccessHint(false),
         _fUseLargePages(false),
         _ioPriorityHint(IoPriorityHintNormal),
         _dwThroughputBytesPerMillisecond(0),
@@ -393,35 +393,34 @@ public:
     void SetBlockSizeInBytes(DWORD dwBlockSize) { _dwBlockSize = dwBlockSize; }
     DWORD GetBlockSizeInBytes() const { return _dwBlockSize; }
 
-    void SetStrideSizeInBytes(UINT64 ullStrideSize) { _ullStrideSize = ullStrideSize; }
-    UINT64 GetStrideSizeInBytes() const
+    void SetBlockAlignmentInBytes(UINT64 ullBlockAlignment)
     {
-        return _fCustomStrideSize ? _ullStrideSize : _dwBlockSize;
+        _ullBlockAlignment = ullBlockAlignment;
+        _fBlockAlignmentValid = true;
     }
 
-    void SetEnableCustomStrideSize(bool fEnable) { _fCustomStrideSize = fEnable; }
-    bool GetEnableCustomStrideSize() const { return _fCustomStrideSize; }
+    UINT64 GetBlockAlignmentInBytes() const
+    {
+        return _fBlockAlignmentValid ? _ullBlockAlignment : _dwBlockSize;
+    }
+    
+    void SetUseRandomAccessPattern(bool fUseRandomAccessPattern) { _fUseRandomAccessPattern = fUseRandomAccessPattern; }
+    bool GetUseRandomAccessPattern() const { return _fUseRandomAccessPattern; } 
 
     void SetBaseFileOffsetInBytes(UINT64 ullBaseFileOffset) { _ullBaseFileOffset = ullBaseFileOffset; }
     UINT64 GetBaseFileOffsetInBytes() const { return _ullBaseFileOffset; }
 
-    void SetSequentialScan(bool fSequentialScan) { _fSequentialScan = fSequentialScan; }
-    bool GetSequentialScan() const { return _fSequentialScan; }
+    void SetSequentialScanHint(bool fSequentialScanHint) { _fSequentialScanHint = fSequentialScanHint; }
+    bool GetSequentialScanHint() const { return _fSequentialScanHint; }
 
-    void SetRandomAccess(bool fRandomAccess) { _fRandomAccess = fRandomAccess; }
-    bool GetRandomAccess() const { return _fRandomAccess; }
+    void SetRandomAccessHint(bool fRandomAccessHint) { _fRandomAccessHint = fRandomAccessHint; }
+    bool GetRandomAccessHint() const { return _fRandomAccessHint; }
 
     void SetUseLargePages(bool fUseLargePages) { _fUseLargePages = fUseLargePages; }
     bool GetUseLargePages() const { return _fUseLargePages; }
 
     void SetRequestCount(DWORD dwRequestCount) { _dwRequestCount = dwRequestCount; }
     DWORD GetRequestCount() const { return _dwRequestCount; }
-
-    void SetUseRandomAlignment(bool fUseRandomAlignment) { _fUseRandomAlignment = fUseRandomAlignment; }
-    bool GetUseRandomAlignment() const { return _fUseRandomAlignment; }
-
-    void SetRandomAlignmentInBytes(UINT64 ullRandomAlignment) { _ullRandom = ullRandomAlignment; }
-    UINT64 GetRandomAlignmentInBytes() const { return _ullRandom; }
 
     void SetDisableOSCache(bool fDisableOSCache) { _fDisableOSCache = fDisableOSCache; }
     bool GetDisableOSCache() const { return _fDisableOSCache; }
@@ -467,6 +466,9 @@ public:
 
     void SetUseParallelAsyncIO(bool fParallelAsyncIO) { _fParallelAsyncIO = fParallelAsyncIO; }
     bool GetUseParallelAsyncIO() const { return _fParallelAsyncIO; }
+    
+    void SetUseInterlockedSequential(bool fInterlockedSequential) { _fInterlockedSequential = fInterlockedSequential; }
+    bool GetUseInterlockedSequential() const { return _fInterlockedSequential; }
 
     void SetThreadStrideInBytes(UINT64 ullThreadStride) { _ullThreadStride = ullThreadStride; }
     UINT64 GetThreadStrideInBytes() const { return _ullThreadStride; }
@@ -494,12 +496,14 @@ private:
     string _sPath;
     DWORD _dwBlockSize;
     DWORD _dwRequestCount;      // TODO: change the name to something more descriptive (OutstandingRequestCount?)
-    bool _fUseRandomAlignment;  // TODO: "use" or "enable"?
-    UINT64 _ullRandom;
-    UINT64 _ullStrideSize;
-    bool _fCustomStrideSize;
+
+    UINT64 _ullBlockAlignment;
+    bool _fBlockAlignmentValid;
+    bool _fUseRandomAccessPattern;
+ 
     UINT64 _ullBaseFileOffset;
     bool _fParallelAsyncIO;
+    bool _fInterlockedSequential;
     bool _fDisableOSCache;
     bool _fDisableAllCache;
     bool _fZeroWriteBuffers;
@@ -518,8 +522,8 @@ private:
     bool _fThinkTime;       //variable to decide whether to think between IOs (default is false)
     DWORD _dwThroughputBytesPerMillisecond; // set to 0 to disable throttling
 
-    bool _fSequentialScan;          // open file with the FILE_FLAG_SEQUENTIAL_SCAN flag
-    bool _fRandomAccess;            // open file with the FILE_FLAG_RANDOM_ACCESS flag
+    bool _fSequentialScanHint;          // open file with the FILE_FLAG_SEQUENTIAL_SCAN hint
+    bool _fRandomAccessHint;            // open file with the FILE_FLAG_RANDOM_ACCESS hint
     bool _fUseLargePages;           // Use large pages for IO buffers
 
     UINT64 _cbRandomDataWriteBuffer;            // if > 0, then the write buffer should be filled with random data
@@ -558,9 +562,9 @@ public:
     }
     vector<UINT32> GetAffinityAssignments() const { return _vAffinity; }
 
-    void AddTarget(Target target)
+    void AddTarget(const Target& target)
     {
-        _vTargets.push_back(target);
+        _vTargets.push_back(Target(target));
     }
     vector<Target> GetTargets() const { return _vTargets; }
 
@@ -656,12 +660,12 @@ public:
     {
     }
 
-    void AddTimeSpan(TimeSpan timeSpan)
+    void AddTimeSpan(const TimeSpan& timeSpan)
     {
-        _vTimeSpans.push_back(timeSpan);
+        _vTimeSpans.push_back(TimeSpan(timeSpan));
     }
 
-    vector<TimeSpan> GetTimeSpans() const { return _vTimeSpans; }
+    const vector<TimeSpan>& GetTimeSpans() const { return _vTimeSpans; }
 
     void SetVerbose(bool fVerbose) { _fVerbose = fVerbose; }
     bool GetVerbose() const { return _fVerbose; }
@@ -708,9 +712,12 @@ public:
     bool GetEtwUseCyclesCounter() const { return _fEtwUseCyclesCounter; }
 
     string GetXml() const;
+    bool Validate(bool fSingleSpec) const;
     void MarkFilesAsPrecreated(const vector<string> vFiles);
 
 private:
+    Profile(const Profile& T);
+
     vector<TimeSpan>_vTimeSpans;
     bool _fVerbose;
     DWORD _dwProgress;
@@ -739,23 +746,40 @@ private:
 class ThreadParameters
 {
 public:
+    ThreadParameters() :
+        pProfile(nullptr),
+        pTimeSpan(nullptr),
+        pullSharedSequentialOffsets(nullptr),
+        ulRandSeed(0),
+        ulThreadNo(0),
+        ulRelativeThreadNo(0)
+    {
+    }
+
     const Profile *pProfile;
     const TimeSpan *pTimeSpan;
 
     vector<Target> vTargets;
     vector<HANDLE> vhTargets;
     vector<UINT64> vullFileSizes;
-    vector<UINT64> vullFilePosition;
     vector<BYTE *> vpDataBuffers;
-    vector<UINT64> vcAlignedRandomBlocks;
     vector<OVERLAPPED> vOverlapped;             // each target has RequestCount OVERLAPPED structures
     vector<size_t> vOverlappedIdToTargetId;
     vector<size_t> vFirstOverlappedIdForTargetId;   //id of the first overlapped structure in the vOverlapped vector by target
     vector<IOOperation> vdwIoType;                        //as many as vOverlapped; used by the completion routines
     vector<UINT64> vIoStartTimes;
+  
+    // For vanilla sequential access (-s):
+    // Private per-thread offsets, incremented directly, indexed to number of targets
+    vector<UINT64> vullPrivateSequentialOffsets; 
+
+    // For interlocked sequential access (-si):
+    // Pointers to offsets shared between threads, incremented with an interlocked op
+    UINT64* pullSharedSequentialOffsets;
 
     UINT32 ulRandSeed;
     UINT32 ulThreadNo;
+    UINT32 ulRelativeThreadNo;
 
     // accounting
     volatile bool *pfAccountingOn;
@@ -776,6 +800,9 @@ public:
     BYTE* GetReadBuffer(size_t iTarget, size_t iRequest);
     BYTE* GetWriteBuffer(size_t iTarget, size_t iRequest);
     DWORD GetTotalRequestCount() const;
+
+private:
+    ThreadParameters(const ThreadParameters& T);
 };
 
 class IResultParser

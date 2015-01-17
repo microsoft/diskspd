@@ -217,7 +217,7 @@ void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters E
     }
 }
 
-void ResultParser::_PrintTarget(Target target, bool fUseThreadsPerFile, bool fCompletionRoutines)
+void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fCompletionRoutines)
 {
     _Print("\tpath: '%s'\n", target.GetPath().c_str());
     _Print("\t\tthink time: %ums\n", target.GetThinkTime());
@@ -228,8 +228,7 @@ void ResultParser::_PrintTarget(Target target, bool fUseThreadsPerFile, bool fCo
     {
         _Print("\t\tsoftware and hardware write cache disabled\n");
     }
-
-    if (target.GetDisableOSCache())
+    else if (target.GetDisableOSCache())
     {
         _Print("\t\tsoftware cache disabled\n");
     }
@@ -272,10 +271,23 @@ void ResultParser::_PrintTarget(Target target, bool fUseThreadsPerFile, bool fCo
         _Print("\t\tperforming mix test (write/read ratio: %d/100)\n", target.GetWriteRatio());
     }
     _Print("\t\tblock size: %d\n", target.GetBlockSizeInBytes());
-    if (target.GetRandomAlignmentInBytes() != 0)
+    if (target.GetUseRandomAccessPattern())
     {
-        _Print("\t\tusing random I/O (alignment: %I64u)\n", target.GetRandomAlignmentInBytes());
+        _Print("\t\tusing random I/O (alignment: ");
     }
+    else
+    {
+        if (target.GetUseInterlockedSequential())
+        {
+            _Print("\t\tusing interlocked sequential I/O (stride: ");
+        }
+        else
+        {
+            _Print("\t\tusing sequential I/O (stride: ");
+        }
+    }
+    _Print("%I64u)\n", target.GetBlockAlignmentInBytes());
+
     _Print("\t\tnumber of outstanding I/O operations: %d\n", target.GetRequestCount());
     if (0 != target.GetBaseFileOffsetInBytes())
     {
@@ -287,15 +299,14 @@ void ResultParser::_PrintTarget(Target target, bool fUseThreadsPerFile, bool fCo
         _Print("\t\tmax file size: %I64u\n", target.GetMaxFileSize());
     }
 
-    _Print("\t\tstride size: %I64u\n", target.GetStrideSizeInBytes());
     _Print("\t\tthread stride size: %I64u\n", target.GetThreadStrideInBytes());
 
-    if (target.GetSequentialScan())
+    if (target.GetSequentialScanHint())
     {
         _Print("\t\tusing FILE_FLAG_SEQUENTIAL_SCAN hint\n");
     }
 
-    if (target.GetRandomAccess())
+    if (target.GetRandomAccessHint())
     {
         _Print("\t\tusing FILE_FLAG_RANDOM_ACCESS hint\n");
     }
@@ -334,7 +345,7 @@ void ResultParser::_PrintTarget(Target target, bool fUseThreadsPerFile, bool fCo
     }
 }
 
-void ResultParser::_PrintTimeSpan(TimeSpan timeSpan)
+void ResultParser::_PrintTimeSpan(const TimeSpan& timeSpan)
 {
     _Print("\tduration: %us\n", timeSpan.GetDuration());
     _Print("\twarm up time: %us\n", timeSpan.GetWarmup());
@@ -375,7 +386,7 @@ void ResultParser::_PrintTimeSpan(TimeSpan timeSpan)
     }
 }
 
-void ResultParser::_PrintProfile(Profile profile)
+void ResultParser::_PrintProfile(const Profile& profile)
 {
     _Print("\nCommand Line: %s\n", profile.GetCmdLine().c_str());
     _Print("\n");
@@ -385,7 +396,7 @@ void ResultParser::_PrintProfile(Profile profile)
         _Print("\tusing verbose mode\n");
     }
 
-    vector<TimeSpan> vTimeSpans(profile.GetTimeSpans());
+    const vector<TimeSpan>& vTimeSpans = profile.GetTimeSpans();
     int c = 1;
     for (auto i = vTimeSpans.begin(); i != vTimeSpans.end(); i++)
     {
@@ -478,10 +489,10 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
 
     for (unsigned int iThread = 0; iThread < results.vThreadResults.size(); ++iThread)
     {
-        ThreadResults threadResults = results.vThreadResults[iThread];
+        const ThreadResults& threadResults = results.vThreadResults[iThread];
         for (unsigned int iFile = 0; iFile < threadResults.vTargetResults.size(); iFile++)
         {
-            TargetResults targetResults = threadResults.vTargetResults[iFile];
+            const TargetResults& targetResults = threadResults.vTargetResults[iFile];
 
             UINT64 ullBytesCount = 0;
             UINT64 ullIOCount = 0;
@@ -615,9 +626,9 @@ void ResultParser::_PrintLatencyPercentiles(const Results& results)
     Histogram<float> writeLatencyHistogram;
     Histogram<float> totalLatencyHistogram;
 
-    for (auto thread : results.vThreadResults)
+    for (const auto& thread : results.vThreadResults)
     {
-        for (auto target : thread.vTargetResults)
+        for (const auto& target : thread.vTargetResults)
         {
             readLatencyHistogram.Merge(target.readLatencyHistogram);
 
@@ -705,8 +716,8 @@ string ResultParser::ParseResults(Profile& profile, const SystemInformation& sys
         _Print("\n\nResults for timespan %d:\n", iResult + 1);
         _Print("*******************************************************************************\n");
 
-        Results results = vResults[iResult];
-        TimeSpan timeSpan = profile.GetTimeSpans()[iResult];
+        const Results& results = vResults[iResult];
+        const TimeSpan& timeSpan = profile.GetTimeSpans()[iResult];
 
         size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
         double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration

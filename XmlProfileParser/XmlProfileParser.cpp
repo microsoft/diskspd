@@ -550,8 +550,17 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
         hr = _GetUINT64(XmlNode, "StrideSize", &ullStrideSize);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
-            pTarget->SetStrideSizeInBytes(ullStrideSize);
-            pTarget->SetEnableCustomStrideSize(true);
+            pTarget->SetBlockAlignmentInBytes(ullStrideSize);
+        }
+    }
+    
+    if (SUCCEEDED(hr))
+    {
+        bool fInterlockedSequential;
+        hr = _GetBool(XmlNode, "InterlockedSequential", &fInterlockedSequential);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTarget->SetUseInterlockedSequential(fInterlockedSequential);
         }
     }
 
@@ -571,7 +580,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
         hr = _GetBool(XmlNode, "SequentialScan", &fSequentialScan);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
-            pTarget->SetSequentialScan(fSequentialScan);
+            pTarget->SetSequentialScanHint(fSequentialScan);
         }
     }
 
@@ -581,7 +590,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
         hr = _GetBool(XmlNode, "RandomAccess", &fRandomAccess);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
-            pTarget->SetRandomAccess(fRandomAccess);
+            pTarget->SetRandomAccessHint(fRandomAccess);
         }
     }
 
@@ -611,8 +620,8 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
         hr = _GetUINT64(XmlNode, "Random", &ullRandom);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
-            pTarget->SetRandomAlignmentInBytes(ullRandom);
-            pTarget->SetUseRandomAlignment(true);
+            pTarget->SetUseRandomAccessPattern(true);
+            pTarget->SetBlockAlignmentInBytes(ullRandom);
         }
     }
 

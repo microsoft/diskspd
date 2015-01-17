@@ -45,15 +45,15 @@ private:
     void _DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo);
     void _DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters);
     void _Print(const char *format, ...);
-    void _PrintProfile(Profile profile);
+    void _PrintProfile(const Profile& profile);
     void _PrintCpuUtilization(const Results&);
     enum class _SectionEnum {TOTAL, READ, WRITE};
     void _PrintSectionFieldNames(const TimeSpan& timeSpan);
     void _PrintSectionBorderLine(const TimeSpan& timeSpan);
     void _PrintSection(_SectionEnum, const TimeSpan&, const Results&);
     void _PrintLatencyPercentiles(const Results&);
-    void _PrintTimeSpan(TimeSpan timeSpan);
-    void _PrintTarget(Target target, bool fUseThreadsPerFile, bool fCompletionRoutines);
+    void _PrintTimeSpan(const TimeSpan &timeSpan);
+    void _PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fCompletionRoutines);
 
     string _sResult;
 

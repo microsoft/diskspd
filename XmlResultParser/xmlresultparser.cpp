@@ -279,9 +279,9 @@ void XmlResultParser::_PrintOverallIops(const Results& results, UINT32 bucketTim
     IoBucketizer readBucketizer;
     IoBucketizer writeBucketizer;
 
-    for (auto thread : results.vThreadResults)
+    for (const auto& thread : results.vThreadResults)
     {
-        for (auto target : thread.vTargetResults)
+        for (const auto& target : thread.vTargetResults)
         {
             readBucketizer.Merge(target.readBucketizer);
             writeBucketizer.Merge(target.writeBucketizer);
@@ -297,9 +297,9 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
     Histogram<float> writeLatencyHistogram;
     Histogram<float> totalLatencyHistogram;
 
-    for (auto thread : results.vThreadResults)
+    for (const auto& thread : results.vThreadResults)
     {
-        for (auto target : thread.vTargetResults)
+        for (const auto& target : thread.vTargetResults)
         {
             readLatencyHistogram.Merge(target.readLatencyHistogram);
 
@@ -405,8 +405,8 @@ string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& 
     _sResult += profile.GetXml();
     for (size_t iResults = 0; iResults < vResults.size(); iResults++)
     {
-        Results results = vResults[iResults];
-        TimeSpan timeSpan = profile.GetTimeSpans()[iResults];
+        const Results& results = vResults[iResults];
+        const TimeSpan& timeSpan = profile.GetTimeSpans()[iResults];
 
         _Print("<TimeSpan>\n");
         double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
@@ -441,10 +441,10 @@ string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& 
 
             for (size_t iThread = 0; iThread < results.vThreadResults.size(); iThread++)
             {
-                ThreadResults threadResults = results.vThreadResults[iThread];
+                const ThreadResults& threadResults = results.vThreadResults[iThread];
                 _Print("<Thread>\n");
                 _Print("<Id>%u</Id>\n", iThread);
-                for (auto targetResults : threadResults.vTargetResults)
+                for (const auto& targetResults : threadResults.vTargetResults)
                 {
                     _Print("<Target>\n");
                     _PrintTargetResults(targetResults);

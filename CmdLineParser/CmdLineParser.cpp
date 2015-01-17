@@ -127,6 +127,7 @@ bool CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb
 
 void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
 {
+    // ISSUE-REVIEW: this formats badly in the default 80 column command prompt
     printf("\n");
     printf("Usage: %s [options] target1 [ target2 [ target3 ...] ]\n", pszFilename);
     printf("version %s (%s)\n", DISKSPD_NUMERIC_VERSION_STRING, DISKSPD_DATE_VERSION_STRING);
@@ -137,68 +138,72 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("       <partition_drive_letter>:\n");
     printf("\n");
     printf("Available options:\n");
-    printf("  -?                 display usage information\n");
-    printf("  -a#[,#[...]]       advanced CPU affinity - affinitize threads to CPUs provided after -a in a round-robin\n");
-    printf("                       manner within current Processor Group (CPU count starts with 0); the same CPU can\n");
-    printf("                       be listed more than once and the number of CPUs can be different than the number\n");
-    printf("                       of files or threads\n");
-    printf("                       [default: round-robin within the current Processor Group starting at CPU 0,\n");
-    printf("                          use -n to disable default affinity]\n"); 
-    printf("  -ag                group affinity - affinitize threads in a round-robin manner across Processor\n");
-    printf("                       Groups, starting at group 0\n");
-    printf("  -b<size>[K|M|G]    block size in bytes or KiB/MiB/GiB [default=64K]\n");
-    printf("  -B<offs>[K|M|G|b]  base target offset in bytes or KiB/MiB/GiB/blocks [default=0]\n");
-    printf("                       (offset from the beginning of the file)\n");
-    printf("  -c<size>[K|M|G|b]  create files of the given size.\n");
-    printf("                       Size can be stated in bytes or KiB/MiB/GiB/blocks\n");
-    printf("  -C<seconds>        cool down time - duration of the test after measurements finished [default=0s].\n");
-    printf("  -D<milliseconds>   Capture IOPs statistics in intervals of <milliseconds>; these are per-thread\n");
-    printf("                       per-target: text output provides IOPs standard deviation, XML provides the full\n");
-    printf("                       IOPs time series in addition. [default=1000, 1 second].\n");
-    printf("  -d<seconds>        duration (in seconds) to run test [default=10s]\n");
-    printf("  -f<size>[K|M|G|b]  target size - use only the first <size> bytes or KiB/MiB/GiB/blocks of the file/disk/partition,\n");
-    printf("                       for example to test only the first sectors of a disk\n");
-    printf("  -fr                open file with the FILE_FLAG_RANDOM_ACCESS hint\n");
-    printf("  -fs                open file with the FILE_FLAG_SEQUENTIAL_SCAN hint\n");
-    printf("  -F<count>          total number of threads (conflicts with -t)\n");
-    printf("  -g<bytes per ms>   throughput per-thread per-target throttled to given bytes per millisecond\n");
-    printf("                       note that this can not be specified when using completion routines\n");
-    printf("                       [default inactive]\n"); 
-    printf("  -h                 disable both software caching and hardware write caching. Equivalent to\n");
-    printf("                       FILE_FLAG_NO_BUFFERING and FILE_FLAG_WRITE_THROUGH\n");
-    printf("                       [default: caching is enabled, also see -S]\n"); 
-    printf("  -i<count>          number of IOs per burst; see -j [default: inactive]\n");
-    printf("  -j<milliseconds>   interval in <milliseconds> between issuing IO bursts; see -i [default: inactive]\n");
-    printf("  -I<priority>       Set IO priority to <priority>. Available values are: 1-very low, 2-low, 3-normal (default)\n");
-    printf("  -l                 Use large pages for IO buffers\n");
-    printf("  -L                 measure latency statistics\n");
-    printf("  -n                 disable default affinity (-a)\n");
-    printf("  -o<count>          number of outstanding I/O requests per target per thread\n");
-    printf("                       (1=synchronous I/O, unless more than 1 thread is specified with -F)\n");
-    printf("                       [default=2]\n");
-    printf("  -p                 start parallel sequential I/O operations with the same offset\n");
-    printf("                       (ignored if -r is specified, makes sense only with -o2 or greater)\n");
-    printf("  -P<count>          enable printing a progress dot after each <count> [default=65536]\n");
-    printf("                       completed I/O operations, counted separately by each thread \n");
-    printf("  -r<align>[K|M|G|b] random I/O aligned to <align> in bytes/KiB/MiB/GiB/blocks (overrides -s)\n");
-    printf("  -R<text|xml>       output format. Default is text.\n");
-    printf("  -s<size>[K|M|G|b]  sequential stride size, offset between subsequent I/O operations\n");
-    printf("                       (ignored if -r specified)\n");
-    printf("                       [default access=sequential, default stride=block size]\n");
-    printf("  -S                 disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n");
-    printf("                       [default: caching is enabled, also see -h]\n");
-    printf("  -t<count>          number of threads per target (conflicts with -F)\n");
-    printf("  -T<offs>[K|M|G|b]  starting stride between I/O operations performed on the same target by different threads\n");
-    printf("                       [default=0] (starting offset = base file offset + (thread number * <offs>)\n");
-    printf("                       makes sense only with #threads > 1\n");
-    printf("  -v                 verbose mode\n");
-    printf("  -w<percentage>     percentage of write requests (-w and -w0 are equivalent and result in a read-only workload).\n");
-    printf("                     absence of this switch indicates 100%% reads\n");
-    printf("                       IMPORTANT: a write test will destroy existing data without a warning\n");
-    printf("  -W<seconds>        warm up time - duration of the test before measurements start [default=5s]\n");
-    printf("  -x                 use completion routines instead of I/O Completion Ports\n");
-    printf("  -X<filepath>       use an XML file for configuring the workload. Cannot be used with other parameters.\n");
-    printf("  -z[seed]           set random seed [with no -z, seed=0; with plain -z, seed is based on system run time]\n");
+    printf("  -?                    display usage information\n");
+    printf("  -a#[,#[...]]          advanced CPU affinity - affinitize threads to CPUs provided after -a in a round-robin\n");
+    printf("                          manner within current Processor Group (CPU count starts with 0); the same CPU can\n");
+    printf("                          be listed more than once and the number of CPUs can be different than the number\n");
+    printf("                          of files or threads\n");
+    printf("                          [default: round-robin within the current Processor Group starting at CPU 0,\n");
+    printf("                             use -n to disable default affinity]\n"); 
+    printf("  -ag                   group affinity - affinitize threads in a round-robin manner across Processor\n");
+    printf("                          Groups, starting at group 0\n");
+    printf("  -b<size>[K|M|G]       block size in bytes or KiB/MiB/GiB [default=64K]\n");
+    printf("  -B<offs>[K|M|G|b]     base target offset in bytes or KiB/MiB/GiB/blocks [default=0]\n");
+    printf("                          (offset from the beginning of the file)\n");
+    printf("  -c<size>[K|M|G|b]     create files of the given size.\n");
+    printf("                          Size can be stated in bytes or KiB/MiB/GiB/blocks\n");
+    printf("  -C<seconds>           cool down time - duration of the test after measurements finished [default=0s].\n");
+    printf("  -D<milliseconds>      Capture IOPs statistics in intervals of <milliseconds>; these are per-thread\n");
+    printf("                          per-target: text output provides IOPs standard deviation, XML provides the full\n");
+    printf("                          IOPs time series in addition. [default=1000, 1 second].\n");
+    printf("  -d<seconds>           duration (in seconds) to run test [default=10s]\n");
+    printf("  -f<size>[K|M|G|b]     target size - use only the first <size> bytes or KiB/MiB/GiB/blocks of the file/disk/partition,\n");
+    printf("                          for example to test only the first sectors of a disk\n");
+    printf("  -fr                   open file with the FILE_FLAG_RANDOM_ACCESS hint\n");
+    printf("  -fs                   open file with the FILE_FLAG_SEQUENTIAL_SCAN hint\n");
+    printf("  -F<count>             total number of threads (conflicts with -t)\n");
+    printf("  -g<bytes per ms>      throughput per-thread per-target throttled to given bytes per millisecond\n");
+    printf("                          note that this can not be specified when using completion routines\n");
+    printf("                          [default inactive]\n"); 
+    printf("  -h                    disable both software caching and hardware write caching. Equivalent to\n");
+    printf("                          FILE_FLAG_NO_BUFFERING and FILE_FLAG_WRITE_THROUGH\n");
+    printf("                          [default: caching is enabled, also see -S]\n"); 
+    printf("  -i<count>             number of IOs per burst; see -j [default: inactive]\n");
+    printf("  -j<milliseconds>      interval in <milliseconds> between issuing IO bursts; see -i [default: inactive]\n");
+    printf("  -I<priority>          Set IO priority to <priority>. Available values are: 1-very low, 2-low, 3-normal (default)\n");
+    printf("  -l                    Use large pages for IO buffers\n");
+    printf("  -L                    measure latency statistics\n");
+    printf("  -n                    disable default affinity (-a)\n");
+    printf("  -o<count>             number of outstanding I/O requests per target per thread\n");
+    printf("                          (1=synchronous I/O, unless more than 1 thread is specified with -F)\n");
+    printf("                          [default=2]\n");
+    printf("  -p                    start parallel sequential I/O operations with the same offset\n");
+    printf("                          (ignored if -r is specified, makes sense only with -o2 or greater)\n");
+    printf("  -P<count>             enable printing a progress dot after each <count> [default=65536]\n");
+    printf("                          completed I/O operations, counted separately by each thread \n");
+    printf("  -r<align>[K|M|G|b]    random I/O aligned to <align> in bytes/KiB/MiB/GiB/blocks (overrides -s)\n");
+    printf("  -R<text|xml>          output format. Default is text.\n");
+    printf("  -s[i]<size>[K|M|G|b]  sequential stride size, offset between subsequent I/O operations\n");
+    printf("                          [default access=non-interlocked sequential, default stride=block size]\n");
+    printf("                          In non-interlocked mode, threads do not coordinate, so the pattern of offsets\n");
+    printf("                          as seen by the target will not be truly sequential.  Under -si the threads\n");
+    printf("                          manipulate a shared offset with InterlockedIncrement, which may reduce throughput,\n");
+    printf("                          but promotes a more sequential pattern.\n");
+    printf("                          (ignored if -r specified, -si conflicts with -T and -p)\n");
+    printf("  -S                    disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n");
+    printf("                          [default: caching is enabled, also see -h]\n");
+    printf("  -t<count>             number of threads per target (conflicts with -F)\n");
+    printf("  -T<offs>[K|M|G|b]     starting stride between I/O operations performed on the same target by different threads\n");
+    printf("                          [default=0] (starting offset = base file offset + (thread number * <offs>)\n");
+    printf("                          makes sense only with #threads > 1\n");
+    printf("  -v                    verbose mode\n");
+    printf("  -w<percentage>        percentage of write requests (-w and -w0 are equivalent and result in a read-only workload).\n");
+    printf("                        absence of this switch indicates 100%% reads\n");
+    printf("                          IMPORTANT: a write test will destroy existing data without a warning\n");
+    printf("  -W<seconds>           warm up time - duration of the test before measurements start [default=5s]\n");
+    printf("  -x                    use completion routines instead of I/O Completion Ports\n");
+    printf("  -X<filepath>          use an XML file for configuring the workload. Cannot be used with other parameters.\n");
+    printf("  -z[seed]              set random seed [with no -z, seed=0; with plain -z, seed is based on system run time]\n");
     printf("\n");
     printf("Write buffers:\n");
     printf("  -Z                        zero buffers used for write tests\n");
@@ -551,14 +556,14 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             {
                 for (auto i = vTargets.begin(); i != vTargets.end(); i++)
                 {
-                    i->SetRandomAccess(true);
+                    i->SetRandomAccessHint(true);
                 }
             }
             else if ('s' == *(arg + 1))
             {
                 for (auto i = vTargets.begin(); i != vTargets.end(); i++)
                 {
-                    i->SetSequentialScan(true);
+                    i->SetSequentialScanHint(true);
                 }
             }
             else
@@ -744,8 +749,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 {
                     for (auto i = vTargets.begin(); i != vTargets.end(); i++)
                     {
-                        i->SetRandomAlignmentInBytes(cb);
-                        i->SetUseRandomAlignment(true);
+                        i->SetUseRandomAccessPattern(true);
+                        i->SetBlockAlignmentInBytes(cb);
                     }
                 }
             }
@@ -772,26 +777,39 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             break;
 
         case 's':    //stride size
-            if (*(arg + 1) != '\0')
             {
-                UINT64 cb;
-                if (_GetSizeInBytes(arg + 1, cb))
+                int idx = 1;
+
+                if ('i' == *(arg + idx))
                 {
+                    // do interlocked sequential mode
+                    // ISSUE-REVIEW: this does nothing if -r is specified
+                    // ISSUE-REVIEW: this does nothing if -p is specified
+                    // ISSUE-REVIEW: this does nothing if we are single-threaded 
                     for (auto i = vTargets.begin(); i != vTargets.end(); i++)
                     {
-                        i->SetStrideSizeInBytes(cb);
-                        i->SetEnableCustomStrideSize(true);
+                        i->SetUseInterlockedSequential(true);
+                    }
+
+                    idx++;
+                }
+                
+                if (*(arg + idx) != '\0')
+                {
+                    UINT64 cb;
+                    if (_GetSizeInBytes(arg + idx, cb))
+                    {
+                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        {
+                            i->SetBlockAlignmentInBytes(cb);
+                        }
+                    }
+                    else
+                    {
+                        fprintf(stderr, "Invalid stride size passed to -s\n");
+                        fError = true;
                     }
                 }
-                else
-                {
-                    fprintf(stderr, "Invalid stride size passed to -s\n");
-                    fError = true;
-                }
-            }
-            else
-            {
-                fError = true;
             }
             break;
 
@@ -1071,14 +1089,25 @@ bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pP
 
     //check if parameters should be read from an xml file
     bool fOk = true;
+    bool fCmdLine;
 
     if (argc == 2 && (argv[1][0] == '-' || argv[1][0] == '/') && argv[1][1] == 'X' && argv[1][2] != '\0')
     {
         fOk = _ReadParametersFromXmlFile(argv[1] + 2, pProfile);
+        fCmdLine = false;
     }
     else
     {
         fOk = _ReadParametersFromCmdLine(argc, argv, pProfile, synch);
+        fCmdLine = true;
+    }
+    
+    // check additional restrictions and conditions on the passed parameters.
+    // note that on the cmdline, all targets receive the same parameters so
+    // that their mutual consistency only needs to be checked once.
+    if (fOk)
+    {
+        fOk = pProfile->Validate(fCmdLine);
     }
 
     return fOk;
