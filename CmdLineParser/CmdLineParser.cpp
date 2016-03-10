@@ -141,10 +141,10 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("  -ag                   group affinity - affinitize threads round-robin to cores in Processor Groups 0 - n.\n");
     printf("                          Group 0 is filled before Group 1, and so forth.\n");
     printf("                          [default; use -n to disable default affinity]\n");
-    printf("  -a<[g]#[,#,...]>      advanced CPU affinity - affinitize threads round-robin to the CPUs provided. The g# notation\n");
+    printf("  -ag#,#[,#,...]>       advanced CPU affinity - affinitize threads round-robin to the CPUs provided. The g# notation\n");
     printf("                          specifies Processor Groups for the following CPU core #s. Multiple Processor Groups\n");
     printf("                          may be specified, and groups/cores may be repeated. If no group is specified, 0 is assumed.\n");
-    printf("                          Additional groups/processors may be added, comma separated, or on separate parameters. ");
+    printf("                          Additional groups/processors may be added, comma separated, or on separate parameters.\n");
     printf("                          Examples: -a0,1,2 and -ag0,0,1,2 are equivalent.\n");
     printf("                                    -ag0,0,1,2,g1,0,1,2 specifies the first three cores in groups 0 and 1.\n");
     printf("                                    -ag0,0,1,2 -ag1,0,1,2 is equivalent.\n");
