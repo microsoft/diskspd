@@ -133,7 +133,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="..\..Common\CmdLineParser.h" />
+    <ClInclude Include="..\..\Common\CmdLineParser.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\CmdLineParser\CmdLineParser.cpp" />
