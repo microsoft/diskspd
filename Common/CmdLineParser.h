@@ -38,7 +38,7 @@ public:
     CmdLineParser();
     ~CmdLineParser();
 
-    bool ParseCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch);
+    bool ParseCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch, SystemInformation *pSystem = nullptr);
 
 private:
     bool _ReadParametersFromCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch);

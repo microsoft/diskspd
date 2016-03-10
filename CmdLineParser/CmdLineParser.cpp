@@ -29,7 +29,7 @@ SOFTWARE.
 
 #include "CmdLineParser.h"
 #include "Common.h"
-#include "..\XmlProfileParser\XmlProfileParser.h"
+#include "XmlProfileParser.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,7 +41,6 @@ CmdLineParser::CmdLineParser() :
     _hEventFinished(nullptr)
 {
 }
-
 
 CmdLineParser::~CmdLineParser()
 {
@@ -139,14 +138,16 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("\n");
     printf("Available options:\n");
     printf("  -?                    display usage information\n");
-    printf("  -a#[,#[...]]          advanced CPU affinity - affinitize threads to CPUs provided after -a in a round-robin\n");
-    printf("                          manner within current Processor Group (CPU count starts with 0); the same CPU can\n");
-    printf("                          be listed more than once and the number of CPUs can be different than the number\n");
-    printf("                          of files or threads\n");
-    printf("                          [default: round-robin within the current Processor Group starting at CPU 0,\n");
-    printf("                             use -n to disable default affinity]\n"); 
-    printf("  -ag                   group affinity - affinitize threads in a round-robin manner across Processor\n");
-    printf("                          Groups, starting at group 0\n");
+    printf("  -ag                   group affinity - affinitize threads round-robin to cores in Processor Groups 0 - n.\n");
+    printf("                          Group 0 is filled before Group 1, and so forth.\n");
+    printf("                          [default; use -n to disable default affinity]\n");
+    printf("  -a<[g]#[,#,...]>      advanced CPU affinity - affinitize threads round-robin to the CPUs provided. The g# notation\n");
+    printf("                          specifies Processor Groups for the following CPU core #s. Multiple Processor Groups\n");
+    printf("                          may be specified, and groups/cores may be repeated. If no group is specified, 0 is assumed.\n");
+    printf("                          Additional groups/processors may be added, comma separated, or on separate parameters. ");
+    printf("                          Examples: -a0,1,2 and -ag0,0,1,2 are equivalent.\n");
+    printf("                                    -ag0,0,1,2,g1,0,1,2 specifies the first three cores in groups 0 and 1.\n");
+    printf("                                    -ag0,0,1,2 -ag1,0,1,2 is equivalent.\n");
     printf("  -b<size>[K|M|G]       block size in bytes or KiB/MiB/GiB [default=64K]\n");
     printf("  -B<offs>[K|M|G|b]     base target offset in bytes or KiB/MiB/GiB/blocks [default=0]\n");
     printf("                          (offset from the beginning of the file)\n");
@@ -159,15 +160,16 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("  -d<seconds>           duration (in seconds) to run test [default=10s]\n");
     printf("  -f<size>[K|M|G|b]     target size - use only the first <size> bytes or KiB/MiB/GiB/blocks of the file/disk/partition,\n");
     printf("                          for example to test only the first sectors of a disk\n");
-    printf("  -fr                   open file with the FILE_FLAG_RANDOM_ACCESS hint\n");
-    printf("  -fs                   open file with the FILE_FLAG_SEQUENTIAL_SCAN hint\n");
+    printf("  -f<rst>               open file with one or more additional access hints\n");
+    printf("                          r : the FILE_FLAG_RANDOM_ACCESS hint\n");
+    printf("                          s : the FILE_FLAG_SEQUENTIAL_SCAN hint\n");
+    printf("                          t : the FILE_ATTRIBUTE_TEMPORARY hint\n");
+    printf("                          [default: none]\n");
     printf("  -F<count>             total number of threads (conflicts with -t)\n");
     printf("  -g<bytes per ms>      throughput per-thread per-target throttled to given bytes per millisecond\n");
     printf("                          note that this can not be specified when using completion routines\n");
     printf("                          [default inactive]\n"); 
-    printf("  -h                    disable both software caching and hardware write caching. Equivalent to\n");
-    printf("                          FILE_FLAG_NO_BUFFERING and FILE_FLAG_WRITE_THROUGH\n");
-    printf("                          [default: caching is enabled, also see -S]\n"); 
+    printf("  -h                    deprecated, see -Sh\n");
     printf("  -i<count>             number of IOs per burst; see -j [default: inactive]\n");
     printf("  -j<milliseconds>      interval in <milliseconds> between issuing IO bursts; see -i [default: inactive]\n");
     printf("  -I<priority>          Set IO priority to <priority>. Available values are: 1-very low, 2-low, 3-normal (default)\n");
@@ -190,8 +192,11 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("                          manipulate a shared offset with InterlockedIncrement, which may reduce throughput,\n");
     printf("                          but promotes a more sequential pattern.\n");
     printf("                          (ignored if -r specified, -si conflicts with -T and -p)\n");
+    printf("  -S[h|r]               control caching behavior [default: caching is enabled]\n");
     printf("  -S                    disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n");
-    printf("                          [default: caching is enabled, also see -h]\n");
+    printf("  -Sh                   disable both software caching and hardware write caching, equivalent to\n");
+    printf("                          FILE_FLAG_NO_BUFFERING and FILE_FLAG_WRITE_THROUGH\n");
+    printf("  -Sr                   disable local caching, leaving remote caching enabled; only valid for remote filesystems\n");
     printf("  -t<count>             number of threads per target (conflicts with -F)\n");
     printf("  -T<offs>[K|M|G|b]     starting stride between I/O operations performed on the same target by different threads\n");
     printf("                          [default=0] (starting offset = base file offset + (thread number * <offs>)\n");
@@ -331,42 +336,137 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
     assert('\0' != *arg);
 
     const char *c = arg + 1;
+
+    // -a and -ag are functionally equivalent; group-aware affinity.
+    // Note that group-aware affinity is default.
+
+    // look for the -a simple case
     if (*c == '\0')
     {
-        // simple affinity (-a) is turned on by default, do nothing
-        return false;
-    }
-
-    if (*c == 'g')
-    {
-        pTimeSpan->SetGroupAffinity(true);
         return true;
     }
 
-    // TODO: will treat ,, as ,0,
-    // more complex affinity (-a#[,#[,#...]])
-    int nCpu = 0;
-    while (fOk && (*c != '\0'))
+    // look for the -ag simple case
+    if (*c == 'g')
+    {
+        // peek ahead, done?
+        if (*(c + 1) == '\0')
+        {
+            return true;
+        }
+
+        // leave the parser at the g; this is the start of a group number
+    }
+
+    // more complex affinity -ag0,0,1,2,g1,0,1,2,... OR -a0,1,2,..
+    // n counts the -a prefix, the first parsed character is string index 2
+    DWORD nGroup = 0, nNum = 0, n = 2;
+    bool fGroup = false, fNum = false;
+    while (*c != '\0')
     {
         if ((*c >= '0') && (*c <= '9'))
         {
-            nCpu = 10 * nCpu + (*c - '0');
+            // accumulating a number
+            fNum = true;
+            nNum = 10 * nNum + (*c - '0');
+        }
+        else if (*c == 'g')
+        {
+            // bad: ggggg
+            if (fGroup)
+            {
+                fOk = false;
+            }
+
+            // now parsing a group number
+            fGroup = true;
         }
         else if (*c == ',')
         {
-            pTimeSpan->AddAffinityAssignment(nCpu);
-            nCpu = 0;
+            // separator; if parsing group and have a number, now have the group
+            if (fGroup && fNum)
+            {
+                if (nNum > MAXWORD)
+                {
+                    fprintf(stderr, "ERROR: group %u is out of range\n", nNum);
+                    fOk = false;
+                }
+                else
+                {
+                    nGroup = nNum;
+                    nNum = 0;
+                    fGroup = false;
+                }
+            }
+            // at a split but don't have a parsed number, error
+            else if (!fNum)
+            {
+                fOk = false;
+            }
+            // have a parsed core number
+            else
+            {
+                if (nNum > MAXBYTE)
+                {
+                    fprintf(stderr, "ERROR: core %u is out of range\n", nNum);
+                    fOk = false;
+                }
+                else
+                {
+                    pTimeSpan->AddAffinityAssignment((WORD)nGroup, (BYTE)nNum);
+                    nNum = 0;
+                    fNum = false;
+                }
+            }
         }
         else
         {
             fOk = false;
-            fprintf(stderr, "error parsing affinity (invalid character: %c)\n", *c);
         }
+
+        // bail out to error pretty print on error
+        if (!fOk)
+        {
+            break;
+        }
+
         c++;
+        n++;
     }
+
+    // if parsing a group or don't have a final number, error
+    if (fGroup || !fNum)
+    {
+        fOk = false;
+    }
+
+    if (fOk && nNum > MAXBYTE)
+    {
+        fprintf(stderr, "ERROR: core %u is out of range\n", nNum);
+        fOk = false;
+    }
+
+    if (!fOk)
+    {
+        // mid-parse error, show the point at which it occured
+        if (*c != '\0') {
+            fprintf(stderr, "ERROR: syntax error parsing affinity at highlighted character\n-%s\n", arg);
+            while (n-- > 0)
+            {
+                fprintf(stderr, " ");
+            }
+            fprintf(stderr, "^\n");
+        }
+        else
+        {
+            fprintf(stderr, "ERROR: incomplete affinity specification\n");
+        }
+    }
+
     if (fOk)
     {
-        pTimeSpan->AddAffinityAssignment(nCpu);
+        // fprintf(stderr, "FINAL parsed group %d core %d\n", nGroup, nNum);
+        pTimeSpan->AddAffinityAssignment((WORD)nGroup, (BYTE)nNum);
     }
 
     return fOk;
@@ -410,7 +510,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             else
             {
                 fprintf(stderr, "Invalid block size passed to -b\n");
-                exit(1);
+                return false;
             }
             _dwBlockSize = (DWORD)ullBlockSize;
             break;
@@ -433,14 +533,14 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         // skip '-' or '/'
         ++arg;
 
-        if ('\0' == *arg)
-        {
-            fprintf(stderr, "Invalid option\n");
-            exit(1);
-        }
-
         switch (*arg)
         {
+        case '\0':
+            // back up so that the error complaint mentions the switch char
+            arg--;
+            fError = true;
+            break;
+
         case '?':
             _DisplayUsageInfo(argv[0]);
             exit(0);
@@ -457,7 +557,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             // nop - block size has been taken care of before the loop
             break;
 
-        case 'B':    //base file offset (offset from the beggining of the file), cannot be used with 'random'
+        case 'B':    //base file offset (offset from the beginning of the file), cannot be used with 'random'
             if (*(arg + 1) != '\0')
             {
                 UINT64 cb;
@@ -552,41 +652,59 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             break;
 
         case 'f':
-            if ('r' == *(arg + 1))
+            if (isdigit(*(arg + 1)))
             {
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                UINT64 cb;
+                if (_GetSizeInBytes(arg + 1, cb))
                 {
-                    i->SetRandomAccessHint(true);
-                }
-            }
-            else if ('s' == *(arg + 1))
-            {
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
-                {
-                    i->SetSequentialScanHint(true);
-                }
-            }
-            else
-            {
-                if (*(arg + 1) != '\0')
-                {
-                    UINT64 cb;
-                    if (_GetSizeInBytes(arg + 1, cb))
+                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
                     {
-                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
-                        {
-                            i->SetMaxFileSize(cb);
-                        }
-                    }
-                    else
-                    {
-                        fprintf(stderr, "Invalid max file size passed to -f\n");
-                        fError = true;
+                        i->SetMaxFileSize(cb);
                     }
                 }
                 else
                 {
+                    fprintf(stderr, "Invalid max file size passed to -f\n");
                     fError = true;
+                }
+            }
+            else
+            {
+                if ('\0' == *(arg + 1))
+                {
+                    fError = true;
+                }
+                else
+                {
+                    // while -frs (or -fsr) are generally conflicting intentions as far as
+                    // the OS is concerned, do not enforce
+                    while (*(++arg) != '\0')
+                    {
+                        switch (*arg)
+                        {
+                        case 'r':
+                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                            {
+                                i->SetRandomAccessHint(true);
+                            }
+                            break;
+                        case 's':
+                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                            {
+                                i->SetSequentialScanHint(true);
+                            }
+                            break;
+                        case 't':
+                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                            {
+                                i->SetTemporaryFileHint(true);
+                            }
+                            break;
+                        default:
+                            fError = true;
+                            break;
+                        }
+                    }
                 }
             }
             break;
@@ -622,10 +740,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             }
             break;
 
-        case 'h':    //disable both software and hardware caching
+        case 'h':    //disable both software and hardware caching; now equivalent to -Sh
             for (auto i = vTargets.begin(); i != vTargets.end(); i++)
             {
-                i->SetDisableAllCache(true);
+                i->SetCacheMode(TargetCacheMode::DisableAllCache);
             }
             break;
 
@@ -813,15 +931,27 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             }
             break;
 
-        case 'S':   //disable OS caching (software buffering)
-            //IMPORTANT: File access must begin at byte offsets within the file that are integer multiples of the volume's sector size. 
-            // File access must be for numbers of bytes that are integer multiples of the volume's sector size. For example, if the sector
-            // size is 512 bytes, an application can request reads and writes of 512, 1024, or 2048 bytes, but not of 335, 981, or 7171 bytes. 
-            // Buffer addresses for read and write operations should be sector aligned (aligned on addresses in memory that are integer
-            // multiples of the volume's sector size). Depending on the disk, this requirement may not be enforced. 
+        case 'S':   //control os/hw/remote caching
+            //IMPORTANT: If uncached to physical storage, file access must begin at byte offsets within the file that are integer multiples
+            // of the volume's sector size. File access must be for numbers of bytes that are integer multiples of the volume's sector size.
+            // For example, if the sector size is 512 bytes, an application can request reads and writes of 512, 1024, or 2048 bytes, but not
+            // of 335, 981, or 7171 bytes.
             for (auto i = vTargets.begin(); i != vTargets.end(); i++)
             {
-                i->SetDisableOSCache(true);
+                switch (*(arg + 1)) {
+                case 'h':
+                    i->SetCacheMode(TargetCacheMode::DisableAllCache);
+                    break;
+                case 'r':
+                    i->SetCacheMode(TargetCacheMode::DisableLocalCache);
+                    break;
+                case '\0':
+                    i->SetCacheMode(TargetCacheMode::DisableOSCache);
+                    break;
+                default:
+                    fError = true;
+                    break;
+                }
             }
             break;
 
@@ -1012,21 +1142,21 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 }
                 else
                 {
-                    fprintf(stderr, "Invalid size passed to -Z\n");
+                    fprintf(stderr, "ERROR: invalid size passed to -Z\n");
                     fError = true;
                 }
             }
             break;
 
         default:
-            fprintf(stderr, "Invalid option: '%s'\n", arg);
-            exit(1);                    // TODO: this class shouldn't terminate the process
+            fprintf(stderr, "ERROR: invalid option: '%s'\n", arg);
+            return false;
         }
 
         if (fError)
         {
-            fprintf(stderr, "Incorrectly provided option: '%s'\n", arg);
-            exit(1);                    // TODO: this class shouldn't terminate the process
+            fprintf(stderr, "ERROR: incorrectly provided option: '%s'\n", arg);
+            return false;
         }
 
         --nParamCnt;
@@ -1044,7 +1174,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
     if (vTargets.size() < 1)
     {
-        fprintf(stderr, "You need to provide at least one filename\n");
+        fprintf(stderr, "ERROR: need to provide at least one filename\n");
         return false;
     }
 
@@ -1063,7 +1193,7 @@ bool CmdLineParser::_ReadParametersFromXmlFile(const char *pszPath, Profile *pPr
     return parser.ParseFile(pszPath, pProfile);
 }
 
-bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch)
+bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch, SystemInformation *pSystem)
 {
     assert(nullptr != argv);
     assert(nullptr != pProfile);
@@ -1107,7 +1237,7 @@ bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pP
     // that their mutual consistency only needs to be checked once.
     if (fOk)
     {
-        fOk = pProfile->Validate(fCmdLine);
+        fOk = pProfile->Validate(fCmdLine, pSystem);
     }
 
     return fOk;

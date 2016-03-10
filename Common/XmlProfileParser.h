@@ -45,6 +45,7 @@ private:
     HRESULT _ParseWriteBufferContent(IXMLDOMNode &XmlNode, Target *pTarget);
     HRESULT _ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget);
     HRESULT _ParseAffinityAssignment(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpan);
+    HRESULT _ParseAffinityGroupAssignment(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpan);
 
     HRESULT _GetString(IXMLDOMNode &XmlNode, const char *pszQuery, string *psValue) const;
     HRESULT _GetUINT32(IXMLDOMNode &XmlNode, const char *pszQuery, UINT32 *pulValue) const;
@@ -52,6 +53,8 @@ private:
     HRESULT _GetDWORD(IXMLDOMNode &XmlNode, const char *pszQuery, DWORD *pdwValue) const;
     HRESULT _GetBool(IXMLDOMNode &XmlNode, const char *pszQuery, bool *pfValue) const;
 
+    HRESULT _GetUINT32Attr(IXMLDOMNode &XmlNode, const char *pszAttr, UINT32 *pulValue) const;
+    
     HRESULT _GetVerbose(IXMLDOMDocument2 &XmlDoc, bool *pfVerbose);
     HRESULT _GetProgress(IXMLDOMDocument2 &XmlDoc, DWORD *pdwProgress);
 };

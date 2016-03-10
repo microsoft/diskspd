@@ -30,6 +30,7 @@ SOFTWARE.
 #pragma once
 
 #include <windows.h>
+#include <ctime>
 #include <vector>
 #include <Winternl.h>   //ntdll.dll
 #include <assert.h>
@@ -50,8 +51,8 @@ using namespace std;
 //      Monday, June 16, 2014 12:00:00 AM
 
 #define DISKSPD_RELEASE_TAG ""
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.15" DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2015/01/09"
+#define DISKSPD_NUMERIC_VERSION_STRING "2.0.16b" DISKSPD_RELEASE_TAG
+#define DISKSPD_DATE_VERSION_STRING "2016/2/22"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -295,13 +296,149 @@ public:
 typedef void (*CALLBACK_TEST_STARTED)();    //callback function to notify that the measured test is about to start
 typedef void (*CALLBACK_TEST_FINISHED)();   //callback function to notify that the measured test has just finished
 
-class SystemInformation
+class ProcessorGroupInformation
 {
 public:
+    WORD _groupNumber; 
+    BYTE _maximumProcessorCount;
+    BYTE _activeProcessorCount;
+    KAFFINITY _activeProcessorMask;
+
+    ProcessorGroupInformation() = delete;
+    ProcessorGroupInformation(
+        BYTE MaximumProcessorCount,
+        BYTE ActiveProcessorCount,
+        WORD Group,
+        KAFFINITY ActiveProcessorMask) :
+        _maximumProcessorCount(MaximumProcessorCount),
+        _activeProcessorCount(ActiveProcessorCount),
+        _groupNumber(Group),
+        _activeProcessorMask(ActiveProcessorMask)
+    {
+    }
+
+    bool IsProcessorActive(BYTE Processor)
+    {
+        if (IsProcessorValid(Processor) &&
+            (((KAFFINITY)1 << Processor) & _activeProcessorMask) != 0)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    bool IsProcessorValid(BYTE Processor)
+    {
+        if (Processor < _maximumProcessorCount)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+};
+
+class ProcessorTopology
+{
+public:
+    vector<ProcessorGroupInformation> _vProcessorGroupInformation;
+    DWORD _ulProcCount;
+
+    ProcessorTopology()
+    {
+        BOOL fResult;
+        PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX pInformation;
+        DWORD ReturnedLength = 1024;
+        pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[ReturnedLength];
+
+        fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            delete [] pInformation;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[ReturnedLength];
+            fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
+        }
+
+        if (fResult)
+        {
+            // Group information comes back as a single (large) element, not an array.
+            assert(ReturnedLength == pInformation->Size);
+            _ulProcCount = 0;
+
+            // Fill in group topology vector so we can answer questions about active/max procs
+            for (WORD i = 0; i < pInformation->Group.ActiveGroupCount; i++)
+            {
+                _vProcessorGroupInformation.emplace_back(
+                    pInformation->Group.GroupInfo[i].MaximumProcessorCount,
+                    pInformation->Group.GroupInfo[i].ActiveProcessorCount,
+                    i,
+                    pInformation->Group.GroupInfo[i].ActiveProcessorMask
+                    );
+                _ulProcCount += _vProcessorGroupInformation[i]._maximumProcessorCount;
+            }
+        }
+
+        delete [] pInformation;
+    }
+
+    bool IsGroupValid(WORD Group)
+    {
+        if (Group < _vProcessorGroupInformation.size())
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    // Return the next active processor in the system, exclusive (Next = true)
+    // or inclusive (Next = false) of the input group/processor.
+    // Iteration is in order of absolute processor number.
+    // This does assume at least one core is active, but that is a given.
+    void GetActiveGroupProcessor(WORD& Group, BYTE& Processor, bool Next)
+    {
+        if (Next)
+        {
+            Processor++;
+        }
+
+        while (!_vProcessorGroupInformation[Group].IsProcessorActive(Processor))
+        {
+            if (!_vProcessorGroupInformation[Group].IsProcessorValid(Processor))
+            {
+                Processor = 0;
+                if (!IsGroupValid(++Group))
+                {
+                    Group = 0;
+                }
+            }
+            else
+            {
+                Processor++;
+            }
+        }
+    }
+};
+
+
+class SystemInformation
+{
+private:
+    time_t t;
+public:
     string sComputerName;
+    ProcessorTopology processorTopology;
 
     SystemInformation()
     {
+        // System Name
         char buffer[64];
         DWORD cb = _countof(buffer);
         BOOL fResult;
@@ -312,10 +449,21 @@ public:
         {
             sComputerName = buffer;
         }
+
+        // capture start time
+        time(&t);
+    }
+
+    // for unit test, squelch variable timestamp
+    void SystemInformation::ResetTime()
+    {
+        t = 0;
     }
 
     string SystemInformation::GetXml() const
     {
+        char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
+        int nWritten;
         string sXml("<System>\n");
 
         // identify computer which ran the test
@@ -329,11 +477,54 @@ public:
         sXml += "<VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n";
         sXml += "</Tool>\n";
 
+        // identify run time in GMT (parses with System.DateTime)
+        sXml += "<RunTime>";
+        if (t != 0)
+        {
+            errno_t err;
+            struct tm ttm;
+            err = gmtime_s(&ttm, &t);
+            if (!err) {
+                nWritten = snprintf(szBuffer, _countof(szBuffer),
+                    "%u/%02u/%02u %02u:%02u:%02u GMT",
+                    1900 + ttm.tm_year,
+                    1 + ttm.tm_mon,
+                    ttm.tm_mday,
+                    ttm.tm_hour,
+                    ttm.tm_min,
+                    ttm.tm_sec);
+                assert(nWritten && nWritten < _countof(szBuffer));
+                sXml += szBuffer;
+            }
+        }
+        sXml += "</RunTime>\n";
+
+        // processor topology
+        sXml += "<ProcessorTopology>\n";
+        for (const auto& g : processorTopology._vProcessorGroupInformation)
+        {
+            sXml += "<Group Group=\"";
+            sXml += to_string(g._groupNumber);
+            sXml += "\" MaximumProcessors=\"";
+            sXml += to_string(g._maximumProcessorCount);
+            sXml += "\" ActiveProcessors=\"";
+            sXml += to_string(g._activeProcessorCount);
+            sXml += "\" ActiveProcessorMask=\"0x";
+            nWritten = snprintf(szBuffer, _countof(szBuffer), "%Ix", g._activeProcessorMask);
+            assert(nWritten && nWritten < _countof(szBuffer));
+            sXml += szBuffer;
+            sXml += "\"/>\n";
+
+        }
+        sXml += "</ProcessorTopology>\n";
+
         sXml += "</System>\n";
 
         return sXml;
     }
 };
+
+extern SystemInformation g_SystemInformation;
 
 struct Synchronization
 {
@@ -349,6 +540,18 @@ struct Synchronization
     ((pSynch)->ulStructSize >= offsetof(struct Synchronization, Field) + sizeof((pSynch)->Field)) \
     )
 
+// caching modes
+// cached-> default
+// disableoscache  -> no_intermediate_buffering (-S)
+// disableallcache -> +write_through (-h or -Sh)
+// disablelocalcache -> cached, but then tear down local rdr cache (-Sr)
+enum class TargetCacheMode {
+    Cached = 1,
+    DisableOSCache,
+    DisableAllCache,
+    DisableLocalCache
+};
+
 class Target
 {
 public:
@@ -362,8 +565,7 @@ public:
         _ullBaseFileOffset(0),
         _fParallelAsyncIO(false),
         _fInterlockedSequential(false),
-        _fDisableOSCache(false),
-        _fDisableAllCache(false),
+        _cacheMode(TargetCacheMode::Cached),
         _fZeroWriteBuffers(false),
         _dwThreadsPerFile(1),
         _ullThreadStride(0),
@@ -378,6 +580,7 @@ public:
         _fThinkTime(false),
         _fSequentialScanHint(false),
         _fRandomAccessHint(false),
+        _fTemporaryFileHint(false),
         _fUseLargePages(false),
         _ioPriorityHint(IoPriorityHintNormal),
         _dwThroughputBytesPerMillisecond(0),
@@ -404,31 +607,31 @@ public:
         return _fBlockAlignmentValid ? _ullBlockAlignment : _dwBlockSize;
     }
     
-    void SetUseRandomAccessPattern(bool fUseRandomAccessPattern) { _fUseRandomAccessPattern = fUseRandomAccessPattern; }
+    void SetUseRandomAccessPattern(bool fBool) { _fUseRandomAccessPattern = fBool; }
     bool GetUseRandomAccessPattern() const { return _fUseRandomAccessPattern; } 
 
     void SetBaseFileOffsetInBytes(UINT64 ullBaseFileOffset) { _ullBaseFileOffset = ullBaseFileOffset; }
     UINT64 GetBaseFileOffsetInBytes() const { return _ullBaseFileOffset; }
 
-    void SetSequentialScanHint(bool fSequentialScanHint) { _fSequentialScanHint = fSequentialScanHint; }
+    void SetSequentialScanHint(bool fBool) { _fSequentialScanHint = fBool; }
     bool GetSequentialScanHint() const { return _fSequentialScanHint; }
 
-    void SetRandomAccessHint(bool fRandomAccessHint) { _fRandomAccessHint = fRandomAccessHint; }
+    void SetRandomAccessHint(bool fBool) { _fRandomAccessHint = fBool; }
     bool GetRandomAccessHint() const { return _fRandomAccessHint; }
 
-    void SetUseLargePages(bool fUseLargePages) { _fUseLargePages = fUseLargePages; }
+    void SetTemporaryFileHint(bool fBool) { _fTemporaryFileHint = fBool; }
+    bool GetTemporaryFileHint() const { return _fTemporaryFileHint; }
+
+    void SetUseLargePages(bool fBool) { _fUseLargePages = fBool; }
     bool GetUseLargePages() const { return _fUseLargePages; }
 
     void SetRequestCount(DWORD dwRequestCount) { _dwRequestCount = dwRequestCount; }
     DWORD GetRequestCount() const { return _dwRequestCount; }
 
-    void SetDisableOSCache(bool fDisableOSCache) { _fDisableOSCache = fDisableOSCache; }
-    bool GetDisableOSCache() const { return _fDisableOSCache; }
+    void SetCacheMode(TargetCacheMode cacheMode) { _cacheMode = cacheMode; }
+    TargetCacheMode GetCacheMode() const { return _cacheMode;  }
 
-    void SetDisableAllCache(bool fDisableAllCache) { _fDisableAllCache = fDisableAllCache; }
-    bool GetDisableAllCache() const { return _fDisableAllCache; }
-
-    void SetZeroWriteBuffers(bool fZeroWriteBuffers) { _fZeroWriteBuffers = fZeroWriteBuffers; }
+    void SetZeroWriteBuffers(bool fBool) { _fZeroWriteBuffers = fBool; }
     bool GetZeroWriteBuffers() const { return _fZeroWriteBuffers; }
 
     void SetRandomDataWriteBufferSize(UINT64 cbWriteBuffer) { _cbRandomDataWriteBuffer = cbWriteBuffer; }
@@ -437,7 +640,7 @@ public:
     void SetRandomDataWriteBufferSourcePath(string sPath) { _sRandomDataWriteBufferSourcePath = sPath; }
     string GetRandomDataWriteBufferSourcePath() const { return _sRandomDataWriteBufferSourcePath; }
 
-    void SetUseBurstSize(bool fUseBurstSize) { _fUseBurstSize = fUseBurstSize; }
+    void SetUseBurstSize(bool fBool) { _fUseBurstSize = fBool; }
     bool GetUseBurstSize() const { return _fUseBurstSize; }
 
     void SetBurstSize(DWORD dwBurstSize) { _dwBurstSize = dwBurstSize; }
@@ -446,13 +649,13 @@ public:
     void SetThinkTime(DWORD dwThinkTime) { _dwThinkTime = dwThinkTime; }
     DWORD GetThinkTime() const { return _dwThinkTime; }
 
-    void SetEnableThinkTime(bool fEnable)   { _fThinkTime = fEnable; }
+    void SetEnableThinkTime(bool fBool)   { _fThinkTime = fBool; }
     bool GetEnableThinkTime() const { return _fThinkTime; }
 
     void SetThreadsPerFile(DWORD dwThreadsPerFile) { _dwThreadsPerFile = dwThreadsPerFile; }
     DWORD GetThreadsPerFile() const { return _dwThreadsPerFile; }
 
-    void SetCreateFile(bool fCreateFile) { _fCreateFile = fCreateFile; }
+    void SetCreateFile(bool fBool) { _fCreateFile = fBool; }
     bool GetCreateFile() const { return _fCreateFile; }
 
     void SetFileSize(UINT64 ullFileSize) { _ullFileSize = ullFileSize; }
@@ -464,10 +667,10 @@ public:
     void SetWriteRatio(UINT32 ulWriteRatio) { _ulWriteRatio = ulWriteRatio; }
     UINT32 GetWriteRatio() const { return _ulWriteRatio; }
 
-    void SetUseParallelAsyncIO(bool fParallelAsyncIO) { _fParallelAsyncIO = fParallelAsyncIO; }
+    void SetUseParallelAsyncIO(bool fBool) { _fParallelAsyncIO = fBool; }
     bool GetUseParallelAsyncIO() const { return _fParallelAsyncIO; }
     
-    void SetUseInterlockedSequential(bool fInterlockedSequential) { _fInterlockedSequential = fInterlockedSequential; }
+    void SetUseInterlockedSequential(bool fBool) { _fInterlockedSequential = fBool; }
     bool GetUseInterlockedSequential() const { return _fInterlockedSequential; }
 
     void SetThreadStrideInBytes(UINT64 ullThreadStride) { _ullThreadStride = ullThreadStride; }
@@ -480,7 +683,7 @@ public:
     }
     PRIORITY_HINT GetIOPriorityHint() const { return _ioPriorityHint; }
 
-    void SetPrecreated(bool fPrecreated) { _fPrecreated = fPrecreated; }
+    void SetPrecreated(bool fBool) { _fPrecreated = fBool; }
     bool GetPrecreated() const { return _fPrecreated; }
 
     void SetThroughput(DWORD dwThroughputBytesPerMillisecond) { _dwThroughputBytesPerMillisecond = dwThroughputBytesPerMillisecond; }
@@ -491,6 +694,43 @@ public:
     bool AllocateAndFillRandomDataWriteBuffer();
     void FreeRandomDataWriteBuffer();
     BYTE* GetRandomDataWriteBuffer();
+
+    DWORD GetCreateFlags(bool fAsync)
+    {
+        DWORD dwFlags = FILE_ATTRIBUTE_NORMAL;
+
+        if (GetSequentialScanHint())
+        {
+            dwFlags |= FILE_FLAG_SEQUENTIAL_SCAN;
+        }
+
+        if (GetRandomAccessHint())
+        {
+            dwFlags |= FILE_FLAG_RANDOM_ACCESS;
+        }
+
+        if (GetTemporaryFileHint())
+        {
+            dwFlags |= FILE_ATTRIBUTE_TEMPORARY;
+        }
+
+        if (GetRequestCount() > 1 || fAsync)
+        {
+            dwFlags |= FILE_FLAG_OVERLAPPED;
+        }
+
+        if (GetCacheMode() == TargetCacheMode::DisableOSCache)
+        {
+            dwFlags |= FILE_FLAG_NO_BUFFERING;
+        }
+
+        if (GetCacheMode() == TargetCacheMode::DisableAllCache)
+        {
+            dwFlags |= (FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH);
+        }
+
+        return dwFlags;
+    }
 
 private:
     string _sPath;
@@ -504,16 +744,18 @@ private:
     UINT64 _ullBaseFileOffset;
     bool _fParallelAsyncIO;
     bool _fInterlockedSequential;
-    bool _fDisableOSCache;
-    bool _fDisableAllCache;
+
+    TargetCacheMode _cacheMode;
     bool _fZeroWriteBuffers;
     DWORD _dwThreadsPerFile;
     UINT64 _ullThreadStride;
 
     bool _fCreateFile;
-    bool _fPrecreated;      // used to track which files have been created before the first timespan and which have to be created later
+    bool _fPrecreated;          // used to track which files have been created before the first timespan and which have to be created later
     UINT64 _ullFileSize;
     UINT64 _ullMaxFileSize;
+
+
     UINT32 _ulWriteRatio;
     bool _fUseBurstSize;    // TODO: "use" or "enable"?; since burst size must be specified with the think time, one variable should be sufficient
     DWORD _dwBurstSize;     // number of IOs in a burst
@@ -522,8 +764,9 @@ private:
     bool _fThinkTime;       //variable to decide whether to think between IOs (default is false)
     DWORD _dwThroughputBytesPerMillisecond; // set to 0 to disable throttling
 
-    bool _fSequentialScanHint;          // open file with the FILE_FLAG_SEQUENTIAL_SCAN hint
-    bool _fRandomAccessHint;            // open file with the FILE_FLAG_RANDOM_ACCESS hint
+    bool _fSequentialScanHint;      // open file with the FILE_FLAG_SEQUENTIAL_SCAN hint
+    bool _fRandomAccessHint;        // open file with the FILE_FLAG_RANDOM_ACCESS hint
+    bool _fTemporaryFileHint;       // open file with the FILE_ATTRIBUTE_TEMPORARY hint
     bool _fUseLargePages;           // Use large pages for IO buffers
 
     UINT64 _cbRandomDataWriteBuffer;            // if > 0, then the write buffer should be filled with random data
@@ -538,6 +781,20 @@ private:
     friend class UnitTests::TargetUnitTests;
 };
 
+class AffinityAssignment
+{
+public:
+    WORD wGroup;
+    BYTE bProc;
+
+    AffinityAssignment() = delete;
+    AffinityAssignment(WORD p_wGroup, BYTE p_bProc) :
+        wGroup(p_wGroup),
+        bProc(p_bProc)
+    {
+    }
+};
+
 class TimeSpan
 {
 public:
@@ -547,7 +804,6 @@ public:
         _ulCoolDown(0),
         _ulRandSeed(0),
         _dwThreadCount(0),
-        _fGroupAffinity(false),
         _fDisableAffinity(false),
         _fCompletionRoutines(false),
         _fMeasureLatency(false),
@@ -556,11 +812,15 @@ public:
     {
     }
 
-    void AddAffinityAssignment(UINT32 ulAffinity)
+    void ClearAffinityAssignment()
     {
-        _vAffinity.push_back(ulAffinity);
+        _vAffinity.clear();
     }
-    vector<UINT32> GetAffinityAssignments() const { return _vAffinity; }
+    void AddAffinityAssignment(WORD wGroup, BYTE bProc)
+    {
+        _vAffinity.emplace_back(wGroup, bProc);
+    }
+    const auto& GetAffinityAssignments() const { return _vAffinity; }
 
     void AddTarget(const Target& target)
     {
@@ -582,9 +842,6 @@ public:
 
     void SetThreadCount(DWORD dwThreadCount) { _dwThreadCount = dwThreadCount; }
     DWORD GetThreadCount() const { return _dwThreadCount; }
-
-    void SetGroupAffinity(bool fGroupAffinity) { _fGroupAffinity = fGroupAffinity; }
-    bool GetGroupAffinity() const { return _fGroupAffinity; }
 
     void SetDisableAffinity(bool fDisableAffinity) { _fDisableAffinity = fDisableAffinity; }
     bool GetDisableAffinity() const { return _fDisableAffinity; }
@@ -611,9 +868,8 @@ private:
     UINT32 _ulCoolDown;
     UINT32 _ulRandSeed;
     DWORD _dwThreadCount;
-    bool _fGroupAffinity;
     bool _fDisableAffinity;
-    vector<UINT32> _vAffinity;
+    vector<AffinityAssignment> _vAffinity;
     bool _fCompletionRoutines;
     bool _fMeasureLatency;
     bool _fCalculateIopsStdDev;
@@ -660,6 +916,11 @@ public:
     {
     }
 
+    void ClearTimeSpans()
+    {
+        _vTimeSpans.clear();
+    }
+
     void AddTimeSpan(const TimeSpan& timeSpan)
     {
         _vTimeSpans.push_back(TimeSpan(timeSpan));
@@ -667,7 +928,7 @@ public:
 
     const vector<TimeSpan>& GetTimeSpans() const { return _vTimeSpans; }
 
-    void SetVerbose(bool fVerbose) { _fVerbose = fVerbose; }
+    void SetVerbose(bool b) { _fVerbose = b; }
     bool GetVerbose() const { return _fVerbose; }
 
     void SetProgress(DWORD dwProgress) { _dwProgress = dwProgress; }
@@ -683,19 +944,19 @@ public:
     PrecreateFiles GetPrecreateFiles() const { return _precreateFiles; }
 
     //ETW
-    void SetEtwEnabled(bool fEtwEnabled)                    { _fEtwEnabled = fEtwEnabled; }
-    void SetEtwProcess(bool fEtwProcess)                    { _fEtwProcess = fEtwProcess; }
-    void SetEtwThread(bool fEtwThread)                      { _fEtwThread = fEtwThread; }
-    void SetEtwImageLoad(bool fEtwImageLoad)                { _fEtwImageLoad = fEtwImageLoad; }
-    void SetEtwDiskIO(bool fEtwDiskIO)                      { _fEtwDiskIO = fEtwDiskIO; }
-    void SetEtwMemoryPageFaults(bool fEtwMemoryPageFaults)  { _fEtwMemoryPageFaults = fEtwMemoryPageFaults; }
-    void SetEtwMemoryHardFaults(bool fEtwMemoryHardFaults)  { _fEtwMemoryHardFaults = fEtwMemoryHardFaults; }
-    void SetEtwNetwork(bool fEtwNetwork)                    { _fEtwNetwork = fEtwNetwork; }
-    void SetEtwRegistry(bool fEtwRegistry)                  { _fEtwRegistry = fEtwRegistry; }
-    void SetEtwUsePagedMemory(bool fEtwUsePagedMemory)      { _fEtwUsePagedMemory = fEtwUsePagedMemory; }
-    void SetEtwUsePerfTimer(bool fEtwUsePerfTimer)          { _fEtwUsePerfTimer = fEtwUsePerfTimer; }
-    void SetEtwUseSystemTimer(bool fEtwUseSystemTimer)      { _fEtwUseSystemTimer = fEtwUseSystemTimer; }
-    void SetEtwUseCyclesCounter(bool fEtwUseCyclesCounter)  { _fEtwUseCyclesCounter = fEtwUseCyclesCounter; }
+    void SetEtwEnabled(bool b)          { _fEtwEnabled = b; }
+    void SetEtwProcess(bool b)          { _fEtwProcess = b; }
+    void SetEtwThread(bool b)           { _fEtwThread = b; }
+    void SetEtwImageLoad(bool b)        { _fEtwImageLoad = b; }
+    void SetEtwDiskIO(bool b)           { _fEtwDiskIO = b; }
+    void SetEtwMemoryPageFaults(bool b) { _fEtwMemoryPageFaults = b; }
+    void SetEtwMemoryHardFaults(bool b) { _fEtwMemoryHardFaults = b; }
+    void SetEtwNetwork(bool b)          { _fEtwNetwork = b; }
+    void SetEtwRegistry(bool b)         { _fEtwRegistry = b; }
+    void SetEtwUsePagedMemory(bool b)   { _fEtwUsePagedMemory = b; }
+    void SetEtwUsePerfTimer(bool b)     { _fEtwUsePerfTimer = b; }
+    void SetEtwUseSystemTimer(bool b)   { _fEtwUseSystemTimer = b; }
+    void SetEtwUseCyclesCounter(bool b) { _fEtwUseCyclesCounter = b; }
 
     bool GetEtwEnabled() const          { return _fEtwEnabled; }
     bool GetEtwProcess() const          { return _fEtwProcess; }
@@ -712,7 +973,7 @@ public:
     bool GetEtwUseCyclesCounter() const { return _fEtwUseCyclesCounter; }
 
     string GetXml() const;
-    bool Validate(bool fSingleSpec) const;
+    bool Validate(bool fSingleSpec, SystemInformation *pSystem = nullptr) const;
     void MarkFilesAsPrecreated(const vector<string> vFiles);
 
 private:
@@ -788,8 +1049,7 @@ public:
 
     //group affinity
     WORD wGroupNum;
-    DWORD dwProcNum;
-    GROUP_AFFINITY GroupAffinity;
+    DWORD bProcNum;
 
     HANDLE hStartEvent;
 

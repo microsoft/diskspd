@@ -34,7 +34,7 @@ SOFTWARE.
 #include <Wmistr.h>		///WNODE_HEADER
 #define INITGUID		//Include this #define to use SystemTraceControlGuid in Evntrace.h.
 #include <Evntrace.h>	//ETW
-#include "..\Common\Common.h"
+#include "Common.h"
 
 BOOL TraceEvents();
 TRACEHANDLE StartETWSession(const Profile& profile);

@@ -36,11 +36,11 @@ SOFTWARE.
 #include <assert.h>
 #include "common.h"
 #include "errors.h"
-#include "..\CmdLineParser\CmdLineParser.h"
-#include "..\XmlProfileParser\XmlProfileParser.h"
-#include "..\IORequestGenerator\IORequestGenerator.h"
-#include "..\ResultParser\ResultParser.h"
-#include "..\XmlResultParser\XmlResultParser.h"
+#include "CmdLineParser.h"
+#include "XmlProfileParser.h"
+#include "IORequestGenerator.h"
+#include "ResultParser.h"
+#include "XmlResultParser.h"
 
 /*****************************************************************************/
 // global variables
@@ -118,7 +118,7 @@ int __cdecl main(int argc, const char* argv[])
 
     CmdLineParser cmdLineParser;
     Profile profile;
-    if (!cmdLineParser.ParseCmdLine(argc, argv, &profile, &synch))
+    if (!cmdLineParser.ParseCmdLine(argc, argv, &profile, &synch, &g_SystemInformation))
     {
         return ERROR_PARSE_CMD_LINE;
     }

@@ -27,17 +27,11 @@ SOFTWARE.
 
 */
 
-// IORequestGenerator.cpp : Defines the entry point for the DLL application.
-//
-
 //FUTURE EXTENSION: make it compile with /W4
 
+// Windows 7
 #ifndef _WIN32_WINNT
-    #define _WIN32_WINNT 0x0600
-#endif
-
-#ifndef _WIN32_IE
-    #define _WIN32_IE    0x0500
+#define _WIN32_WINNT 0x0601
 #endif
 
 #include "common.h"
@@ -53,7 +47,6 @@ SOFTWARE.
 
 #include "etw.h"
 #include <assert.h>
-#include <list>
 #include "ThroughputMeter.h"
 #include "OverlappedQueue.h"
 
@@ -183,7 +176,7 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
 /*****************************************************************************/
 // activates specified privilege in process token
 //
-bool SetPrivilege(LPCSTR pszPrivilege)
+bool SetPrivilege(LPCSTR pszPrivilege, LPCSTR pszErrorPrefix = "ERROR:")
 {
     TOKEN_PRIVILEGES TokenPriv;
     HANDLE hToken = INVALID_HANDLE_VALUE;
@@ -192,7 +185,7 @@ bool SetPrivilege(LPCSTR pszPrivilege)
 
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hToken))
     {
-        PrintError("Error opening process token (error code: %u)\n", GetLastError());
+        PrintError("%s Error opening process token (error code: %u)\n", pszErrorPrefix, GetLastError());
         fOk = false;
         goto cleanup;
     }
@@ -201,21 +194,21 @@ bool SetPrivilege(LPCSTR pszPrivilege)
     TokenPriv.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
     if (!LookupPrivilegeValue(nullptr, pszPrivilege, &TokenPriv.Privileges[0].Luid))
     {
-        PrintError("Error looking up privilege value %s (error code: %u)\n", pszPrivilege, GetLastError());
+        PrintError("%s Error looking up privilege value %s (error code: %u)\n", pszErrorPrefix, pszPrivilege, GetLastError());
         fOk = false;
         goto cleanup;
     }
 
     if (!AdjustTokenPrivileges(hToken, FALSE, &TokenPriv, 0, nullptr, nullptr))
     {
-        PrintError("Error adjusting token privileges for %s (error code: %u)\n", pszPrivilege, GetLastError());
+        PrintError("%s Error adjusting token privileges for %s (error code: %u)\n", pszErrorPrefix, pszPrivilege, GetLastError());
         fOk = false;
         goto cleanup;
     }
 
     if (ERROR_SUCCESS != (dwError = GetLastError()))
     {
-        PrintError("Error adjusting token privileges for %s (error code: %u)\n", pszPrivilege, dwError);
+        PrintError("%s Error adjusting token privileges for %s (error code: %u)\n", pszErrorPrefix, pszPrivilege, dwError);
         fOk = false;
         goto cleanup;
     }
@@ -229,6 +222,73 @@ cleanup:
     return fOk;
 }
 
+BOOL
+DisableLocalCache(
+    HANDLE h
+)
+/*++
+Routine Description:
+
+    Disables local caching of I/O to a file by SMB. All reads/writes will flow to the server.
+
+Arguments:
+
+    h - Handle to the file
+
+Return Value:
+
+    Returns ERROR_SUCCESS (0) on success, nonzero error code on failure.
+
+--*/
+{
+    DWORD BytesReturned = 0;
+    OVERLAPPED Overlapped = { 0 };
+    DWORD Status = ERROR_SUCCESS;
+    BOOL Success = false;
+
+    Overlapped.hEvent = CreateEvent(nullptr, true, false, nullptr);
+    if (!Overlapped.hEvent)
+    {
+        return GetLastError();
+    }
+
+#ifndef FSCTL_DISABLE_LOCAL_BUFFERING
+#define FSCTL_DISABLE_LOCAL_BUFFERING   CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 174, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#endif
+
+    Success = DeviceIoControl(h,
+        FSCTL_DISABLE_LOCAL_BUFFERING,
+        nullptr,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        &Overlapped);
+
+    if (!Success) {
+        Status = GetLastError();
+    }
+
+    if (!Success && Status == ERROR_IO_PENDING)
+    {
+        if (!GetOverlappedResult(h, &Overlapped, &BytesReturned, true))
+        {
+            Status = GetLastError();
+        }
+        else
+        {
+            Status = (DWORD) Overlapped.Internal;
+        }
+    }
+
+    if (Overlapped.hEvent)
+    {
+        CloseHandle(Overlapped.hEvent);
+    }
+
+    return Status;
+}
+
 /*****************************************************************************/
 // structures and global variables
 //
@@ -237,7 +297,6 @@ struct ETWEventCounters g_EtwEventCounters;
 __declspec(align(4)) static LONG volatile g_lRunningThreadsCount = 0;   //must be aligned on a 32-bit boundary, otherwise InterlockedIncrement
                                                                         //and InterlockedDecrement will fail on 64-bit systems
 
-static ULONG volatile g_ulProcCount = 0;        //number of CPUs present in the system
 static BOOL volatile g_bRun;                    //used for letting threads know that they should stop working
 
 typedef NTSTATUS (__stdcall *NtQuerySysInfo)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
@@ -255,155 +314,13 @@ __declspec(align(4)) static LONG volatile g_lGeneratorRunning = 0;  //used to de
 
 static BOOL volatile g_bError = FALSE;                              //true means there was fatal error during intialization and threads shouldn't perform their work
 
-/*****************************************************************************/
-//structure and functions to get system groups and processors information
-#define MAXIMUM_GROUPS_LARGE 32
-
-typedef struct {
-    WORD wActiveGroupCount;                             //number of groups in the system
-    DWORD dwaActiveProcsCount[MAXIMUM_GROUPS_LARGE];    //number of processors per group
-} ACTIVE_GROUPS_AND_PROCS, *PACTIVE_GROUPS_AND_PROCS;
-
-PACTIVE_GROUPS_AND_PROCS g_pActiveGroupsAndProcs;
-
-//Win7 kernel32.dll groups and processors exported functions
-#define GET_ACTIVE_PROCESSOR_GROUP_COUNT ("GetActiveProcessorGroupCount")
-#define GET_ACTIVE_PROCESSOR_COUNT ("GetActiveProcessorCount")
-#define SET_THREAD_GROUP_AFFINITY ("SetThreadGroupAffinity")
-
-typedef WORD (WINAPI *PFN_GET_ACTIVE_PROCESSOR_GROUP_COUNT) (VOID);
-typedef DWORD (WINAPI *PFN_GET_ACTIVE_PROCESSOR_COUNT) (WORD GroupNumber);
-typedef DWORD (WINAPI *PFN_SET_THREAD_GROUP_AFFINITY) (HANDLE hThread, const GROUP_AFFINITY * pGroupAffinity, PGROUP_AFFINITY PreviousGroupAffinity);
-
-bool IORequestGenerator::_GetActiveGroupsAndProcs() const
-{
-    HMODULE kernel32;
-    PFN_GET_ACTIVE_PROCESSOR_GROUP_COUNT GetActiveProcessorGroupCount;
-    PFN_GET_ACTIVE_PROCESSOR_COUNT GetActiveProcessorCount;
-    WORD wActiveGroupCtr = 0;
-    SYSTEM_INFO SystemInfo;
-
-    //load kernel32.dll
-    kernel32 = LoadLibraryExW(L"kernel32.dll", NULL, 0);
-    if (kernel32 == NULL)
-    {
-        PrintError("ERROR: kernel32.dll library failed to load!\r\n");
-        return false;
-    }
-
-    //get function address from kernel32.dll for groups
-    GetActiveProcessorGroupCount = (PFN_GET_ACTIVE_PROCESSOR_GROUP_COUNT)GetProcAddress(kernel32, GET_ACTIVE_PROCESSOR_GROUP_COUNT);
-
-    if (GetActiveProcessorGroupCount != NULL)
-    {
-        g_pActiveGroupsAndProcs->wActiveGroupCount = GetActiveProcessorGroupCount();
-
-        //verify that group count number is not bigger than maximume groups supported by the OS
-        if (g_pActiveGroupsAndProcs->wActiveGroupCount > MAXIMUM_GROUPS_LARGE)
-        {
-            PrintError("ERROR: pActiveGroupsAndProcs->wActiveGroupCount = %d\r\n", g_pActiveGroupsAndProcs->wActiveGroupCount);
-            PrintError("ERROR: Incorrect value; there can be max %d groups in the system\r\n", MAXIMUM_GROUPS_LARGE);
-            return false;
-        }
-
-        //get function address from kernel32.dll for processors per group
-        GetActiveProcessorCount = (PFN_GET_ACTIVE_PROCESSOR_COUNT)GetProcAddress(kernel32, GET_ACTIVE_PROCESSOR_COUNT);
-
-        if (GetActiveProcessorCount != NULL)
-        {
-            g_ulProcCount = 0;
-
-            //get number of processors per group
-            for (wActiveGroupCtr = 0; wActiveGroupCtr < g_pActiveGroupsAndProcs->wActiveGroupCount; wActiveGroupCtr++)
-            {
-                g_pActiveGroupsAndProcs->dwaActiveProcsCount[wActiveGroupCtr] = 
-                    GetActiveProcessorCount(wActiveGroupCtr);
-                g_ulProcCount += g_pActiveGroupsAndProcs->dwaActiveProcsCount[wActiveGroupCtr];
-            }
-        }
-        else
-        {
-            PrintError("ERROR: GetActiveProcessorCount address not obtained with error: %d.!\r\n", GetLastError());
-            return false;
-        }
-    }
-    else
-    {
-        g_pActiveGroupsAndProcs->wActiveGroupCount = 1;
-        g_pActiveGroupsAndProcs->dwaActiveProcsCount[0] = 0;
-
-        GetSystemInfo(&SystemInfo);
-        g_pActiveGroupsAndProcs->dwaActiveProcsCount[0] = SystemInfo.dwNumberOfProcessors;
-        g_ulProcCount = g_pActiveGroupsAndProcs->dwaActiveProcsCount[0];
-
-        if (g_ulProcCount < 1)
-        {
-            PrintError("ERROR: Processor count = %d\n", g_pActiveGroupsAndProcs->dwaActiveProcsCount[0]);
-            PrintError("ERROR: Incorrect value; there has to be at least 1 processor in the system\n");
-            return false;
-        }
-    }
-    if (g_pActiveGroupsAndProcs->wActiveGroupCount > 1 || g_ulProcCount > 64)
-    {
-        PrintError("WARNING: Complete CPU utilization cannot currently be gathered within DISKSPD for this system.\n"
-            "         Use alternate mechanisms to gather this data such as perfmon/logman.\n"
-            "         Active KGroups %u > 1 and/or processor count %u > 64.\n",
-            g_pActiveGroupsAndProcs->wActiveGroupCount,
-            g_ulProcCount);
-    }
-    return true;
-}
-
-VOID SetProcGroupMask(WORD wGroupNum, DWORD dwProcNum, GROUP_AFFINITY *pGroupAffinity)
+VOID SetProcGroupMask(WORD wGroupNum, DWORD dwProcNum, PGROUP_AFFINITY pGroupAffinity)
 {
     //must zero this structure first, otherwise it fails to set affinity
     memset(pGroupAffinity, 0, sizeof(GROUP_AFFINITY));
 
-    pGroupAffinity->Group = (USHORT)wGroupNum;
+    pGroupAffinity->Group = wGroupNum;
     pGroupAffinity->Mask = (KAFFINITY)1<<dwProcNum;
-}
-
-BOOL SetThreadGroupAndProcAffinity(HANDLE hThread, const GROUP_AFFINITY *pGroupAffinity, PGROUP_AFFINITY pPreviousGroupAffinity)
-{
-    HMODULE kernel32;
-    PFN_SET_THREAD_GROUP_AFFINITY SetThreadGroupAffinity;
-    DWORD_PTR dwpPrevMask;
-    BOOL bStatus;
-
-    //load kernel32.dll
-    kernel32 = LoadLibraryExW(L"kernel32.dll", NULL, 0);
-    if (kernel32 == NULL)
-    {
-        PrintError("ERROR: kernel32.dll library failed to load!\r\n");
-        return FALSE;
-    }
-
-    //get function address from kernel32.dll 
-    SetThreadGroupAffinity = (PFN_SET_THREAD_GROUP_AFFINITY)GetProcAddress(
-        kernel32, SET_THREAD_GROUP_AFFINITY);
-
-    if (SetThreadGroupAffinity != NULL)
-    {
-        bStatus = SetThreadGroupAffinity(hThread, pGroupAffinity, pPreviousGroupAffinity);
-        if (bStatus == FALSE)
-        {
-            PrintError("ERROR: SetThreadGroupAffinity failed with error: %d.!\r\n", GetLastError());
-            return FALSE;
-        }
-
-        return TRUE;
-    }
-    else
-    {
-        dwpPrevMask = SetThreadAffinityMask(hThread, (DWORD_PTR)(pGroupAffinity->Mask));
-        if (dwpPrevMask == 0)
-        {
-            PrintError("ERROR: SetThreadAffinityMask failed with error: %d.!\r\n", GetLastError());
-            return FALSE;
-        }
-
-        return TRUE;
-    }
 }
 
 /*****************************************************************************/
@@ -536,30 +453,6 @@ bool IORequestGenerator::_LoadDLLs()
     }
 
     return true;
-}
-
-/*****************************************************************************/
-// returns the number of CPUs present in the system
-//
-static ULONG getProcessorCount()
-{
-  SYSTEM_INFO SystemInfo;
-
-  // get system information
-  GetSystemInfo(&SystemInfo);
-
-  // and extract number or processors from there
-  return (ULONG)SystemInfo.dwNumberOfProcessors; 
-}
-
-/*****************************************************************************/
-// returns affinity mask
-//
-static DWORD_PTR getCPUMask(ULONG ulProcNum)
-{
-    assert(ulProcNum < 8 * sizeof(DWORD_PTR));
-
-    return ((DWORD_PTR)1) << ulProcNum;
 }
 
 /*****************************************************************************/
@@ -1085,82 +978,16 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     //set random seed (each thread has a different one)
     srand(p->ulRandSeed);
 
-    //affinity
-    ULONG ulGroupProcs = 0;
-    if (!p->pTimeSpan->GetGroupAffinity())
+    // apply affinity. The specific assignment is provided in the thread profile up front.
+    if (!p->pTimeSpan->GetDisableAffinity())
     {
-        assert(g_ulProcCount > 0);
-        ulGroupProcs = getProcessorCount();
-    }
+        GROUP_AFFINITY GroupAffinity;
 
-    //simple affinity
-    if (!p->pTimeSpan->GetDisableAffinity() && (p->pTimeSpan->GetAffinityAssignments().size() == 0) && !p->pTimeSpan->GetGroupAffinity())
-    {
-        HANDLE hThread = GetCurrentThread();
-        ULONG ulProcNum = p->ulThreadNo % ulGroupProcs;
-        printfv(p->pProfile->GetVerbose(), "affinitizing thread %u to CPU%u\n", p->ulThreadNo, ulProcNum);
-
-        // set thread affinity
-        if (0 == SetThreadAffinityMask(hThread, getCPUMask(ulProcNum)))
-        {
-            PrintError("Error setting affinity mask in thread %u\n", p->ulThreadNo);
-            fOk = false;
-            goto cleanup;
-        }
-
-        // set thread ideal processor
-        if ((DWORD)-1 == SetThreadIdealProcessor(hThread, ulProcNum))
-        {
-            PrintError("Error setting ideal processor in thread %u\n", p->ulThreadNo);
-            fOk = false;
-            goto cleanup;
-        }
-    }
-
-    //advanced affinity
-    if (!p->pTimeSpan->GetDisableAffinity() && (p->pTimeSpan->GetAffinityAssignments().size() > 0) && !p->pTimeSpan->GetGroupAffinity())
-    {
-        vector<UINT32> vAffinity(p->pTimeSpan->GetAffinityAssignments());
-
-        ULONG ulProcNum = p->ulThreadNo % vAffinity.size();
-        UINT32 proc = vAffinity[ulProcNum];
-
-        assert(proc < g_ulProcCount);
-        if (ulProcNum >= g_ulProcCount)
-        {
-            PrintError("Invalid affinity mask (CPU id cannot be larger than the number of CPUs in the system)\n");
-            fOk = false;
-            goto cleanup;
-        }
-
-        printfv(p->pProfile->GetVerbose(), "affinitizing thread %u to CPU%u\n", p->ulThreadNo, proc);
+        printfv(p->pProfile->GetVerbose(), "affinitizing thread %u to Group %u / CPU %u\n", p->ulThreadNo, p->wGroupNum, p->bProcNum);
+        SetProcGroupMask(p->wGroupNum, p->bProcNum, &GroupAffinity);
 
         HANDLE hThread = GetCurrentThread();
-
-        // set thread affinity
-        if (0 == SetThreadAffinityMask(hThread, getCPUMask(proc)))
-        {
-            PrintError("Error setting affinity mask in thread %u\n", p->ulThreadNo);
-            fOk = false;
-            goto cleanup;
-        }
-
-        // set thread ideal processor
-        if ((DWORD)-1 == SetThreadIdealProcessor(hThread, proc))
-        {
-            PrintError("Error setting ideal processor in thread %u\n", p->ulThreadNo);
-            fOk = false;
-            goto cleanup;
-        }
-    }
-
-    //group affinity
-    if (!p->pTimeSpan->GetDisableAffinity() && (p->pTimeSpan->GetAffinityAssignments().size() == 0) && p->pTimeSpan->GetGroupAffinity())
-    {
-        SetProcGroupMask(p->wGroupNum, p->dwProcNum, &p->GroupAffinity);
-
-        HANDLE hThread = GetCurrentThread();
-        if (SetThreadGroupAndProcAffinity(hThread, &p->GroupAffinity, nullptr) == FALSE)
+        if (SetThreadGroupAffinity(hThread, &GroupAffinity, nullptr) == FALSE)
         {
             PrintError("Error setting affinity mask in thread %u\n", p->ulThreadNo);
             fOk = false;
@@ -1226,34 +1053,8 @@ DWORD WINAPI threadFunc(LPVOID cookie)
             fname = sPath.c_str();
         }
 
-        //set file flags
-        DWORD dwFlags = FILE_ATTRIBUTE_NORMAL;
-
-        if (pTarget->GetSequentialScanHint())
-        {
-            dwFlags |= FILE_FLAG_SEQUENTIAL_SCAN;
-        }
-
-        if (pTarget->GetRandomAccessHint())
-        {
-            dwFlags |= FILE_FLAG_RANDOM_ACCESS;
-        }
-
-        if ((pTarget->GetRequestCount() > 1) || (p->vTargets.size() > 1))
-        {
-            dwFlags |= FILE_FLAG_OVERLAPPED;
-        }
-
-        if (pTarget->GetDisableOSCache())
-        {
-            dwFlags |= FILE_FLAG_NO_BUFFERING;
-        }
-
-        if (pTarget->GetDisableAllCache())
-        {
-            dwFlags |= (FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH);
-        }
-
+        // get/set file flags
+        DWORD dwFlags = pTarget->GetCreateFlags(p->vTargets.size() > 1);
         DWORD dwDesiredAccess = 0;
         if (pTarget->GetWriteRatio() == 0)
         {
@@ -1273,7 +1074,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             nullptr,        //security
             OPEN_EXISTING,
-            dwFlags,        //flags (add overlapping)
+            dwFlags,        //flags
             nullptr);       //template file
         if (INVALID_HANDLE_VALUE == hFile)
         {
@@ -1281,6 +1082,17 @@ DWORD WINAPI threadFunc(LPVOID cookie)
             PrintError("Error opening file: %s [%u]\n", sPath.c_str(), GetLastError());
             fOk = false;
             goto cleanup;
+        }
+
+        if (pTarget->GetCacheMode() == TargetCacheMode::DisableLocalCache)
+        {
+            DWORD Status = DisableLocalCache(hFile);
+            if (Status != ERROR_SUCCESS)
+            {
+                PrintError("Failed to disable local caching (error %u). NOTE: only supported on remote filesystems with Windows 8 or newer.\n", Status);
+                fOk = false;
+                goto cleanup;
+            }
         }
 
         p->vhTargets.push_back(hFile);
@@ -1586,12 +1398,13 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     else
     {
         //
-        // create IO completion port
+        // create IO completion port if not doing completion routines
         //
-        for (unsigned int i = 0; i < p->vTargets.size(); i++)
+        if (!p->pTimeSpan->GetCompletionRoutines())
         {
-            if (!p->pTimeSpan->GetCompletionRoutines())
+            for (unsigned int i = 0; i < p->vTargets.size(); i++)
             {
+
                 hCompletionPort = CreateIoCompletionPort(p->vhTargets[i], hCompletionPort, 0, 1);
                 if (nullptr == hCompletionPort)
                 {
@@ -1814,7 +1627,7 @@ bool IORequestGenerator::_CreateFile(UINT64 ullFileSize, const char *pszFilename
     printfv(fVerbose, "Creating file '%s' of size %I64u.\n", pszFilename, ullFileSize);
 
     //enable SE_MANAGE_VOLUME_NAME privilege, required to set valid size of a file
-    if (!SetPrivilege(SE_MANAGE_VOLUME_NAME))
+    if (!SetPrivilege(SE_MANAGE_VOLUME_NAME, "WARNING:"))
     {
         PrintError("WARNING: Could not set privileges for setting valid file size; will use a slower method of preparing the file\n", GetLastError());
         fSlowWrites = true;
@@ -1829,14 +1642,14 @@ bool IORequestGenerator::_CreateFile(UINT64 ullFileSize, const char *pszFilename
         PrintError("WARNING: Could not create intermediate directory (error code: %u)\n", dwError);
     }
 
-    //create handle to the file
+    // create handle to the file
     HANDLE hFile = CreateFile(pszFilename,
-                              GENERIC_WRITE,
-                              FILE_SHARE_WRITE,
-                              NULL,                        //security
+                              GENERIC_READ | GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              nullptr,
                               CREATE_ALWAYS,
-                              FILE_ATTRIBUTE_NORMAL,        //flags
-                              NULL);                        //template file
+                              FILE_ATTRIBUTE_NORMAL,
+                              nullptr);
     if (INVALID_HANDLE_VALUE == hFile)
     {
         PrintError("Could not create the file (error code: %u)\n", GetLastError());
@@ -1919,18 +1732,21 @@ bool IORequestGenerator::_CreateFile(UINT64 ullFileSize, const char *pszFilename
                 {
                     ulBufSize = (UINT32)ullRemainSize;
                 }
+
                 if (!WriteFile(hFile, &vBuf[0], ulBufSize, &dwBytesWritten, NULL))
                 {
                     PrintError("Error while writng during file creation (error code: %u)\n", GetLastError());
                     CloseHandle(hFile);
                     return false;
                 }
+
                 if (dwBytesWritten != ulBufSize)
                 {
                     PrintError("Improperly written data during file creation\n");
                     CloseHandle(hFile);
                     return false;
                 }
+
                 ullRemainSize -= ulBufSize;
             }
         }
@@ -1947,7 +1763,7 @@ bool IORequestGenerator::_CreateFile(UINT64 ullFileSize, const char *pszFilename
 
     CloseHandle(hFile);
 
-    return TRUE;
+    return true;
 }
 
 /*****************************************************************************/
@@ -2016,9 +1832,7 @@ bool IORequestGenerator::_StopETW(bool fUseETW, TRACEHANDLE hTraceSession) const
 //
 void IORequestGenerator::_InitializeGlobalParameters()
 {
-//    g_vThreadResults.clear(); // TODO: remove
     g_lRunningThreadsCount = 0;     //number of currently running worker threads
-    g_ulProcCount = 0;              //number of CPUs present in the system
     g_bRun = TRUE;                  //used for letting threads know that they should stop working
 
     g_bThreadError = FALSE;         //true means that an error has occured in one of the threads
@@ -2026,8 +1840,6 @@ void IORequestGenerator::_InitializeGlobalParameters()
 
     _hNTDLL = nullptr;              //handle to ntdll.dll
     g_bError = FALSE;               //true means there was fatal error during intialization and threads shouldn't perform their work
-
-    g_pActiveGroupsAndProcs = NULL; // structure with KGroup info
 }
 
 bool IORequestGenerator::_PrecreateFiles(Profile& profile) const
@@ -2102,19 +1914,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 
     memset(&g_EtwEventCounters, 0, sizeof(struct ETWEventCounters));  // reset all etw event counters
 
-    //ulProcCount = getProcessorCount();
-    g_pActiveGroupsAndProcs = (PACTIVE_GROUPS_AND_PROCS)malloc(sizeof(ACTIVE_GROUPS_AND_PROCS));
-    if (g_pActiveGroupsAndProcs == NULL)
-    {
-        PrintError("ERROR: Memory allocation for groups and procs structure failed!\r\n");
-        return false;
-    }
-    if (_GetActiveGroupsAndProcs() == false)
-    {
-        PrintError("ERROR: Failed to get groups and processors information!\r\n");
-        return false;
-    }
-
     bool fUseETW = false;            //true if user wants ETW
 
     //
@@ -2146,21 +1945,20 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         if ((i->GetFileSize() > 0) && (i->GetPrecreated() == false))
         {
             string str = i->GetPath();
-            const char *filename = str.c_str();
-            if (NULL == filename || NULL == *(filename))
+            if (str.empty())
             {
                 PrintError("You have to provide a filename\n");
                 return false;
             }
 
             //skip physical drives and partitions
-            if ('#' == filename[0] || (':' == filename[1] && 0 == filename[2]))
+            if ('#' == str[0] || (':' == str[1] && '\0' == str[2]))
             {
                 continue;
             }
 
             //create only regular files
-            if (!_CreateFile(i->GetFileSize(), filename, i->GetZeroWriteBuffers(), profile.GetVerbose()))
+            if (!_CreateFile(i->GetFileSize(), str.c_str(), i->GetZeroWriteBuffers(), profile.GetVerbose()))
             {
                 return false;
             }
@@ -2183,9 +1981,9 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //
     // allocate memory for performance counters
     //
-    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfInit(g_ulProcCount);
-    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfDone(g_ulProcCount);
-    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfDiff(g_ulProcCount);
+    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfInit(g_SystemInformation.processorTopology._ulProcCount);
+    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfDone(g_SystemInformation.processorTopology._ulProcCount);
+    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfDiff(g_SystemInformation.processorTopology._ulProcCount);
 
     //
     //create start event
@@ -2216,8 +2014,12 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //
 
     g_bRun = TRUE;
+
+    // gather affinity information, and move to the first active processor
+    const auto& vAffinity = timeSpan.GetAffinityAssignments();
     WORD wGroupCtr = 0;
-    DWORD dwProcCtr = 0;
+    BYTE bProcCtr = 0;
+    g_SystemInformation.processorTopology.GetActiveGroupProcessor(wGroupCtr, bProcCtr, false);
 
     volatile bool fAccountingOn = false;
     UINT64 ullStartTime;    //start time
@@ -2294,27 +2096,24 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         cookie->ulRandSeed = timeSpan.GetRandSeed() + iThread;  // each thread has a different random seed
 
         //Set thread group and proc affinity
-        if (timeSpan.GetGroupAffinity())
+
+        // Default: Round robin cores in order of groups, starting at group 0.
+        //          Fill each group before moving to next.
+        if (vAffinity.size() == 0)
         {
             cookie->wGroupNum = wGroupCtr;
-            cookie->dwProcNum = dwProcCtr;
+            cookie->bProcNum = bProcCtr;
 
-            if (dwProcCtr == g_pActiveGroupsAndProcs->dwaActiveProcsCount[wGroupCtr] - 1)
-            {
-                dwProcCtr = 0;
-                if (wGroupCtr == g_pActiveGroupsAndProcs->wActiveGroupCount - 1)
-                {
-                    wGroupCtr = 0;
-                }
-                else
-                {
-                    wGroupCtr++;
-                }
-            }
-            else
-            {
-                dwProcCtr++;
-            }
+            // advance to next active
+            g_SystemInformation.processorTopology.GetActiveGroupProcessor(wGroupCtr, bProcCtr, true);
+        }
+        // Assigned affinity. Round robin through the assignment list.
+        else
+        {
+            ULONG i = iThread % vAffinity.size();
+
+            cookie->wGroupNum = vAffinity[i].wGroup;
+            cookie->bProcNum = vAffinity[i].bProc;
         }
 
         //create thread
@@ -2336,11 +2135,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         //store handle to the thread
         vhThreads[iThread] = hThread;
     }
-    //
-    // affinitize thread to first cpu
-    // (otherwise, because of bios bugs, RDTSC readings may be not accurate)
-    //
-    SetThreadAffinityMask(GetCurrentThread(), 1);    //FUTURE EXTENSION: check if it is set correctly, on the end/error set the affinity (and priority) to original
 
     //FUTURE EXTENSION: SetPriorityClass HIGH/ABOVE_NORMAL
     //FUTURE EXTENSION: lower priority so the worker threads will initialize (-2)
@@ -2434,7 +2228,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         //
         // read performance counters
         //
-        if (_GetSystemPerfInfo(&vPerfInit[0], g_ulProcCount) == FALSE)
+        if (_GetSystemPerfInfo(&vPerfInit[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
         {
             PrintError("Error reading performance counters\n");
             _StopETW(fUseETW, hTraceSession);
@@ -2494,7 +2288,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             pSynch->pfnCallbackTestFinished();
         }
 
-        if (_GetSystemPerfInfo(&vPerfDone[0], g_ulProcCount) == FALSE)
+        if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
         {
             PrintError("Error getting performance counters\n");
             _StopETW(fUseETW, hTraceSession);
@@ -2596,7 +2390,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //
     // compute time spent by each cpu
     //
-    for (unsigned int p = 0; p<g_ulProcCount; ++p)
+    for (unsigned int p = 0; p < g_SystemInformation.processorTopology._ulProcCount; ++p)
     {
         assert(vPerfDone[p].IdleTime.QuadPart >= vPerfInit[p].IdleTime.QuadPart);
         assert(vPerfDone[p].KernelTime.QuadPart >= vPerfInit[p].KernelTime.QuadPart);
@@ -2643,11 +2437,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         results.EtwMask.bUsePerfTimer = profile.GetEtwUsePerfTimer();
         results.EtwMask.bUseSystemTimer = profile.GetEtwUseSystemTimer();
         results.EtwMask.bUseCyclesCounter = profile.GetEtwUseCyclesCounter();
-    }
-
-    if (g_pActiveGroupsAndProcs != nullptr)
-    {
-        free(g_pActiveGroupsAndProcs);
     }
 
     // free memory used by random data write buffers

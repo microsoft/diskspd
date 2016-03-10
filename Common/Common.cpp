@@ -29,6 +29,8 @@ SOFTWARE.
 
 #include "Common.h"
 
+SystemInformation g_SystemInformation;
+
 UINT64 PerfTimer::GetTime()
 {
     LARGE_INTEGER li;
@@ -112,13 +114,20 @@ string Target::GetXml() const
 
     sXml += _fSequentialScanHint ? "<SequentialScan>true</SequentialScan>\n" : "<SequentialScan>false</SequentialScan>\n";
     sXml += _fRandomAccessHint ? "<RandomAccess>true</RandomAccess>\n" : "<RandomAccess>false</RandomAccess>\n";
+    sXml += _fTemporaryFileHint ? "<TemporaryFile>true</TemporaryFile>\n" : "<TemporaryFile>false</TemporaryFile>\n";
     sXml += _fUseLargePages ? "<UseLargePages>true</UseLargePages>\n" : "<UseLargePages>false</UseLargePages>\n";
-    sXml += _fDisableAllCache ? "<DisableAllCache>true</DisableAllCache>\n" : "<DisableAllCache>false</DisableAllCache>\n";
-    // normalize cache controls - disabling the OS cache is included if all caches are disabled,
-    // so specifying it twice is not neccesary (this generates a warning on the cmdline)
-    if (!_fDisableAllCache)
-    {
-        sXml += _fDisableOSCache ? "<DisableOSCache>true</DisableOSCache>\n" : "<DisableOSCache>false</DisableOSCache>\n";
+
+    // TargetCacheMode::Cached is implied default
+    switch (_cacheMode) {
+    case TargetCacheMode::DisableAllCache:
+        sXml += "<DisableAllCache>true</DisableAllCache>\n";
+        break;
+    case TargetCacheMode::DisableLocalCache:
+        sXml += "<DisableLocalCache>true</DisableLocalCache>\n";
+        break;
+    case TargetCacheMode::DisableOSCache:
+        sXml += "<DisableOSCache>true</DisableOSCache>\n";
+        break;
     }
     
     sXml += "<WriteBufferContent>\n";
@@ -217,7 +226,6 @@ string Target::GetXml() const
 
     sXml += "</Target>\n";
 
-
     return sXml;
 }
 
@@ -313,7 +321,7 @@ BYTE* Target::GetRandomDataWriteBuffer()
     // leave enough bytes in the buffer for one block
     size_t randomOffset = rand() % (cbBuffer - (cbBlock - 1));
 
-    bool fUnbufferedIO = (GetDisableOSCache() || GetDisableAllCache());
+    bool fUnbufferedIO = (_cacheMode == TargetCacheMode::DisableAllCache || _cacheMode == TargetCacheMode::DisableOSCache);
     if (fUnbufferedIO)
     {
         // for unbuffered IO, offset in the buffer needs to be DWORD-aligned
@@ -341,7 +349,6 @@ string TimeSpan::GetXml() const
     sXml += _fMeasureLatency ? "<MeasureLatency>true</MeasureLatency>\n" : "<MeasureLatency>false</MeasureLatency>\n";
     sXml += _fCalculateIopsStdDev ? "<CalculateIopsStdDev>true</CalculateIopsStdDev>\n" : "<CalculateIopsStdDev>false</CalculateIopsStdDev>\n";
     sXml += _fDisableAffinity ? "<DisableAffinity>true</DisableAffinity>\n" : "<DisableAffinity>false</DisableAffinity>\n";
-    sXml += _fGroupAffinity ? "<GroupAffinity>true</GroupAffinity>\n" : "<GroupAffinity>false</GroupAffinity>\n";
 
     sprintf_s(buffer, _countof(buffer), "<Duration>%u</Duration>\n", _ulDuration);
     sXml += buffer;
@@ -364,9 +371,9 @@ string TimeSpan::GetXml() const
     if (_vAffinity.size() > 0)
     {
         sXml += "<Affinity>\n";
-        for (auto a : _vAffinity)
+        for (const auto& a : _vAffinity)
         {
-            sprintf_s(buffer, _countof(buffer), "<AffinityAssignment>%u</AffinityAssignment>\n", a);
+            sprintf_s(buffer, _countof(buffer), "<AffinityGroupAssignment Group=\"%u\" Processor=\"%u\"/>\n", a.wGroup, a.bProc);
             sXml += buffer;
         }
         sXml += "</Affinity>\n";
@@ -465,143 +472,196 @@ void Profile::MarkFilesAsPrecreated(const vector<string> vFiles)
     }
 }
 
-bool Profile::Validate(bool fSingleSpec) const
+bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 {
     bool fOk = true;
-    for (const auto& timeSpan : GetTimeSpans())
+
+    // Note that if no SystemInformation is provided, we do not verify the profile
+    // v. the system content. This is used to limit code churn in the UT.
+
+    if (pSystem != nullptr &&
+        (pSystem->processorTopology._vProcessorGroupInformation.size() > 1 || pSystem->processorTopology._ulProcCount > 64))
     {
-        if (timeSpan.GetDisableAffinity() && timeSpan.GetAffinityAssignments().size() > 0)
+        fprintf(stderr, "WARNING: Complete CPU utilization cannot currently be gathered within DISKSPD for this system.\n"
+            "         Use alternate mechanisms to gather this data such as perfmon/logman.\n"
+            "         Active KGroups %u > 1 and/or processor count %u > 64.\n",
+            (int) pSystem->processorTopology._vProcessorGroupInformation.size(),
+            pSystem->processorTopology._ulProcCount);
+    }
+
+    if (GetTimeSpans().size() == 0)
+    {
+        fprintf(stderr, "ERROR: no timespans specified\n");
+        fOk = false;
+    }
+    else
+    {
+        for (const auto& timeSpan : GetTimeSpans())
         {
-            fprintf(stderr, "ERROR: -n and -a parameters cannot be used together\n");
-            fOk = false;
-        }
-
-        for (const auto& target : timeSpan.GetTargets())
-        {
-            const bool targetHasMultipleThreads = (timeSpan.GetThreadCount() > 1) || (target.GetThreadsPerFile() > 1);
-
-            if (timeSpan.GetThreadCount() > 0 && target.GetThreadsPerFile() > 1)
+            if (pSystem != nullptr)
             {
-                fprintf(stderr, "ERROR: -F and -t parameters cannot be used together\n");
+                for (const auto& Affinity : timeSpan.GetAffinityAssignments())
+                {
+                    if (Affinity.wGroup >= pSystem->processorTopology._vProcessorGroupInformation.size())
+                    {
+                        fprintf(stderr, "ERROR: affinity assignment to group %u; system only has %u groups\n",
+                            Affinity.wGroup,
+                            (int) pSystem->processorTopology._vProcessorGroupInformation.size());
+
+                        fOk = false;
+
+                    }
+                    if (fOk && !pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].IsProcessorValid(Affinity.bProc))
+                    {
+                        fprintf(stderr, "ERROR: affinity assignment to group %u core %u not possible; group only has %u cores\n",
+                            Affinity.wGroup,
+                            Affinity.bProc,
+                            pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup]._maximumProcessorCount);
+
+                        fOk = false;
+                    }
+
+                    if (fOk && !pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].IsProcessorActive(Affinity.bProc))
+                    {
+                        fprintf(stderr, "ERROR: affinity assignment to group %u core %u not possible; core is not active (current mask 0x%I64x)\n",
+                            Affinity.wGroup,
+                            Affinity.bProc,
+                            pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup]._activeProcessorMask);
+
+                        fOk = false;
+                    }
+                }
+            }
+
+            if (timeSpan.GetDisableAffinity() && timeSpan.GetAffinityAssignments().size() > 0)
+            {
+                fprintf(stderr, "ERROR: -n and -a parameters cannot be used together\n");
                 fOk = false;
             }
 
-            if (target.GetDisableAllCache() && target.GetDisableOSCache())
+            for (const auto& target : timeSpan.GetTargets())
             {
-                fprintf(stderr, "WARNING: -S is included in the effect of -h, specifying both is not required\n");
-            }
+                const bool targetHasMultipleThreads = (timeSpan.GetThreadCount() > 1) || (target.GetThreadsPerFile() > 1);
 
-            if (target.GetThroughputInBytesPerMillisecond() > 0 && timeSpan.GetCompletionRoutines())
-            {
-                fprintf(stderr, "ERROR: -g throughput control cannot be used with -x completion routines\n");
-                fOk = false;
-            }
+                if (timeSpan.GetThreadCount() > 0 && target.GetThreadsPerFile() > 1)
+                {
+                    fprintf(stderr, "ERROR: -F and -t parameters cannot be used together\n");
+                    fOk = false;
+                }
 
-            //  If burst size is specified think time must be specified and If think time is specified burst size should be non zero
-            if ((target.GetThinkTime() == 0 && target.GetBurstSize() > 0) || (target.GetThinkTime() > 0 && target.GetBurstSize() == 0))
-            {
-                fprintf(stderr, "ERROR: need to specify -j<think time> with -i<burst size>\n");
-                fOk = false;
-            }
+                if (target.GetThroughputInBytesPerMillisecond() > 0 && timeSpan.GetCompletionRoutines())
+                {
+                    fprintf(stderr, "ERROR: -g throughput control cannot be used with -x completion routines\n");
+                    fOk = false;
+                }
 
-            // FIXME: we can no longer do this check, because the target no longer
-            // contains a property that uniquely identifies the case where "-s" or <StrideSize>
-            // was passed.  
+                //  If burst size is specified think time must be specified and If think time is specified burst size should be non zero
+                if ((target.GetThinkTime() == 0 && target.GetBurstSize() > 0) || (target.GetThinkTime() > 0 && target.GetBurstSize() == 0))
+                {
+                    fprintf(stderr, "ERROR: need to specify -j<think time> with -i<burst size>\n");
+                    fOk = false;
+                }
+
+                // FIXME: we can no longer do this check, because the target no longer
+                // contains a property that uniquely identifies the case where "-s" or <StrideSize>
+                // was passed.  
 #if 0
-            if (target.GetUseRandomAccessPattern() && target.GetEnableCustomStrideSize())
-            {
-                fprintf(stderr, "WARNING: -s is ignored if -r is provided\n");
-            }
+                if (target.GetUseRandomAccessPattern() && target.GetEnableCustomStrideSize())
+                {
+                    fprintf(stderr, "WARNING: -s is ignored if -r is provided\n");
+                }
 #endif
-            if (target.GetUseRandomAccessPattern())
-            {
-                if (target.GetThreadStrideInBytes() > 0)
-                {
-                    fprintf(stderr, "ERROR: -T conflicts with -r\n");
-                    fOk = false;
-                    // although ullThreadStride==0 is a valid value, it's interpreted as "not provided" for this warning
-                }
-
-                if (target.GetUseInterlockedSequential())
-                {
-                    fprintf(stderr, "ERROR: -si conflicts with -r\n");
-                    fOk = false;
-                }
-
-                if (target.GetUseParallelAsyncIO())
-                {
-                    fprintf(stderr, "ERROR: -p conflicts with -r\n");
-                    fOk = false;
-                }
-            }
-            else
-            {
-                if (target.GetUseParallelAsyncIO() && target.GetRequestCount() == 1)
-                {
-                    fprintf(stderr, "WARNING: -p does not have effect unless outstanding I/O count (-o) is > 1\n");
-                }
-
-                if (timeSpan.GetRandSeed() > 0)
-                {
-                    fprintf(stderr, "WARNING: -z is ignored if -r is not provided\n");
-                    // although ulRandSeed==0 is a valid value, it's interpreted as "not provided" for this warning
-                }
-
-                if (target.GetUseInterlockedSequential())
+                if (target.GetUseRandomAccessPattern())
                 {
                     if (target.GetThreadStrideInBytes() > 0)
                     {
-                        fprintf(stderr, "ERROR: -si conflicts with -T\n");
+                        fprintf(stderr, "ERROR: -T conflicts with -r\n");
+                        fOk = false;
+                        // although ullThreadStride==0 is a valid value, it's interpreted as "not provided" for this warning
+                    }
+
+                    if (target.GetUseInterlockedSequential())
+                    {
+                        fprintf(stderr, "ERROR: -si conflicts with -r\n");
                         fOk = false;
                     }
 
                     if (target.GetUseParallelAsyncIO())
                     {
-                        fprintf(stderr, "ERROR: -si conflicts with -p\n");
+                        fprintf(stderr, "ERROR: -p conflicts with -r\n");
                         fOk = false;
-                    }
-
-                    if (!targetHasMultipleThreads)
-                    {
-                        fprintf(stderr, "WARNING: single-threaded test, -si ignored\n");
                     }
                 }
                 else
                 {
-                    if (targetHasMultipleThreads && !target.GetThreadStrideInBytes())
+                    if (target.GetUseParallelAsyncIO() && target.GetRequestCount() == 1)
                     {
-                        fprintf(stderr, "WARNING: target access pattern will not be sequential, consider -si\n");
+                        fprintf(stderr, "WARNING: -p does not have effect unless outstanding I/O count (-o) is > 1\n");
                     }
 
-                    if (!targetHasMultipleThreads && target.GetThreadStrideInBytes())
+                    if (timeSpan.GetRandSeed() > 0)
                     {
-                        fprintf(stderr, "ERROR: -T has no effect unless multiple threads per target are used\n");
+                        fprintf(stderr, "WARNING: -z is ignored if -r is not provided\n");
+                        // although ulRandSeed==0 is a valid value, it's interpreted as "not provided" for this warning
+                    }
+
+                    if (target.GetUseInterlockedSequential())
+                    {
+                        if (target.GetThreadStrideInBytes() > 0)
+                        {
+                            fprintf(stderr, "ERROR: -si conflicts with -T\n");
+                            fOk = false;
+                        }
+
+                        if (target.GetUseParallelAsyncIO())
+                        {
+                            fprintf(stderr, "ERROR: -si conflicts with -p\n");
+                            fOk = false;
+                        }
+
+                        if (!targetHasMultipleThreads)
+                        {
+                            fprintf(stderr, "WARNING: single-threaded test, -si ignored\n");
+                        }
+                    }
+                    else
+                    {
+                        if (targetHasMultipleThreads && !target.GetThreadStrideInBytes())
+                        {
+                            fprintf(stderr, "WARNING: target access pattern will not be sequential, consider -si\n");
+                        }
+
+                        if (!targetHasMultipleThreads && target.GetThreadStrideInBytes())
+                        {
+                            fprintf(stderr, "ERROR: -T has no effect unless multiple threads per target are used\n");
+                            fOk = false;
+                        }
+                    }
+                }
+
+                if (target.GetRandomDataWriteBufferSize() > 0)
+                {
+                    if (target.GetRandomDataWriteBufferSize() < target.GetBlockSizeInBytes())
+                    {
+                        fprintf(stderr, "ERROR: custom write buffer (-Z) is smaller than the block size. Write buffer size: %I64u block size: %u\n",
+                            target.GetRandomDataWriteBufferSize(),
+                            target.GetBlockSizeInBytes());
                         fOk = false;
                     }
                 }
-            }
 
-            if (target.GetRandomDataWriteBufferSize() > 0)
-            {
-                if (target.GetRandomDataWriteBufferSize() < target.GetBlockSizeInBytes())
+                // in the cases where there is only a single configuration specified for each target (e.g., cmdline),
+                // currently there are no validations specific to individual targets (e.g., pre-existing files)
+                // so we can stop validation now. this allows us to only warn/error once, as opposed to repeating
+                // it for each target.
+                if (fSingleSpec)
                 {
-                    fprintf(stderr, "ERROR: custom write buffer (-Z) is smaller than the block size. Write buffer size: %I64u block size: %u\n",
-                        target.GetRandomDataWriteBufferSize(),
-                        target.GetBlockSizeInBytes());
-                    fOk = false;
+                    break;
                 }
-            }
-
-            // in the cases where there is only a single configuration specified for each target (e.g., cmdline),
-            // currently there are no validations specific to individual targets (e.g., pre-existing files)
-            // so we can stop validation now. this allows us to only warn/error once, as opposed to repeating
-            // it for each target.
-            if (fSingleSpec)
-            {
-                break;
             }
         }
     }
+
     return fOk;
 }
 

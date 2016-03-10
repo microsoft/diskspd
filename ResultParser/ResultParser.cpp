@@ -224,18 +224,19 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     _Print("\t\tburst size: %u\n", target.GetBurstSize());
     // TODO: completion routines/ports
 
-    if (target.GetDisableAllCache())
-    {
-        _Print("\t\tsoftware and hardware write cache disabled\n");
-    }
-    else if (target.GetDisableOSCache())
-    {
-        _Print("\t\tsoftware cache disabled\n");
-    }
-
-    if (!target.GetDisableAllCache() && !target.GetDisableOSCache())
-    {
+    switch (target.GetCacheMode()) {
+    case TargetCacheMode::Cached:
         _Print("\t\tusing software and hardware write cache\n");
+        break;
+    case TargetCacheMode::DisableAllCache:
+        _Print("\t\tsoftware and hardware write cache disabled\n");
+        break;
+    case TargetCacheMode::DisableLocalCache:
+        _Print("\t\tlocal software cache disabled, remote caches enabled\n");
+        break;
+    case TargetCacheMode::DisableOSCache:
+        _Print("\t\tsoftware cache disabled\n");
+        break;
     }
 
     if (target.GetZeroWriteBuffers())
@@ -268,7 +269,7 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     }
     else
     {
-        _Print("\t\tperforming mix test (write/read ratio: %d/100)\n", target.GetWriteRatio());
+        _Print("\t\tperforming mix test (read/write ratio: %d/%d)\n", 100 - target.GetWriteRatio(), target.GetWriteRatio());
     }
     _Print("\t\tblock size: %d\n", target.GetBlockSizeInBytes());
     if (target.GetUseRandomAccessPattern())
@@ -309,6 +310,11 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     if (target.GetRandomAccessHint())
     {
         _Print("\t\tusing FILE_FLAG_RANDOM_ACCESS hint\n");
+    }
+
+    if (target.GetTemporaryFileHint())
+    {
+        _Print("\t\tusing FILE_ATTRIBUTE_TEMPORARY hint\n");
     }
 
     if (fUseThreadsPerFile)
@@ -360,17 +366,17 @@ void ResultParser::_PrintTimeSpan(const TimeSpan& timeSpan)
     }
     if (timeSpan.GetCalculateIopsStdDev())
     {
-        _Print("\tcalculating IOPS stddev with bucket duration = %u milliseconds\n", timeSpan.GetIoBucketDurationInMilliseconds());
+        _Print("\tgathering IOPS at intervals of %ums\n", timeSpan.GetIoBucketDurationInMilliseconds());
     }
     _Print("\trandom seed: %u\n", timeSpan.GetRandSeed());
 
-    vector<UINT32> vAffinity = timeSpan.GetAffinityAssignments();
+    const auto& vAffinity = timeSpan.GetAffinityAssignments();
     if ( vAffinity.size() > 0)
     {
-        _Print("\tadvanced affinity: ");
+        _Print("\tadvanced affinity round robin (group/core): ");
         for (unsigned int x = 0; x < vAffinity.size(); ++x)
         {
-            _Print("%d", vAffinity[x]);
+            _Print("%u/%u", vAffinity[x].wGroup, vAffinity[x].bProc);
             if (x < vAffinity.size() - 1)
             {
                 _Print(", ");

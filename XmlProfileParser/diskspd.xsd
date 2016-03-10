@@ -2,8 +2,7 @@
 <xs:schema targetNamespace="http://microsoft.com/diskspd/DiskSpdConfig.xsd"
     elementFormDefault="qualified"
     xmlns="http://microsoft.com/diskspd/DiskSpdConfig.xsd"
-    xmlns:xs="http://www.w3.org/2001/XMLSchema"
->
+    xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:complexType name="Profile">
     <xs:all>
       <xs:element name="TimeSpans" minOccurs="1" maxOccurs="1">
@@ -27,17 +26,22 @@
 
                               <!-- UINT64 ullStrideSize -->
                               <xs:element name="StrideSize" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
+                              
+                              <xs:element name="InterlockedSequential" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
                               <!-- UINT64 ullBaseFileOffset -->
                               <xs:element name="BaseFileOffset" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL bSequentialScan (open file with the FILE_FLAG_SEQUENTIAL_SCAN flag) -->
+                              <!-- BOOL fSequentialScan (open file with the FILE_FLAG_SEQUENTIAL_SCAN flag) -->
                               <xs:element name="SequentialScan" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL bRandomAccess (open file with the FILE_FLAG_RANDOM_ACCESS flag) -->
+                              <!-- BOOL fRandomAccess (open file with the FILE_FLAG_RANDOM_ACCESS flag) -->
                               <xs:element name="RandomAccess" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL bUseLargePages (Use large pages for IO buffers) -->
+                              <!-- BOOL fTemporaryFile (open file with the FILE_ATTRIBUTE_TEMPORARY flag) -->
+                              <xs:element name="TemporaryFile" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                              
+                              <!-- BOOL fUseLargePages (Use large pages for IO buffers) -->
                               <xs:element name="UseLargePages" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
                               <!-- DWORD dwRequestCount -->
@@ -50,11 +54,14 @@
                                    <align> can be stated in bytes/KB/MB/GB/blocks [default access=sequential, default alignment=block size] -->
                               <xs:element name="Random" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL bDisableOSCache -->
-                              <xs:element name="DisableOSCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-
-                              <!-- BOOL bDisableAllCache -->
+                              <!-- BOOL fDisableAllCache -->
                               <xs:element name="DisableAllCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+
+                              <!-- BOOL fDisableLocalCache -->
+                              <xs:element name="DisableLocalCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+
+                              <!-- BOOL fDisableOSCache -->
+                              <xs:element name="DisableOSCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
                               <xs:element name="WriteBufferContent" minOccurs="0" maxOccurs="1">
                                 <xs:complexType>
@@ -106,7 +113,7 @@
                               <!-- UINT32 ulWriteRatio -->
                               <xs:element name="WriteRatio" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL bParallelAsyncIO
+                              <!-- BOOL fParallelAsyncIO
                                    -p                 start async (overlapped) I/O operations with the same offset (makes sense only with -o2 or grater) -->
                               <xs:element name="ParallelAsyncIO" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
@@ -141,7 +148,7 @@
                        -F<count>          total number of threads (cannot be used with -t) this cannot be used if per-file thread count is provided -->
                   <xs:element name="ThreadCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- BOOL bGroupAffinity -->
+                  <!-- BOOL fGroupAffinity -->
                   <xs:element name="GroupAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
                   <!-- UINT32 *puAffinity -->
@@ -153,11 +160,11 @@
                     </xs:complexType>
                   </xs:element>
 
-                  <!-- BOOL bDisableAffinity
+                  <!-- BOOL fDisableAffinity
                        -n                 disable affinity (cannot be used with -a) -->
                   <xs:element name="DisableAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- BOOL bCompletionRoutines -->
+                  <!-- BOOL fCompletionRoutines -->
                   <!-- TODO: this should be decided on a target level -->
                   <xs:element name="CompletionRoutines" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
                   

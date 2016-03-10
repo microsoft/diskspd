@@ -39,93 +39,221 @@ SOFTWARE.
 #include <comdef.h>
 
 _COM_SMARTPTR_TYPEDEF(IXMLDOMDocument2, __uuidof(IXMLDOMDocument2));
+_COM_SMARTPTR_TYPEDEF(IXMLDOMSchemaCollection2, __uuidof(IXMLDOMSchemaCollection2)); 
 _COM_SMARTPTR_TYPEDEF(IXMLDOMNode, __uuidof(IXMLDOMNodeList));
 _COM_SMARTPTR_TYPEDEF(IXMLDOMNodeList, __uuidof(IXMLDOMNodeList));
+_COM_SMARTPTR_TYPEDEF(IXMLDOMNamedNodeMap, __uuidof(IXMLDOMNamedNodeMap));
+_COM_SMARTPTR_TYPEDEF(IXMLDOMParseError, __uuidof(IXMLDOMParseError));
+
+HRESULT ReportXmlError(
+	const char *pszName,
+	IXMLDOMParseErrorPtr pXMLError
+	)
+{
+	long line;
+	long linePos;
+	long errorCode = E_FAIL;
+	_bstr_t bReason;
+	BSTR bstr;
+	HRESULT hr;
+
+	hr = pXMLError->get_line(&line);
+	if (FAILED(hr))
+	{
+		line = 0;
+	}
+	hr = pXMLError->get_linepos(&linePos);
+	if (FAILED(hr))
+	{
+		linePos = 0;
+	}
+	hr = pXMLError->get_errorCode(&errorCode);
+	if (FAILED(hr))
+	{
+		errorCode = E_FAIL;
+	}
+	hr = pXMLError->get_reason(&bstr);
+	if (SUCCEEDED(hr))
+	{
+		bReason.Attach(bstr);
+	}
+
+	fprintf(stderr,
+		"ERROR: failed to load %s, line %lu, line position %lu, errorCode %08x\nERROR: reason: %S\n",
+		pszName, line, linePos, errorCode, (PWCHAR)bReason);
+
+	return errorCode;
+}
 
 bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
 {
     assert(pszPath != nullptr);
     assert(pProfile != nullptr);
 
+    // import schema from the named resource
+    HRSRC hSchemaXmlResource = FindResource(NULL, L"DISKSPD.XSD", RT_HTML);
+    assert(hSchemaXmlResource != NULL);
+    HGLOBAL hSchemaXml = LoadResource(NULL, hSchemaXmlResource);
+    assert(hSchemaXml != NULL);
+    LPVOID pSchemaXml = LockResource(hSchemaXml);
+    assert(pSchemaXml != NULL);
+    
+    // convert from utf-8 produced by the xsd authoring tool to utf-16
+    int cchSchemaXml = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)pSchemaXml, -1, NULL, 0);
+	vector<WCHAR> vWideSchemaXml(cchSchemaXml);
+    int dwcchWritten = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)pSchemaXml, -1, vWideSchemaXml.data(), cchSchemaXml);
+    UNREFERENCED_PARAMETER(dwcchWritten);
+    assert(dwcchWritten == cchSchemaXml);
+    // ... and finally, packed in a bstr for the loadXml interface
+    _bstr_t bSchemaXml(vWideSchemaXml.data());
+
     bool fComInitialized = false;
-    HRESULT hr = CoInitialize(nullptr);
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (SUCCEEDED(hr))
     {
         fComInitialized = true;
-        IXMLDOMDocument2Ptr spXmlDoc;
-        hr = CoCreateInstance(__uuidof(DOMDocument60), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&spXmlDoc));
+        IXMLDOMDocument2Ptr spXmlDoc = nullptr;
+        IXMLDOMDocument2Ptr spXmlSchema = nullptr;
+        IXMLDOMSchemaCollection2Ptr spXmlSchemaColl = nullptr;
+        IXMLDOMParseErrorPtr spXmlParseError = nullptr;
+
+        // create com objects and decorate
+        hr = CoCreateInstance(__uuidof(DOMDocument60), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&spXmlSchema));
+        if (SUCCEEDED(hr))
+        {
+            hr = spXmlSchema->put_async(VARIANT_FALSE);
+        }
+        if (SUCCEEDED(hr))
+        {
+            hr = spXmlSchema->setProperty(_bstr_t("ProhibitDTD").GetBSTR(), _variant_t(VARIANT_FALSE));
+        }
+        if (SUCCEEDED(hr))
+        {
+            hr = CoCreateInstance(__uuidof(XMLSchemaCache60), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&spXmlSchemaColl));
+        }
+        if (SUCCEEDED(hr))
+        {
+            hr = spXmlSchemaColl->put_validateOnLoad(VARIANT_TRUE);
+        }
+        if (SUCCEEDED(hr))
+        {
+            hr = CoCreateInstance(__uuidof(DOMDocument60), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&spXmlDoc));
+        }
         if (SUCCEEDED(hr))
         {
             hr = spXmlDoc->put_async(VARIANT_FALSE);
-            if (SUCCEEDED(hr))
+        }
+        if (SUCCEEDED(hr))
+        {
+            hr = spXmlDoc->put_validateOnParse(VARIANT_TRUE);
+        }
+        // work in progress to complete XML schema validation
+        // load schema and attach to schema collection, attach schema collection to spec doc, then load specification
+#if 0
+		//
+		// Issue at the moment: load fails with error as follows.
+		// ERROR: failed to load schema, line 1, line position 1, errorCode c00ce556
+		// ERROR: reason : Invalid at the top level of the document.
+        if (SUCCEEDED(hr))
+        {
+            VARIANT_BOOL fvIsOk;
+            hr = spXmlSchema->loadXML(bSchemaXml.GetBSTR(), &fvIsOk);
+            if (SUCCEEDED(hr) && fvIsOk != VARIANT_TRUE)
             {
-                VARIANT_BOOL fvIsOk;
-                _variant_t vPath(pszPath);
-                hr = spXmlDoc->load(vPath, &fvIsOk);
+                hr = spXmlSchema->get_parseError(&spXmlParseError);
                 if (SUCCEEDED(hr))
                 {
-                    bool fVerbose;
-                    hr = _GetVerbose(spXmlDoc, &fVerbose);
-                    if (SUCCEEDED(hr) && (hr != S_FALSE))
-                    {
-                        pProfile->SetVerbose(fVerbose);
-                    }
+                    ReportXmlError("schema", spXmlParseError);
+                }
+                hr = E_FAIL;
+            }
+        }
+		if (SUCCEEDED(hr))
+        {
+            _variant_t vXmlSchema(spXmlSchema);
+            _bstr_t bNull("");
+            hr = spXmlSchemaColl->add(bNull, vXmlSchema);
+        }
+        if (SUCCEEDED(hr))
+        {
+            _variant_t vSchemaCache(spXmlSchemaColl);
+            hr = spXmlDoc->putref_schemas(vSchemaCache);
+        }
+#endif
+        if (SUCCEEDED(hr))
+        {
+            VARIANT_BOOL fvIsOk;
+            _variant_t vPath(pszPath);
+            hr = spXmlDoc->load(vPath, &fvIsOk);
+            if (SUCCEEDED(hr) && fvIsOk != VARIANT_TRUE)
+            {
+                hr = E_FAIL;
+            }
+        }
 
-                    if (SUCCEEDED(hr))
-                    {
-                        DWORD dwProgress;
-                        hr = _GetProgress(spXmlDoc, &dwProgress);
-                        if (SUCCEEDED(hr) && (hr != S_FALSE))
-                        {
-                            pProfile->SetProgress(dwProgress);
-                        }
-                    }
+        // now parse the specification, if correct
+        if (SUCCEEDED(hr))
+        {
+            bool fVerbose;
+            hr = _GetVerbose(spXmlDoc, &fVerbose);
+            if (SUCCEEDED(hr) && (hr != S_FALSE))
+            {
+                pProfile->SetVerbose(fVerbose);
+            }
 
-                    if (SUCCEEDED(hr))
-                    {
-                        string sResultFormat;
-                        hr = _GetString(spXmlDoc, "//Profile/ResultFormat", &sResultFormat);
-                        if (SUCCEEDED(hr) && (hr != S_FALSE) && sResultFormat == "xml")
-                        {
-                            pProfile->SetResultsFormat(ResultsFormat::Xml);
-                        }
-                    }
+            if (SUCCEEDED(hr))
+            {
+                DWORD dwProgress;
+                hr = _GetProgress(spXmlDoc, &dwProgress);
+                if (SUCCEEDED(hr) && (hr != S_FALSE))
+                {
+                    pProfile->SetProgress(dwProgress);
+                }
+            }
 
-                    if (SUCCEEDED(hr))
-                    {
-                        string sCreateFiles;
-                        hr = _GetString(spXmlDoc, "//Profile/PrecreateFiles", &sCreateFiles);
-                        if (SUCCEEDED(hr) && (hr != S_FALSE))
-                        {
-                            if (sCreateFiles == "UseMaxSize")
-                            {
-                                pProfile->SetPrecreateFiles(PrecreateFiles::UseMaxSize);
-                            }
-                            else if (sCreateFiles == "CreateOnlyFilesWithConstantSizes")
-                            {
-                                pProfile->SetPrecreateFiles(PrecreateFiles::OnlyFilesWithConstantSizes);
-                            }
-                            else if (sCreateFiles == "CreateOnlyFilesWithConstantOrZeroSizes")
-                            {
-                                pProfile->SetPrecreateFiles(PrecreateFiles::OnlyFilesWithConstantOrZeroSizes);
-                            }
-                            else
-                            {
-                                hr = E_INVALIDARG;
-                            }
-                        }
-                    }
+            if (SUCCEEDED(hr))
+            {
+                string sResultFormat;
+                hr = _GetString(spXmlDoc, "//Profile/ResultFormat", &sResultFormat);
+                if (SUCCEEDED(hr) && (hr != S_FALSE) && sResultFormat == "xml")
+                {
+                    pProfile->SetResultsFormat(ResultsFormat::Xml);
+                }
+            }
 
-                    if (SUCCEEDED(hr))
+            if (SUCCEEDED(hr))
+            {
+                string sCreateFiles;
+                hr = _GetString(spXmlDoc, "//Profile/PrecreateFiles", &sCreateFiles);
+                if (SUCCEEDED(hr) && (hr != S_FALSE))
+                {
+                    if (sCreateFiles == "UseMaxSize")
                     {
-                        hr = _ParseEtw(spXmlDoc, pProfile);
+                        pProfile->SetPrecreateFiles(PrecreateFiles::UseMaxSize);
                     }
-
-                    if (SUCCEEDED(hr))
+                    else if (sCreateFiles == "CreateOnlyFilesWithConstantSizes")
                     {
-                        hr = _ParseTimeSpans(spXmlDoc, pProfile);
+                        pProfile->SetPrecreateFiles(PrecreateFiles::OnlyFilesWithConstantSizes);
+                    }
+                    else if (sCreateFiles == "CreateOnlyFilesWithConstantOrZeroSizes")
+                    {
+                        pProfile->SetPrecreateFiles(PrecreateFiles::OnlyFilesWithConstantOrZeroSizes);
+                    }
+                    else
+                    {
+                        hr = E_INVALIDARG;
                     }
                 }
+            }
+
+            if (SUCCEEDED(hr))
+            {
+                hr = _ParseEtw(spXmlDoc, pProfile);
+            }
+
+            if (SUCCEEDED(hr))
+            {
+                hr = _ParseTimeSpans(spXmlDoc, pProfile);
             }
         }
     }
@@ -133,6 +261,7 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
     {
         CoUninitialize();
     }
+
     return SUCCEEDED(hr);
 }
 
@@ -352,16 +481,6 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
 
     if (SUCCEEDED(hr))
     {
-        bool fGroupAffinity;
-        hr = _GetBool(XmlNode, "GroupAffinity", &fGroupAffinity);
-        if (SUCCEEDED(hr) && (hr != S_FALSE))
-        {
-            pTimeSpan->SetGroupAffinity(fGroupAffinity);
-        }
-    }
-
-    if (SUCCEEDED(hr))
-    {
         bool fDisableAffinity;
         hr = _GetBool(XmlNode, "DisableAffinity", &fDisableAffinity);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
@@ -410,9 +529,16 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
         }
     }
 
+    // Look for downlevel non-group aware assignment
     if (SUCCEEDED(hr))
     {
         hr = _ParseAffinityAssignment(XmlNode, pTimeSpan);
+    }
+
+    // Look for uplevel group aware assignment.
+    if (SUCCEEDED(hr))
+    {
+        hr = _ParseAffinityGroupAssignment(XmlNode, pTimeSpan);
     }
 
     if (SUCCEEDED(hr))
@@ -576,21 +702,31 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
 
     if (SUCCEEDED(hr))
     {
-        bool fSequentialScan;
-        hr = _GetBool(XmlNode, "SequentialScan", &fSequentialScan);
+        bool fBool;
+        hr = _GetBool(XmlNode, "SequentialScan", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
-            pTarget->SetSequentialScanHint(fSequentialScan);
+            pTarget->SetSequentialScanHint(fBool);
         }
     }
 
     if (SUCCEEDED(hr))
     {
-        bool fRandomAccess;
-        hr = _GetBool(XmlNode, "RandomAccess", &fRandomAccess);
+        bool fBool;
+        hr = _GetBool(XmlNode, "RandomAccess", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
-            pTarget->SetRandomAccessHint(fRandomAccess);
+            pTarget->SetRandomAccessHint(fBool);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        bool fBool;
+        hr = _GetBool(XmlNode, "TemporaryFile", &fBool);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTarget->SetTemporaryFileHint(fBool);
         }
     }
 
@@ -627,21 +763,31 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
 
     if (SUCCEEDED(hr))
     {
-        bool fDisableOSCache;
-        hr = _GetBool(XmlNode, "DisableOSCache", &fDisableOSCache);
-        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        bool fBool;
+        hr = _GetBool(XmlNode, "DisableOSCache", &fBool);
+        if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
-            pTarget->SetDisableOSCache(fDisableOSCache);
+            pTarget->SetCacheMode(TargetCacheMode::DisableOSCache);
         }
     }
 
     if (SUCCEEDED(hr))
     {
-        bool fDisableAllCache;
-        hr = _GetBool(XmlNode, "DisableAllCache", &fDisableAllCache);
-        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        bool fBool;
+        hr = _GetBool(XmlNode, "DisableAllCache", &fBool);
+        if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
-            pTarget->SetDisableAllCache(fDisableAllCache);
+            pTarget->SetCacheMode(TargetCacheMode::DisableAllCache);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        bool fBool;
+        hr = _GetBool(XmlNode, "DisableLocalCache", &fBool);
+        if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
+        {
+            pTarget->SetCacheMode(TargetCacheMode::DisableLocalCache);
         }
     }
 
@@ -756,6 +902,14 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     return hr;
 }
 
+// Compatibility with the old, non-group aware affinity assignment. Preserved to allow downlevel XML profiles
+// to run without modification.
+// Any assignment done through this method will only assign within group 0, and is equivalent to the non-group
+// specification -a#,#,# (contrast to -ag#,#,#,...). While not strictly equivalent to the old non-group aware
+// behavior, this should be acceptably good-enough.
+//
+// The XML result parser no longer emits this form.
+
 HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpan)
 {
     IXMLDOMNodeListPtr spNodeList;
@@ -777,8 +931,59 @@ HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode &XmlNode, TimeSpa
                     hr = spNode->get_text(&bstrText);
                     if (SUCCEEDED(hr))
                     {
-                        pTimeSpan->AddAffinityAssignment(_wtoi((wchar_t *)bstrText));   // TODO: change to unsigned
+                        pTimeSpan->AddAffinityAssignment((WORD)0, (BYTE)_wtoi((wchar_t *)bstrText));
                         SysFreeString(bstrText);
+                    }
+                }
+            }
+        }
+    }
+    return hr;
+}
+
+// Group aware affinity assignment. This is the only form emitted by the XML result parser.
+
+HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpan)
+{
+    IXMLDOMNodeListPtr spNodeList;
+    _variant_t query("Affinity/AffinityGroupAssignment");
+
+    HRESULT hr = XmlNode.selectNodes(query.bstrVal, &spNodeList);
+    if (SUCCEEDED(hr))
+    {
+        long cNodes;
+        hr = spNodeList->get_length(&cNodes);
+        if (SUCCEEDED(hr))
+        {
+            for (int i = 0; i < cNodes; i++)
+            {
+                IXMLDOMNodePtr spNode;
+                hr = spNodeList->get_item(i, &spNode);
+                if (SUCCEEDED(hr))
+                {
+                    UINT32 dwGroup = 0, dwProc = 0;
+                    hr = _GetUINT32Attr(spNode, "Group", &dwGroup);
+                    if (SUCCEEDED(hr))
+                    {
+                        _GetUINT32Attr(spNode, "Processor", &dwProc);
+                    }
+                    if (SUCCEEDED(hr))
+                    {
+                        if (dwProc > MAXBYTE)
+                        {
+                            fprintf(stderr, "ERROR: profile specifies group assignment to core %u, out of range\n", dwProc);
+                            hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                        }
+                        if (dwGroup > MAXWORD)
+                        {
+                            fprintf(stderr, "ERROR: profile specifies group assignment group %u, out of range\n", dwGroup);
+                            hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                        }
+
+                        if (SUCCEEDED(hr)) {
+                            pTimeSpan->AddAffinityAssignment((WORD)dwGroup, (BYTE)dwProc);
+                        }
+                        
                     }
                 }
             }
@@ -800,6 +1005,29 @@ HRESULT XmlProfileParser::_GetUINT32(IXMLDOMNode &XmlNode, const char *pszQuery,
         {
             *pulValue = _wtoi((wchar_t *)bstrText);  // TODO: make sure it works on large unsigned ints
             SysFreeString(bstrText);
+        }
+    }
+    return hr;
+}
+
+HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode &XmlNode, const char *pszAttr, UINT32 *pulValue) const
+{
+    IXMLDOMNamedNodeMapPtr spNamedNodeMap;
+    _bstr_t attr(pszAttr);
+    HRESULT hr = XmlNode.get_attributes(&spNamedNodeMap);
+    if (SUCCEEDED(hr) && (hr != S_FALSE))
+    {
+        IXMLDOMNodePtr spNode;
+        HRESULT hr = spNamedNodeMap->getNamedItem(attr, &spNode);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            BSTR bstrText;
+            hr = spNode->get_text(&bstrText);
+            if (SUCCEEDED(hr))
+            {
+                *pulValue = _wtoi((wchar_t *)bstrText);  // TODO: make sure it works on large unsigned ints
+                SysFreeString(bstrText);
+            }
         }
     }
     return hr;
