@@ -358,6 +358,7 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
     vPercentiles.push_back(make_pair(4, 99.9999));
     vPercentiles.push_back(make_pair(5, 99.99999));
     vPercentiles.push_back(make_pair(6, 99.999999));
+    vPercentiles.push_back(make_pair(7, 99.9999999));
 
     for (auto p : vPercentiles)
     {
