@@ -678,6 +678,7 @@ void ResultParser::_PrintLatencyPercentiles(const Results& results)
         {   0.999999, "6-nines" },
         {  0.9999999, "7-nines" },
         { 0.99999999, "8-nines" },
+        { 0.999999999, "9-nines" },
     };
 
     for (auto p : percentiles)
