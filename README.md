@@ -6,6 +6,8 @@ DISKSPD is a storage load generator / performance test tool from the Windows/Win
 What's New?
 ===========
 
+In addition DISKSPD itself, this repo hosts measurement frameworks which use DISKSPD. The first example is the ***VM Fleet*** being used for Windows Server 2016 Hyper-Converged Storage Spaces Direct work. Look for these under the *Frameworks* directory.
+
 2.0.16b 2/22/2016
 
 * -ag is now default (round robin group-aware affinity)
