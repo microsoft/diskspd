@@ -37,10 +37,15 @@ SOFTWARE.
 # configuration file.
 #
 
+param(
+    [string] $connectuser,
+    [string] $connectpass
+    )
+
 $null = net use l: /d
 
 if ($(Get-SmbMapping) -eq $null) {
-    New-SmbMapping -LocalPath l: -RemotePath \\169.254.1.1\c$\clusterstorage\collect\control -UserName __ADMIN__ -Password __ADMINPASS__ -ErrorAction SilentlyContinue
+    New-SmbMapping -LocalPath l: -RemotePath \\169.254.1.1\c$\clusterstorage\collect\control -UserName $connectuser -Password $connectpass -ErrorAction SilentlyContinue
 }
 
 # update tooling
@@ -48,6 +53,15 @@ cp l:\tools\* c:\run -Force
 
 $run = 'c:\run\run.ps1'
 $master = 'c:\run\master.ps1'
+
+$mypause = "l:\pause-$(gc c:\vmspec.txt)"
+$mydone = "l:\done-$(gc c:\vmspec.txt)"
+
+$done = $false
+$donetouched = $false
+$pause = $false
+
+$tick = 0
 
 function get-newfile(
     $sourcepat,
@@ -82,21 +96,67 @@ function get-newfile(
     }
 }
 
+function get-flagfile(
+    [string] $flag,
+    [switch] $gc = $false
+    )
+{
+    if ($gc) {
+        gc "l:\$flag" -ErrorAction SilentlyContinue   
+    } else {
+        gi "l:\$flag" -ErrorAction SilentlyContinue
+    }
+}
+
 while ($true) {
 
     # update master control?
     # assume runners have a simple loop to re-execute on exit
-    if (get-newfile l:\master*.ps1 $master) {
+    if (get-newfile l:\master*.ps1 $master -silent:$true) {
         break
     }
 
-    # check and acknowledge pause
-    if (gi l:\pause -ErrorAction SilentlyContinue) {
+    # check and acknowledge pause - only drop flag once
+    $pauseepoch = get-flagfile pause -gc:$true
+    if ($pauseepoch -ne $null) {
 
-        write-host -fore red PAUSE IN FORCE
-        echo $null > l:\pause-$(gc c:\vmspec.txt)
+        # pause clears done
+        $done = $false
+
+        # drop into pause flagfile if needed
+        if ($pause -eq $false) {
+            write-host -fore red PAUSE IN FORCE
+            $pause = $true
+            echo $pauseepoch > $mypause
+        } else {
+            if ($tick % 10 -eq 0) {
+                write-host -fore red -NoNewline '.'
+            }
+        }
+
+    } elseif ($done) {
+
+        # drop epoch into done flagfile if needed
+        if (-not $donetouched) {
+            echo $goepoch > $mydone
+            $donetouched = $true
+        }
+
+        # if go flag is now different, release for the next go around
+        if ($goepoch -ne (get-flagfile go -gc:$true)) {
+            $done = $false
+            write-host -fore cyan `nReleasing from Done
+        } else {
+            if ($tick % 10 -eq 0) {
+                write-host -fore yellow -NoNewline '.'
+            }
+        }
 
     } else {
+
+        # clear pause & donetouched flags
+        $pause = $false
+        $donetouched = $false
 
         # update run script?
         $null = get-newfile l:\run*.ps1 $run -clean:$true
@@ -108,6 +168,13 @@ while ($true) {
             continue
         }
 
+        # update go epoch - a change to this (if present) will be what
+        # allows us to proceed past a done flag
+        $goepoch = get-flagfile go -gc:$true
+        if ($goepoch -ne $null) {
+            write-host -fore cyan Go Epoch acknowledged at: $goepoch
+        }
+
         # acknowledge script
         write-host -fore cyan Run Script $runf.lastwritetime "`n$("*"*20)"
         gc $runf
@@ -117,18 +184,34 @@ while ($true) {
         $j = start-job -arg $run { param($run) & $run }
         while (($jf = wait-job $j -Timeout 1) -eq $null) {
 
-            # check pause or new run file: if so, stop and loop
-            if ((gi l:\pause -ErrorAction SilentlyContinue) -or
-                (get-newfile l:\run*.ps1 $run -clean:$true -silent:$true)) {
+            $halt = $null
 
-                write-host -fore yellow STOPPING CURRENT
+            # check pause or new run file: if so, stop and loop
+            if (get-flagfile pause) {
+                $halt = "pause set"
+            }
+
+            if (get-newfile l:\run*.ps1 $run -clean:$true -silent:$true) {
+                $halt = "new run file"
+            }
+
+            if ($halt -ne $null) {
+                write-host -fore yellow STOPPING CURRENT "(reason: $halt)"
                 $j | stop-job
+                $j | remove-job
                 break
             }
         }
 
+        # job finished?
         if ($jf -ne $null) {
-            $jf | receive-job
+            $result = $jf | receive-job
+
+            if ($result -eq "done") {
+                write-host -fore yellow DONE CURRENT
+                $done = $true
+            }
+
             $jf | remove-job
         }
 
@@ -138,4 +221,5 @@ while ($true) {
     # force gc to teardown potentially conflicting handles and enforce min pause
     [system.gc]::Collect()
     sleep 1
+    $tick += 1
 }

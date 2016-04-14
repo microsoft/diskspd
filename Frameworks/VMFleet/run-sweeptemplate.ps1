@@ -25,11 +25,42 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-$pause = "C:\ClusterStorage\collect\control\pause"
+[string](get-date)
 
-if (gi $pause -ErrorAction SilentlyContinue) {
-    write-host -fore green Pause already set
+# buffer size/alighment, threads/target, outstanding/thread, write%
+$b = __b__; $t = __t__; $o = __o__; $w = __w__
+
+# io pattern, (r)andom or (s)equential (si as needed for multithread)
+$p = '__p__'
+
+# durations of test, cooldown, warmup
+$d = __d__; $cool = __Cool__; $warm = __Warm__
+
+# cap -> true to capture xml results, otherwise human text
+$addspec = '__AddSpec__'
+$result =  "l:\result\result-b$($b)t$($t)o$($o)w$($w)p$($p)-$($addspec)-$(gc c:\vmspec.txt).xml"
+
+### prior to this is template
+
+if (-not (gi $result -ErrorAction SilentlyContinue)) {
+
+    $res = 'xml'
+    $o = C:\run\diskspd.exe -h `-t$t `-o$o `-b$($b)k `-$($p)$($b)k `-w$w `-W$warm `-C$cool `-d$($d) -D -L `-R$res (dir C:\run\testfile?.dat)
+
+    # emit result and indicate done flag to master
+    # this will nominally squelch re-execution
+    $o | Out-File $result -Encoding ascii -Width 9999
+    Write-Output "done"
+
 } else {
-    echo (get-random) > $pause
-    write-host -fore red Pause set `@ (get-date)
+
+    write-host -fore green already done $result
+
+    # indicate done flag to master
+    # this should only occur if controller does not change variation
+    Write-Output "done"
 }
+
+[system.gc]::Collect()
+
+[string](get-date)

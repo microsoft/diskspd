@@ -38,10 +38,10 @@ $d = 1*60; $cool = 30; $warm = 60
 
 # cap -> true to capture xml results, otherwise human text
 $cap = $true
-$addspec = "80vmpn"
+$addspec = '80vmpn'
 $result =  "l:\result\result-b$($b)t$($t)o$($o)w$($w)p$($p)-$($addspec)-$(gc c:\vmspec.txt).xml"
 
-if (-not ($cap -and (gi $result -ErrorAction SilentlyContinue))) {
+if (-not ($cap -and [io.file]::Exists($result))) {
 
     if ($cap) {
         $res = 'xml'
@@ -52,13 +52,24 @@ if (-not ($cap -and (gi $result -ErrorAction SilentlyContinue))) {
     $o = C:\run\diskspd.exe -h `-t$t `-o$o `-b$($b)k `-$($p)$($b)k `-w$w `-W$warm `-C$cool `-d$($d) -D -L `-R$res (dir C:\run\testfile?.dat)
 
     if ($cap) {
+
+        # emit result and indicate done flag to master
+        # this will nominally squelch re-execution
         $o | Out-File $result -Encoding ascii -Width 9999
+        Write-Output "done"
+
     } else {
+
+        #emit to human watcher
         $o | Out-Host
     }
 } elseif ($cap) {
 
     write-host -fore green already done $result
+
+    # indicate done flag to master
+    # this should only occur if controller does not change variation
+    Write-Output "done"
 }
 
 [string](get-date)

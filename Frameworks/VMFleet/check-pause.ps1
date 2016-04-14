@@ -25,27 +25,64 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-$pause = "C:\ClusterStorage\collect\control\pause"
+# script to check the state/health of pause in the fleet
+#
+# isactive - whether there is an active pause (independent of health)
+# !isactive - whether there is an active pause and all VMs have responded to it
+#
+# true/false return
 
-$o = dir "$pause-*" |% {
+param(
+    [switch] $isactive = $false
+    )
+
+$pause = "C:\ClusterStorage\collect\control\pause"
+$pauseepoch = gc $pause -ErrorAction SilentlyContinue
+
+if ($pauseepoch -eq $null) {
+    write-host -fore red Pause not in force
+    return $false
+}
+
+# if only performing the pause active check, done
+if ($isactive) {
+    return $true
+}
+
+# accumulate hash of pause flags mapped to current/stale state
+$h = @{}
+
+dir $pause-* |% {
+
+    $thispause = gc $pause -ErrorAction SilentlyContinue
+    if ($thispause -eq $pauseepoch) {
+        $pausetype = 'Current'
+    } else {
+        $pausetype = 'Stale'
+    }
+
     if ($_.name -match 'pause-(.+)\+(vm.+)') {
-        new-object psobject -Property @{
-            'Node' = $matches[1];
-            'VM' = $matches[2]
-        }
+        # 1 is CSV, 2 is VM name
+        $h[$matches[2]] = $pausetype
+    } else {
+        write-host -fore red ERROR: malformed pause $_.name present
     }
 }
 
-$g = $o | group -Property Node -NoElement | sort -property Count,Name
+# now correlate to online vms and see if we agree all online are paused.
+# note that if we shutdown some vms and then check pause the current flags
+# will be higher than online, so we need to verify individually to not
+# spoof ourselves.
 
-write-host -fore green Total Pauses Active
-$g
+$vms = get-clustergroup |? GroupType -eq VirtualMachine |? Name -like 'vm-*' |? State -eq Online
 
-$gc = $g | group -Property Count
+$pausedvms = $vms |? { $h[$_.Name] -eq 'Current' }
 
-# all nodes should agree on number of pauses accepted
-if ($gc.length -gt 1 -or $gc.count -ne (get-clusternode).length) {
-    write-host -fore red `n Problem
+if ($pausedvms.Count -eq $vms.Count) {
+    write-host -fore green OK: All VMs paused
 } else {
-    write-host -fore green `n Pause OK
+    write-host -fore red WARNING: of "$($vms.Count)," still waiting on ($vms.Count - $pausedvms.Count) to acknowledge pause
+    return $false
 }
+
+return $true

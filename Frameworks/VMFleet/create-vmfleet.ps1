@@ -102,7 +102,7 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
 
         # create run directory
 
-        del -Recurse z:\run -ErrorAction Ignore
+        del -Recurse -Force z:\run
         mkdir z:\run
         $ok = $ok -band $?
         if (-not $ok) {
@@ -132,14 +132,15 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
 
         # scripts
 
-        gc C:\ClusterStorage\collect\control\master.ps1 |% { $_ -replace '__ADMIN__',$connectuser -replace '__ADMINPASS__',$connectpass } > z:\run\master.ps1
+        copy -Force C:\ClusterStorage\collect\control\master.ps1 z:\run\master.ps1
         $ok = $ok -band $?
         if (-not $ok) {
             Write-Error "failed injection of specd master.ps1 for $vhdpath"
             return $ok
         }
 
-        copy -Force C:\ClusterStorage\collect\control\launch.ps1 z:\users\administrator\launch.ps1
+        del -Force z:\users\administrator\launch.ps1
+        gc C:\ClusterStorage\collect\control\launch-template.ps1 |% { $_ -replace '__CONNECTUSER__',$connectuser -replace '__CONNECTPASS__',$connectpass } > z:\users\administrator\launch.ps1
         $ok = $ok -band $?
         if (-not $ok) {
             Write-Error "failed injection of launch.ps1 for $vhdpath"

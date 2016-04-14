@@ -29,6 +29,6 @@ $script = 'c:\run\master.ps1'
 
 while ($true) {
     Write-Host -fore Green Launching $script `@ $(Get-Date)
-    & $script
+    & $script -connectuser __CONNECTUSER__ -connectpass __CONNECTPASS__
     sleep -Seconds 1
 }
