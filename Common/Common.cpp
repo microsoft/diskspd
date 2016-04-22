@@ -270,6 +270,7 @@ bool Target::_FillRandomDataWriteBuffer()
         }
         else
         {
+			printf("\nERROR:  Unable to open '%s'\n", GetRandomDataWriteBufferSourcePath().c_str());
             fOk = false;
             // TODO: print error message?
         }
