@@ -39,8 +39,6 @@ SOFTWARE.
 
 using namespace std;
 
-/// structures used for passing the input parameters
-
 // versioning material. for simplicity in consumption, please ensure that the date string
 // parses via the System.Datetime constructor as follows (in Powershell):
 //
@@ -51,8 +49,8 @@ using namespace std;
 //      Monday, June 16, 2014 12:00:00 AM
 
 #define DISKSPD_RELEASE_TAG ""
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.16b" DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2016/2/22"
+#define DISKSPD_NUMERIC_VERSION_STRING "2.0.17" DISKSPD_RELEASE_TAG
+#define DISKSPD_DATE_VERSION_STRING "2016/4/13"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -93,7 +91,6 @@ struct ETWEventCounters
     UINT64 ullProcessEnd;
     UINT64 ullImageLoad;
 };
-
 
 // structure containing informations about ETW session
 struct ETWSessionInfo

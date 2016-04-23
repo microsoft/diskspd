@@ -30,30 +30,18 @@ SOFTWARE.
 #include "XmlProfileParser.h"
 #include <Objbase.h>
 #include <msxml6.h>
+#include <atlbase.h>
 #include <assert.h>
-
-// the vc com headers define a partial set of smartptr typedefs, which unfortunately
-// aren't 1) complete for our use case and 2) vary between revs of the headers.
-// this define disables the automatic definitions, letting us do them ourselves.
-#define _COM_NO_STANDARD_GUIDS_
-#include <comdef.h>
-
-_COM_SMARTPTR_TYPEDEF(IXMLDOMDocument2, __uuidof(IXMLDOMDocument2));
-_COM_SMARTPTR_TYPEDEF(IXMLDOMSchemaCollection2, __uuidof(IXMLDOMSchemaCollection2)); 
-_COM_SMARTPTR_TYPEDEF(IXMLDOMNode, __uuidof(IXMLDOMNodeList));
-_COM_SMARTPTR_TYPEDEF(IXMLDOMNodeList, __uuidof(IXMLDOMNodeList));
-_COM_SMARTPTR_TYPEDEF(IXMLDOMNamedNodeMap, __uuidof(IXMLDOMNamedNodeMap));
-_COM_SMARTPTR_TYPEDEF(IXMLDOMParseError, __uuidof(IXMLDOMParseError));
 
 HRESULT ReportXmlError(
 	const char *pszName,
-	IXMLDOMParseErrorPtr pXMLError
+	IXMLDOMParseError *pXMLError
 	)
 {
 	long line;
 	long linePos;
 	long errorCode = E_FAIL;
-	_bstr_t bReason;
+	CComBSTR bReason;
 	BSTR bstr;
 	HRESULT hr;
 
@@ -105,17 +93,17 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
     UNREFERENCED_PARAMETER(dwcchWritten);
     assert(dwcchWritten == cchSchemaXml);
     // ... and finally, packed in a bstr for the loadXml interface
-    _bstr_t bSchemaXml(vWideSchemaXml.data());
+    CComBSTR bSchemaXml(vWideSchemaXml.data());
 
     bool fComInitialized = false;
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (SUCCEEDED(hr))
     {
         fComInitialized = true;
-        IXMLDOMDocument2Ptr spXmlDoc = nullptr;
-        IXMLDOMDocument2Ptr spXmlSchema = nullptr;
-        IXMLDOMSchemaCollection2Ptr spXmlSchemaColl = nullptr;
-        IXMLDOMParseErrorPtr spXmlParseError = nullptr;
+        CComPtr<IXMLDOMDocument2> spXmlDoc = nullptr;
+        CComPtr<IXMLDOMDocument2> spXmlSchema = nullptr;
+        CComPtr<IXMLDOMSchemaCollection2> spXmlSchemaColl = nullptr;
+        CComPtr<IXMLDOMParseError> spXmlParseError = nullptr;
 
         // create com objects and decorate
         hr = CoCreateInstance(__uuidof(DOMDocument60), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&spXmlSchema));
@@ -125,7 +113,7 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
         }
         if (SUCCEEDED(hr))
         {
-            hr = spXmlSchema->setProperty(_bstr_t("ProhibitDTD").GetBSTR(), _variant_t(VARIANT_FALSE));
+            hr = spXmlSchema->setProperty(CComBSTR("ProhibitDTD"), CComVariant(VARIANT_FALSE));
         }
         if (SUCCEEDED(hr))
         {
@@ -170,20 +158,20 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
         }
 		if (SUCCEEDED(hr))
         {
-            _variant_t vXmlSchema(spXmlSchema);
-            _bstr_t bNull("");
+            CComVariant vXmlSchema(spXmlSchema);
+            CComBSTR bNull("");
             hr = spXmlSchemaColl->add(bNull, vXmlSchema);
         }
         if (SUCCEEDED(hr))
         {
-            _variant_t vSchemaCache(spXmlSchemaColl);
+            CComVariant vSchemaCache(spXmlSchemaColl);
             hr = spXmlDoc->putref_schemas(vSchemaCache);
         }
 #endif
         if (SUCCEEDED(hr))
         {
             VARIANT_BOOL fvIsOk;
-            _variant_t vPath(pszPath);
+            CComVariant vPath(pszPath);
             hr = spXmlDoc->load(vPath, &fvIsOk);
             if (SUCCEEDED(hr) && fvIsOk != VARIANT_TRUE)
             {
@@ -265,10 +253,10 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
     return SUCCEEDED(hr);
 }
 
-HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
+HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile)
 {
     bool fEtwProcess;
-    HRESULT hr = _GetBool(XmlDoc, "//Profile/ETW/Process", &fEtwProcess);
+    HRESULT hr = _GetBool(pXmlDoc, "//Profile/ETW/Process", &fEtwProcess);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         pProfile->SetEtwEnabled(true);
@@ -278,7 +266,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwThread;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/Thread", &fEtwThread);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/Thread", &fEtwThread);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -289,7 +277,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwImageLoad;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/ImageLoad", &fEtwImageLoad);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/ImageLoad", &fEtwImageLoad);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -300,7 +288,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwDiskIO;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/DiskIO", &fEtwDiskIO);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/DiskIO", &fEtwDiskIO);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -311,7 +299,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwMemoryPageFaults;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/MemoryPageFaults", &fEtwMemoryPageFaults);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/MemoryPageFaults", &fEtwMemoryPageFaults);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -322,7 +310,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwMemoryHardFaults;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/MemoryHardFaults", &fEtwMemoryHardFaults);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/MemoryHardFaults", &fEtwMemoryHardFaults);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -333,7 +321,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwNetwork;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/Network", &fEtwNetwork);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/Network", &fEtwNetwork);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -344,7 +332,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwRegistry;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/Registry", &fEtwRegistry);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/Registry", &fEtwRegistry);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -355,7 +343,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwUsePagedMemory;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/UsePagedMemory", &fEtwUsePagedMemory);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/UsePagedMemory", &fEtwUsePagedMemory);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -366,7 +354,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwUsePerfTimer;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/UsePerfTimer", &fEtwUsePerfTimer);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/UsePerfTimer", &fEtwUsePerfTimer);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -377,7 +365,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwUseSystemTimer;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/UseSystemTimer", &fEtwUseSystemTimer);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/UseSystemTimer", &fEtwUseSystemTimer);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -388,7 +376,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     if (SUCCEEDED(hr))
     {
         bool fEtwUseCyclesCounter;
-        hr = _GetBool(XmlDoc, "//Profile/ETW/UseCyclesCounter", &fEtwUseCyclesCounter);
+        hr = _GetBool(pXmlDoc, "//Profile/ETW/UseCyclesCounter", &fEtwUseCyclesCounter);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pProfile->SetEtwEnabled(true);
@@ -399,11 +387,11 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 &XmlDoc, Profile *pProfile)
+HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile)
 {
-    IXMLDOMNodeListPtr spNodeList;
-    _variant_t query("//Profile/TimeSpans/TimeSpan");
-    HRESULT hr = XmlDoc.selectNodes(query.bstrVal, &spNodeList);
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    CComVariant query("//Profile/TimeSpans/TimeSpan");
+    HRESULT hr = pXmlDoc->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
         long cNodes;
@@ -412,7 +400,7 @@ HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 &XmlDoc, Profile *pPr
         {
             for (int i = 0; i < cNodes; i++)
             {
-                IXMLDOMNodePtr spNode;
+                CComPtr<IXMLDOMNode> spNode = nullptr;
                 hr = spNodeList->get_item(i, &spNode);
                 if (SUCCEEDED(hr))
                 {
@@ -430,10 +418,10 @@ HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 &XmlDoc, Profile *pPr
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpan)
+HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
 {
     UINT32 ulDuration;
-    HRESULT hr = _GetUINT32(XmlNode, "Duration", &ulDuration);
+    HRESULT hr = _GetUINT32(pXmlNode, "Duration", &ulDuration);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         pTimeSpan->SetDuration(ulDuration);
@@ -442,7 +430,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         UINT32 ulWarmup;
-        hr = _GetUINT32(XmlNode, "Warmup", &ulWarmup);
+        hr = _GetUINT32(pXmlNode, "Warmup", &ulWarmup);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetWarmup(ulWarmup);
@@ -452,7 +440,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         UINT32 ulCooldown;
-        hr = _GetUINT32(XmlNode, "Cooldown", &ulCooldown);
+        hr = _GetUINT32(pXmlNode, "Cooldown", &ulCooldown);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetCooldown(ulCooldown);
@@ -462,7 +450,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         UINT32 ulRandSeed;
-        hr = _GetUINT32(XmlNode, "RandSeed", &ulRandSeed);
+        hr = _GetUINT32(pXmlNode, "RandSeed", &ulRandSeed);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetRandSeed(ulRandSeed);
@@ -472,7 +460,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         UINT32 ulThreadCount;
-        hr = _GetUINT32(XmlNode, "ThreadCount", &ulThreadCount);
+        hr = _GetUINT32(pXmlNode, "ThreadCount", &ulThreadCount);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetThreadCount(ulThreadCount);
@@ -482,7 +470,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         bool fDisableAffinity;
-        hr = _GetBool(XmlNode, "DisableAffinity", &fDisableAffinity);
+        hr = _GetBool(pXmlNode, "DisableAffinity", &fDisableAffinity);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetDisableAffinity(fDisableAffinity);
@@ -492,7 +480,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         bool fCompletionRoutines;
-        hr = _GetBool(XmlNode, "CompletionRoutines", &fCompletionRoutines);
+        hr = _GetBool(pXmlNode, "CompletionRoutines", &fCompletionRoutines);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetCompletionRoutines(fCompletionRoutines);
@@ -502,7 +490,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         bool fMeasureLatency;
-        hr = _GetBool(XmlNode, "MeasureLatency", &fMeasureLatency);
+        hr = _GetBool(pXmlNode, "MeasureLatency", &fMeasureLatency);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetMeasureLatency(fMeasureLatency);
@@ -512,7 +500,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         bool fCalculateIopsStdDev;
-        hr = _GetBool(XmlNode, "CalculateIopsStdDev", &fCalculateIopsStdDev);
+        hr = _GetBool(pXmlNode, "CalculateIopsStdDev", &fCalculateIopsStdDev);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetCalculateIopsStdDev(fCalculateIopsStdDev);
@@ -522,7 +510,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     if (SUCCEEDED(hr))
     {
         UINT32 ulIoBucketDuration;
-        hr = _GetUINT32(XmlNode, "IoBucketDuration", &ulIoBucketDuration);
+        hr = _GetUINT32(pXmlNode, "IoBucketDuration", &ulIoBucketDuration);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetIoBucketDurationInMilliseconds(ulIoBucketDuration);
@@ -532,27 +520,27 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode &XmlNode, TimeSpan *pTimeSp
     // Look for downlevel non-group aware assignment
     if (SUCCEEDED(hr))
     {
-        hr = _ParseAffinityAssignment(XmlNode, pTimeSpan);
+        hr = _ParseAffinityAssignment(pXmlNode, pTimeSpan);
     }
 
     // Look for uplevel group aware assignment.
     if (SUCCEEDED(hr))
     {
-        hr = _ParseAffinityGroupAssignment(XmlNode, pTimeSpan);
+        hr = _ParseAffinityGroupAssignment(pXmlNode, pTimeSpan);
     }
 
     if (SUCCEEDED(hr))
     {
-        hr = _ParseTargets(XmlNode, pTimeSpan);
+        hr = _ParseTargets(pXmlNode, pTimeSpan);
     }
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpan)
+HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
 {
-    _variant_t query("Targets/Target");
-    IXMLDOMNodeListPtr spNodeList;
-    HRESULT hr = XmlNode.selectNodes(query.bstrVal, &spNodeList);
+    CComVariant query("Targets/Target");
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
         long cNodes;
@@ -561,7 +549,7 @@ HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpa
         {
             for (int i = 0; i < cNodes; i++)
             {
-                IXMLDOMNodePtr spNode;
+                CComPtr<IXMLDOMNode> spNode = nullptr;
                 hr = spNodeList->get_item(i, &spNode);
                 if (SUCCEEDED(hr))
                 {
@@ -575,18 +563,18 @@ HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpa
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseRandomDataSource(IXMLDOMNode &XmlNode, Target *pTarget)
+HRESULT XmlProfileParser::_ParseRandomDataSource(IXMLDOMNode *pXmlNode, Target *pTarget)
 {
-    IXMLDOMNodeListPtr spNodeList;
-    _variant_t query("RandomDataSource");
-    HRESULT hr = XmlNode.selectNodes(query.bstrVal, &spNodeList);
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    CComVariant query("RandomDataSource");
+    HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
         long cNodes;
         hr = spNodeList->get_length(&cNodes);
         if (SUCCEEDED(hr) && (cNodes == 1))
         {
-            IXMLDOMNodePtr spNode;
+            CComPtr<IXMLDOMNode> spNode = nullptr;
             hr = spNodeList->get_item(0, &spNode);
             if (SUCCEEDED(hr))
             {
@@ -609,18 +597,18 @@ HRESULT XmlProfileParser::_ParseRandomDataSource(IXMLDOMNode &XmlNode, Target *p
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseWriteBufferContent(IXMLDOMNode &XmlNode, Target *pTarget)
+HRESULT XmlProfileParser::_ParseWriteBufferContent(IXMLDOMNode *pXmlNode, Target *pTarget)
 {
-    IXMLDOMNodeListPtr spNodeList;
-    _variant_t query("WriteBufferContent");
-    HRESULT hr = XmlNode.selectNodes(query.bstrVal, &spNodeList);
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    CComVariant query("WriteBufferContent");
+    HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
         long cNodes;
         hr = spNodeList->get_length(&cNodes);
         if (SUCCEEDED(hr) && (cNodes == 1))
         {
-            IXMLDOMNodePtr spNode;
+            CComPtr<IXMLDOMNode> spNode = nullptr;
             hr = spNodeList->get_item(0, &spNode);
             if (SUCCEEDED(hr))
             {
@@ -651,10 +639,10 @@ HRESULT XmlProfileParser::_ParseWriteBufferContent(IXMLDOMNode &XmlNode, Target 
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
+HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
 {
     string sPath;
-    HRESULT hr = _GetString(XmlNode, "Path", &sPath);
+    HRESULT hr = _GetString(pXmlNode, "Path", &sPath);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         pTarget->SetPath(sPath);
@@ -663,7 +651,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         DWORD dwBlockSize;
-        hr = _GetDWORD(XmlNode, "BlockSize", &dwBlockSize);
+        hr = _GetDWORD(pXmlNode, "BlockSize", &dwBlockSize);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetBlockSizeInBytes(dwBlockSize);
@@ -673,7 +661,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         UINT64 ullStrideSize;
-        hr = _GetUINT64(XmlNode, "StrideSize", &ullStrideSize);
+        hr = _GetUINT64(pXmlNode, "StrideSize", &ullStrideSize);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetBlockAlignmentInBytes(ullStrideSize);
@@ -683,7 +671,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fInterlockedSequential;
-        hr = _GetBool(XmlNode, "InterlockedSequential", &fInterlockedSequential);
+        hr = _GetBool(pXmlNode, "InterlockedSequential", &fInterlockedSequential);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetUseInterlockedSequential(fInterlockedSequential);
@@ -693,7 +681,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         UINT64 ullBaseFileOffset;
-        hr = _GetUINT64(XmlNode, "BaseFileOffset", &ullBaseFileOffset);
+        hr = _GetUINT64(pXmlNode, "BaseFileOffset", &ullBaseFileOffset);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetBaseFileOffsetInBytes(ullBaseFileOffset);
@@ -703,7 +691,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fBool;
-        hr = _GetBool(XmlNode, "SequentialScan", &fBool);
+        hr = _GetBool(pXmlNode, "SequentialScan", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetSequentialScanHint(fBool);
@@ -713,7 +701,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fBool;
-        hr = _GetBool(XmlNode, "RandomAccess", &fBool);
+        hr = _GetBool(pXmlNode, "RandomAccess", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetRandomAccessHint(fBool);
@@ -723,7 +711,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fBool;
-        hr = _GetBool(XmlNode, "TemporaryFile", &fBool);
+        hr = _GetBool(pXmlNode, "TemporaryFile", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetTemporaryFileHint(fBool);
@@ -733,7 +721,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fUseLargePages;
-        hr = _GetBool(XmlNode, "UseLargePages", &fUseLargePages);
+        hr = _GetBool(pXmlNode, "UseLargePages", &fUseLargePages);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetUseLargePages(fUseLargePages);
@@ -743,7 +731,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         DWORD dwRequestCount;
-        hr = _GetDWORD(XmlNode, "RequestCount", &dwRequestCount);
+        hr = _GetDWORD(pXmlNode, "RequestCount", &dwRequestCount);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetRequestCount(dwRequestCount);
@@ -753,7 +741,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         UINT64 ullRandom;
-        hr = _GetUINT64(XmlNode, "Random", &ullRandom);
+        hr = _GetUINT64(pXmlNode, "Random", &ullRandom);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetUseRandomAccessPattern(true);
@@ -764,7 +752,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fBool;
-        hr = _GetBool(XmlNode, "DisableOSCache", &fBool);
+        hr = _GetBool(pXmlNode, "DisableOSCache", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
             pTarget->SetCacheMode(TargetCacheMode::DisableOSCache);
@@ -774,7 +762,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fBool;
-        hr = _GetBool(XmlNode, "DisableAllCache", &fBool);
+        hr = _GetBool(pXmlNode, "DisableAllCache", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
             pTarget->SetCacheMode(TargetCacheMode::DisableAllCache);
@@ -784,7 +772,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fBool;
-        hr = _GetBool(XmlNode, "DisableLocalCache", &fBool);
+        hr = _GetBool(pXmlNode, "DisableLocalCache", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
             pTarget->SetCacheMode(TargetCacheMode::DisableLocalCache);
@@ -793,13 +781,13 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
 
     if (SUCCEEDED(hr))
     {
-        hr = _ParseWriteBufferContent(XmlNode, pTarget);
+        hr = _ParseWriteBufferContent(pXmlNode, pTarget);
     }
 
     if (SUCCEEDED(hr))
     {
         DWORD dwBurstSize;
-        hr = _GetDWORD(XmlNode, "BurstSize", &dwBurstSize);
+        hr = _GetDWORD(pXmlNode, "BurstSize", &dwBurstSize);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetBurstSize(dwBurstSize);
@@ -810,7 +798,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         DWORD dwThinkTime;
-        hr = _GetDWORD(XmlNode, "ThinkTime", &dwThinkTime);
+        hr = _GetDWORD(pXmlNode, "ThinkTime", &dwThinkTime);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetThinkTime(dwThinkTime);
@@ -821,7 +809,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         DWORD dwThroughput;
-        hr = _GetDWORD(XmlNode, "Throughput", &dwThroughput);
+        hr = _GetDWORD(pXmlNode, "Throughput", &dwThroughput);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetThroughput(dwThroughput);
@@ -831,7 +819,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         DWORD dwThreadsPerFile;
-        hr = _GetDWORD(XmlNode, "ThreadsPerFile", &dwThreadsPerFile);
+        hr = _GetDWORD(pXmlNode, "ThreadsPerFile", &dwThreadsPerFile);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetThreadsPerFile(dwThreadsPerFile);
@@ -841,7 +829,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         UINT64 ullFileSize;
-        hr = _GetUINT64(XmlNode, "FileSize", &ullFileSize);
+        hr = _GetUINT64(pXmlNode, "FileSize", &ullFileSize);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetFileSize(ullFileSize);
@@ -852,7 +840,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         UINT64 ullMaxFileSize;
-        hr = _GetUINT64(XmlNode, "MaxFileSize", &ullMaxFileSize);
+        hr = _GetUINT64(pXmlNode, "MaxFileSize", &ullMaxFileSize);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetMaxFileSize(ullMaxFileSize);
@@ -862,7 +850,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         UINT32 ulWriteRatio;
-        hr = _GetUINT32(XmlNode, "WriteRatio", &ulWriteRatio);
+        hr = _GetUINT32(pXmlNode, "WriteRatio", &ulWriteRatio);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetWriteRatio(ulWriteRatio);
@@ -872,7 +860,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fParallelAsyncIO;
-        hr = _GetBool(XmlNode, "ParallelAsyncIO", &fParallelAsyncIO);
+        hr = _GetBool(pXmlNode, "ParallelAsyncIO", &fParallelAsyncIO);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetUseParallelAsyncIO(fParallelAsyncIO);
@@ -882,7 +870,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         UINT64 ullThreadStride;
-        hr = _GetUINT64(XmlNode, "ThreadStride", &ullThreadStride);
+        hr = _GetUINT64(pXmlNode, "ThreadStride", &ullThreadStride);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetThreadStrideInBytes(ullThreadStride);
@@ -892,7 +880,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         UINT32 ulIOPriority;
-        hr = _GetUINT32(XmlNode, "IOPriority", &ulIOPriority);
+        hr = _GetUINT32(pXmlNode, "IOPriority", &ulIOPriority);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             PRIORITY_HINT hint[] = { IoPriorityHintVeryLow, IoPriorityHintLow, IoPriorityHintNormal };
@@ -910,11 +898,11 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode &XmlNode, Target *pTarget)
 //
 // The XML result parser no longer emits this form.
 
-HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpan)
+HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
 {
-    IXMLDOMNodeListPtr spNodeList;
-    _variant_t query("Affinity/AffinityAssignment");
-    HRESULT hr = XmlNode.selectNodes(query.bstrVal, &spNodeList);
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    CComVariant query("Affinity/AffinityAssignment");
+    HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
         long cNodes;
@@ -923,7 +911,7 @@ HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode &XmlNode, TimeSpa
         {
             for (int i = 0; i < cNodes; i++)
             {
-                IXMLDOMNodePtr spNode;
+                CComPtr<IXMLDOMNode> spNode = nullptr;
                 hr = spNodeList->get_item(i, &spNode);
                 if (SUCCEEDED(hr))
                 {
@@ -943,12 +931,12 @@ HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode &XmlNode, TimeSpa
 
 // Group aware affinity assignment. This is the only form emitted by the XML result parser.
 
-HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode &XmlNode, TimeSpan *pTimeSpan)
+HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
 {
-    IXMLDOMNodeListPtr spNodeList;
-    _variant_t query("Affinity/AffinityGroupAssignment");
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    CComVariant query("Affinity/AffinityGroupAssignment");
 
-    HRESULT hr = XmlNode.selectNodes(query.bstrVal, &spNodeList);
+    HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
         long cNodes;
@@ -957,7 +945,7 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode &XmlNode, Ti
         {
             for (int i = 0; i < cNodes; i++)
             {
-                IXMLDOMNodePtr spNode;
+                CComPtr<IXMLDOMNode> spNode = nullptr;
                 hr = spNodeList->get_item(i, &spNode);
                 if (SUCCEEDED(hr))
                 {
@@ -992,11 +980,11 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode &XmlNode, Ti
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetUINT32(IXMLDOMNode &XmlNode, const char *pszQuery, UINT32 *pulValue) const
+HRESULT XmlProfileParser::_GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT32 *pulValue) const
 {
-    IXMLDOMNodePtr spNode;
-    _variant_t query(pszQuery);
-    HRESULT hr = XmlNode.selectSingleNode(query.bstrVal, &spNode);
+    CComPtr<IXMLDOMNode> spNode = nullptr;
+    CComVariant query(pszQuery);
+    HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         BSTR bstrText;
@@ -1010,14 +998,14 @@ HRESULT XmlProfileParser::_GetUINT32(IXMLDOMNode &XmlNode, const char *pszQuery,
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode &XmlNode, const char *pszAttr, UINT32 *pulValue) const
+HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszAttr, UINT32 *pulValue) const
 {
-    IXMLDOMNamedNodeMapPtr spNamedNodeMap;
-    _bstr_t attr(pszAttr);
-    HRESULT hr = XmlNode.get_attributes(&spNamedNodeMap);
+    CComPtr<IXMLDOMNamedNodeMap> spNamedNodeMap = nullptr;
+    CComBSTR attr(pszAttr);
+    HRESULT hr = pXmlNode->get_attributes(&spNamedNodeMap);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
-        IXMLDOMNodePtr spNode;
+        CComPtr<IXMLDOMNode> spNode = nullptr;
         HRESULT hr = spNamedNodeMap->getNamedItem(attr, &spNode);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
@@ -1033,11 +1021,11 @@ HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode &XmlNode, const char *pszAt
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetString(IXMLDOMNode &XmlNode, const char *pszQuery, string *psValue) const
+HRESULT XmlProfileParser::_GetString(IXMLDOMNode *pXmlNode, const char *pszQuery, string *psValue) const
 {
-    IXMLDOMNodePtr spNode;
-    _variant_t query(pszQuery);
-    HRESULT hr = XmlNode.selectSingleNode(query.bstrVal, &spNode);
+    CComPtr<IXMLDOMNode> spNode = nullptr;
+    CComVariant query(pszQuery);
+    HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         BSTR bstrText;
@@ -1054,11 +1042,11 @@ HRESULT XmlProfileParser::_GetString(IXMLDOMNode &XmlNode, const char *pszQuery,
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetUINT64(IXMLDOMNode &XmlNode, const char *pszQuery, UINT64 *pullValue) const
+HRESULT XmlProfileParser::_GetUINT64(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT64 *pullValue) const
 {
-    IXMLDOMNodePtr spNode;
-    _variant_t query(pszQuery);
-    HRESULT hr = XmlNode.selectSingleNode(query.bstrVal, &spNode);
+    CComPtr<IXMLDOMNode> spNode = nullptr;
+    CComVariant query(pszQuery);
+    HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         BSTR bstrText;
@@ -1072,10 +1060,10 @@ HRESULT XmlProfileParser::_GetUINT64(IXMLDOMNode &XmlNode, const char *pszQuery,
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetDWORD(IXMLDOMNode &XmlNode, const char *pszQuery, DWORD *pdwValue) const
+HRESULT XmlProfileParser::_GetDWORD(IXMLDOMNode *pXmlNode, const char *pszQuery, DWORD *pdwValue) const
 {
     UINT32 value = 0;
-    HRESULT hr = _GetUINT32(XmlNode, pszQuery, &value);
+    HRESULT hr = _GetUINT32(pXmlNode, pszQuery, &value);
     if (SUCCEEDED(hr))
     {
         *pdwValue = value;
@@ -1083,12 +1071,12 @@ HRESULT XmlProfileParser::_GetDWORD(IXMLDOMNode &XmlNode, const char *pszQuery, 
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetBool(IXMLDOMNode &XmlNode, const char *pszQuery, bool *pfValue) const
+HRESULT XmlProfileParser::_GetBool(IXMLDOMNode *pXmlNode, const char *pszQuery, bool *pfValue) const
 {
     HRESULT hr = S_OK;
-    IXMLDOMNodePtr spNode;
-    _variant_t query(pszQuery);
-    hr = XmlNode.selectSingleNode(query.bstrVal, &spNode);
+    CComPtr<IXMLDOMNode> spNode = nullptr;
+    CComVariant query(pszQuery);
+    hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         BSTR bstrText;
@@ -1102,12 +1090,12 @@ HRESULT XmlProfileParser::_GetBool(IXMLDOMNode &XmlNode, const char *pszQuery, b
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetVerbose(IXMLDOMDocument2 &pXmlDoc, bool *pfVerbose)
+HRESULT XmlProfileParser::_GetVerbose(IXMLDOMDocument2 *pXmlDoc, bool *pfVerbose)
 {
     return _GetBool(pXmlDoc, "//Profile/Verbose", pfVerbose);
 }
 
-HRESULT XmlProfileParser::_GetProgress(IXMLDOMDocument2 &pXmlDoc, DWORD *pdwProgress)
+HRESULT XmlProfileParser::_GetProgress(IXMLDOMDocument2 *pXmlDoc, DWORD *pdwProgress)
 {
     return _GetDWORD(pXmlDoc, "//Profile/Progress", pdwProgress);
 }
