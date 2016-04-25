@@ -270,7 +270,7 @@ bool Target::_FillRandomDataWriteBuffer()
         }
         else
         {
-            printf("\n\nUnable to open file '%s'\n\n", GetRandomDataWriteBufferSourcePath().c_str());
+            printf("\n\nERROR: Unable to open entropy file '%s'\n\n", GetRandomDataWriteBufferSourcePath().c_str());
             fOk = false;
         }
     }
