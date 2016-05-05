@@ -8,6 +8,15 @@ What's New?
 
 In addition DISKSPD itself, this repo hosts measurement frameworks which use DISKSPD. The initial example is the ***VM Fleet*** being used for Windows Server 2016 Hyper-Converged Storage Spaces Direct work. Look for these under the *Frameworks* directory.
 
+DISKSPD 2.0.17 5/01/2016
+
+* -S is expanded to control write-through independent of OS/software cache. Among other things, this allows buffered write-through to be specified (-Sbw).
+* XML: adds a new `<WriteThrough>` element to specify write-through
+* XML: `<DisableAllCache>` is no longer emitted (still parsed, though), in favor or `<WriteThrough>` and `<DisableOSCache>`
+* Text output: OS/software cache and write-through state are now documented separately (adjacent lines)
+* Latency histogram now reports to 9-nines (one part in one billion) in both text and XML output
+* Error message added for failure to open write-content source file (`-Z<size>,<file>`)
+
 DISKSPD 2.0.16b 2/22/2016
 
 * -ag is now default (round robin group-aware affinity)
