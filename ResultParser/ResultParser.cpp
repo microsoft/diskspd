@@ -224,20 +224,39 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     _Print("\t\tburst size: %u\n", target.GetBurstSize());
     // TODO: completion routines/ports
 
-    switch (target.GetCacheMode()) {
-    case TargetCacheMode::Cached:
-        _Print("\t\tusing software and hardware write cache\n");
-        break;
-    case TargetCacheMode::DisableAllCache:
-        _Print("\t\tsoftware and hardware write cache disabled\n");
-        break;
-    case TargetCacheMode::DisableLocalCache:
-        _Print("\t\tlocal software cache disabled, remote caches enabled\n");
-        break;
-    case TargetCacheMode::DisableOSCache:
-        _Print("\t\tsoftware cache disabled\n");
-        break;
+    switch (target.GetCacheMode())
+    {
+        case TargetCacheMode::Cached:
+            _Print("\t\tusing software cache\n");
+            break;
+        case TargetCacheMode::DisableLocalCache:
+            _Print("\t\tlocal software cache disabled, remote cache enabled\n");
+            break;
+        case TargetCacheMode::DisableOSCache:
+            _Print("\t\tsoftware cache disabled\n");
+            break;
     }
+
+    if (target.GetWriteThroughMode() == WriteThroughMode::On)
+    {
+        // context-appropriate comment on writethrough
+        // if sw cache is disabled, commenting on sw write cache is possibly confusing
+        switch (target.GetCacheMode())
+        {
+        case TargetCacheMode::Cached:
+        case TargetCacheMode::DisableLocalCache:
+            _Print("\t\thardware and software write caches disabled, writethrough on\n");
+            break;
+        case TargetCacheMode::DisableOSCache:
+            _Print("\t\thardware write cache disabled, writethrough on\n");
+            break;
+        }
+    }
+    else
+    {
+        _Print("\t\tusing hardware write cache, writethrough off\n");
+    }
+
 
     if (target.GetZeroWriteBuffers())
     {

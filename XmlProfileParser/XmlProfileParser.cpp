@@ -765,7 +765,8 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
         hr = _GetBool(pXmlNode, "DisableAllCache", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
-            pTarget->SetCacheMode(TargetCacheMode::DisableAllCache);
+            pTarget->SetCacheMode(TargetCacheMode::DisableOSCache);
+            pTarget->SetWriteThroughMode(WriteThroughMode::On);
         }
     }
 
@@ -776,6 +777,16 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
         if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
             pTarget->SetCacheMode(TargetCacheMode::DisableLocalCache);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        bool fBool;
+        hr = _GetBool(pXmlNode, "WriteThrough", &fBool);
+        if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
+        {
+            pTarget->SetWriteThroughMode(WriteThroughMode::On);
         }
     }
 

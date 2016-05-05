@@ -49,8 +49,8 @@ using namespace std;
 //      Monday, June 16, 2014 12:00:00 AM
 
 #define DISKSPD_RELEASE_TAG ""
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.17" DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2016/4/13"
+#define DISKSPD_NUMERIC_VERSION_STRING "2.0.17a" DISKSPD_RELEASE_TAG
+#define DISKSPD_DATE_VERSION_STRING "2016/5/01"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -428,7 +428,8 @@ public:
 class SystemInformation
 {
 private:
-    time_t t;
+    SYSTEMTIME StartTime;
+
 public:
     string sComputerName;
     ProcessorTopology processorTopology;
@@ -448,13 +449,13 @@ public:
         }
 
         // capture start time
-        time(&t);
+        GetSystemTime(&StartTime);
     }
 
     // for unit test, squelch variable timestamp
     void SystemInformation::ResetTime()
     {
-        t = 0;
+        StartTime = { 0 };
     }
 
     string SystemInformation::GetXml() const
@@ -474,25 +475,19 @@ public:
         sXml += "<VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n";
         sXml += "</Tool>\n";
 
-        // identify run time in GMT (parses with System.DateTime)
         sXml += "<RunTime>";
-        if (t != 0)
-        {
-            errno_t err;
-            struct tm ttm;
-            err = gmtime_s(&ttm, &t);
-            if (!err) {
-                nWritten = snprintf(szBuffer, _countof(szBuffer),
-                    "%u/%02u/%02u %02u:%02u:%02u GMT",
-                    1900 + ttm.tm_year,
-                    1 + ttm.tm_mon,
-                    ttm.tm_mday,
-                    ttm.tm_hour,
-                    ttm.tm_min,
-                    ttm.tm_sec);
-                assert(nWritten && nWritten < _countof(szBuffer));
-                sXml += szBuffer;
-            }
+        if (StartTime.wYear) {
+
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer),
+                "%u/%02u/%02u %02u:%02u:%02u GMT",
+                StartTime.wYear,
+                StartTime.wMonth,
+                StartTime.wDay,
+                StartTime.wHour,
+                StartTime.wMinute,
+                StartTime.wSecond);
+            assert(nWritten && nWritten < _countof(szBuffer));
+            sXml += szBuffer;
         }
         sXml += "</RunTime>\n";
 
@@ -507,7 +502,7 @@ public:
             sXml += "\" ActiveProcessors=\"";
             sXml += to_string(g._activeProcessorCount);
             sXml += "\" ActiveProcessorMask=\"0x";
-            nWritten = snprintf(szBuffer, _countof(szBuffer), "%Ix", g._activeProcessorMask);
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g._activeProcessorMask);
             assert(nWritten && nWritten < _countof(szBuffer));
             sXml += szBuffer;
             sXml += "\"/>\n";
@@ -538,15 +533,23 @@ struct Synchronization
     )
 
 // caching modes
-// cached-> default
-// disableoscache  -> no_intermediate_buffering (-S)
-// disableallcache -> +write_through (-h or -Sh)
+// cached -> default (-Sb explicitly)
+// disableoscache  -> no_intermediate_buffering (-S or -Su)
 // disablelocalcache -> cached, but then tear down local rdr cache (-Sr)
 enum class TargetCacheMode {
-    Cached = 1,
+    Undefined = 0,
+    Cached,
     DisableOSCache,
-    DisableAllCache,
     DisableLocalCache
+};
+
+// writethrough modes
+// off -> default
+// on -> (-Sw or implied with -Sh == -Suw/-Swu)
+enum class WriteThroughMode {
+    Undefined = 0,
+    Off,
+    On,
 };
 
 class Target
@@ -563,6 +566,7 @@ public:
         _fParallelAsyncIO(false),
         _fInterlockedSequential(false),
         _cacheMode(TargetCacheMode::Cached),
+        _writeThroughMode(WriteThroughMode::Off),
         _fZeroWriteBuffers(false),
         _dwThreadsPerFile(1),
         _ullThreadStride(0),
@@ -627,6 +631,9 @@ public:
 
     void SetCacheMode(TargetCacheMode cacheMode) { _cacheMode = cacheMode; }
     TargetCacheMode GetCacheMode() const { return _cacheMode;  }
+
+    void SetWriteThroughMode(WriteThroughMode writeThroughMode ) { _writeThroughMode = writeThroughMode; }
+    WriteThroughMode GetWriteThroughMode( ) const { return _writeThroughMode; }
 
     void SetZeroWriteBuffers(bool fBool) { _fZeroWriteBuffers = fBool; }
     bool GetZeroWriteBuffers() const { return _fZeroWriteBuffers; }
@@ -721,9 +728,9 @@ public:
             dwFlags |= FILE_FLAG_NO_BUFFERING;
         }
 
-        if (GetCacheMode() == TargetCacheMode::DisableAllCache)
+        if (GetWriteThroughMode( ) == WriteThroughMode::On)
         {
-            dwFlags |= (FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH);
+            dwFlags |= FILE_FLAG_WRITE_THROUGH;
         }
 
         return dwFlags;
@@ -743,6 +750,7 @@ private:
     bool _fInterlockedSequential;
 
     TargetCacheMode _cacheMode;
+    WriteThroughMode _writeThroughMode;
     bool _fZeroWriteBuffers;
     DWORD _dwThreadsPerFile;
     UINT64 _ullThreadStride;
@@ -751,7 +759,6 @@ private:
     bool _fPrecreated;          // used to track which files have been created before the first timespan and which have to be created later
     UINT64 _ullFileSize;
     UINT64 _ullMaxFileSize;
-
 
     UINT32 _ulWriteRatio;
     bool _fUseBurstSize;    // TODO: "use" or "enable"?; since burst size must be specified with the think time, one variable should be sufficient

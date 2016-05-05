@@ -118,15 +118,21 @@ string Target::GetXml() const
     sXml += _fUseLargePages ? "<UseLargePages>true</UseLargePages>\n" : "<UseLargePages>false</UseLargePages>\n";
 
     // TargetCacheMode::Cached is implied default
-    switch (_cacheMode) {
-    case TargetCacheMode::DisableAllCache:
-        sXml += "<DisableAllCache>true</DisableAllCache>\n";
-        break;
+    switch (_cacheMode)
+    {
     case TargetCacheMode::DisableLocalCache:
         sXml += "<DisableLocalCache>true</DisableLocalCache>\n";
         break;
     case TargetCacheMode::DisableOSCache:
         sXml += "<DisableOSCache>true</DisableOSCache>\n";
+        break;
+    }
+
+    // WriteThroughMode::Off is implied default
+    switch (_writeThroughMode)
+    {
+    case WriteThroughMode::On:
+        sXml += "<WriteThrough>true</WriteThrough>\n";
         break;
     }
     
@@ -321,7 +327,7 @@ BYTE* Target::GetRandomDataWriteBuffer()
     // leave enough bytes in the buffer for one block
     size_t randomOffset = rand() % (cbBuffer - (cbBlock - 1));
 
-    bool fUnbufferedIO = (_cacheMode == TargetCacheMode::DisableAllCache || _cacheMode == TargetCacheMode::DisableOSCache);
+    bool fUnbufferedIO = (_cacheMode == TargetCacheMode::DisableOSCache);
     if (fUnbufferedIO)
     {
         // for unbuffered IO, offset in the buffer needs to be DWORD-aligned
@@ -333,7 +339,6 @@ BYTE* Target::GetRandomDataWriteBuffer()
 
     // unbuffered IO needs aligned addresses
     assert(!fUnbufferedIO || (reinterpret_cast<ULONG_PTR>(pBuffer) % 4 == 0));
-
     assert(pBuffer >= _pRandomDataWriteBuffer);
     assert(pBuffer <= _pRandomDataWriteBuffer + GetRandomDataWriteBufferSize() - GetBlockSizeInBytes());
 
@@ -523,7 +528,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 
                     if (fOk && !pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].IsProcessorActive(Affinity.bProc))
                     {
-                        fprintf(stderr, "ERROR: affinity assignment to group %u core %u not possible; core is not active (current mask 0x%I64x)\n",
+                        fprintf(stderr, "ERROR: affinity assignment to group %u core %u not possible; core is not active (current mask 0x%Ix)\n",
                             Affinity.wGroup,
                             Affinity.bProc,
                             pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup]._activeProcessorMask);

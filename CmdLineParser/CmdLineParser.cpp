@@ -192,11 +192,14 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("                          manipulate a shared offset with InterlockedIncrement, which may reduce throughput,\n");
     printf("                          but promotes a more sequential pattern.\n");
     printf("                          (ignored if -r specified, -si conflicts with -T and -p)\n");
-    printf("  -S[h|r]               control caching behavior [default: caching is enabled]\n");
-    printf("  -S                    disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n");
-    printf("  -Sh                   disable both software caching and hardware write caching, equivalent to\n");
-    printf("                          FILE_FLAG_NO_BUFFERING and FILE_FLAG_WRITE_THROUGH\n");
-    printf("  -Sr                   disable local caching, leaving remote caching enabled; only valid for remote filesystems\n");
+    printf("  -S[bhruw]             control caching behavior [default: caching is enabled, no writethrough]\n");
+    printf("                          non-conflicting flags may be combined in any order; ex: -Sbw, -Suw, -Swu\n");
+    printf("  -S                    equivalent to -Su\n");
+    printf("  -Sb                   enable caching (default, explicitly stated)\n");
+    printf("  -Sh                   equivalent -Suw\n");
+    printf("  -Su                   disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n");
+    printf("  -Sr                   disable local caching, with remote sw caching enabled; only valid for remote filesystems\n");
+    printf("  -Sw                   enable writethrough (no hardware write caching), equivalent to FILE_FLAG_WRITE_THROUGH\n");
     printf("  -t<count>             number of threads per target (conflicts with -F)\n");
     printf("  -T<offs>[K|M|G|b]     starting stride between I/O operations performed on the same target by different threads\n");
     printf("                          [default=0] (starting offset = base file offset + (thread number * <offs>)\n");
@@ -517,6 +520,12 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         }
     }
 
+    // initial parse for cache/writethrough
+    // these are built up across the entire cmd line and applied at the end.
+    // this allows for conflicts to be thrown for mixed -h/-S as needed.
+    TargetCacheMode t = TargetCacheMode::Undefined;
+    WriteThroughMode w = WriteThroughMode::Undefined;
+
     TimeSpan timeSpan;
     bool bExit = false;
     while (nParamCnt)
@@ -740,10 +749,17 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             }
             break;
 
-        case 'h':    //disable both software and hardware caching; now equivalent to -Sh
-            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+        case 'h':    // compat: disable os cache and set writethrough; now equivalent to -Sh
+            if (t == TargetCacheMode::Undefined &&
+                w == WriteThroughMode::Undefined)
             {
-                i->SetCacheMode(TargetCacheMode::DisableAllCache);
+                t = TargetCacheMode::DisableOSCache;
+                w = WriteThroughMode::On;
+            }
+            else
+            {
+                fprintf(stderr, "-h conflicts with earlier specification of cache/writethrough\n");
+                fError = true;
             }
             break;
 
@@ -931,26 +947,92 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             }
             break;
 
-        case 'S':   //control os/hw/remote caching
-            //IMPORTANT: If uncached to physical storage, file access must begin at byte offsets within the file that are integer multiples
-            // of the volume's sector size. File access must be for numbers of bytes that are integer multiples of the volume's sector size.
-            // For example, if the sector size is 512 bytes, an application can request reads and writes of 512, 1024, or 2048 bytes, but not
-            // of 335, 981, or 7171 bytes.
-            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+        case 'S':   //control os/hw/remote caching and writethrough
             {
-                switch (*(arg + 1)) {
-                case 'h':
-                    i->SetCacheMode(TargetCacheMode::DisableAllCache);
-                    break;
-                case 'r':
-                    i->SetCacheMode(TargetCacheMode::DisableLocalCache);
-                    break;
-                case '\0':
-                    i->SetCacheMode(TargetCacheMode::DisableOSCache);
-                    break;
-                default:
-                    fError = true;
-                    break;
+                // parse flags - it is an error to multiply specify either property, which
+                //   can be detected simply by checking if we move one from !undefined.
+                //   this also handles conflict cases.
+                int idx;
+                for (idx = 1; !fError && *(arg + idx) != '\0'; idx++)
+                {
+                    switch (*(arg + idx))
+                    {
+                    case 'b':
+                        if (t == TargetCacheMode::Undefined)
+                        {
+                            t = TargetCacheMode::Cached;
+                        }
+                        else
+                        {
+                            fprintf(stderr, "-Sb conflicts with earlier specification of cache mode\n");
+                            fError = true;
+                        }
+                        break; 
+                    case 'h':
+                        if (t == TargetCacheMode::Undefined &&
+                            w == WriteThroughMode::Undefined)
+                        {
+                            t = TargetCacheMode::DisableOSCache;
+                            w = WriteThroughMode::On;
+                        }
+                        else
+                        {
+                            fprintf(stderr, "-Sh conflicts with earlier specification of cache/writethrough\n");
+                            fError = true;
+                        }
+                        break;
+                    case 'r':
+                        if (t == TargetCacheMode::Undefined)
+                        {
+                            t = TargetCacheMode::DisableLocalCache;
+                        }
+                        else
+                        {
+                            fprintf(stderr, "-Sr conflicts with earlier specification of cache mode\n");
+                            fError = true;
+                        }
+                        break;
+                    case 'u':
+                        if (t == TargetCacheMode::Undefined)
+                        {
+                            t = TargetCacheMode::DisableOSCache;
+                        }
+                        else
+                        {
+                            fprintf(stderr, "-Su conflicts with earlier specification of cache mode\n");
+                            fError = true;
+                        }
+                        break;
+                    case 'w':
+                        if (w == WriteThroughMode::Undefined)
+                        {
+                            w = WriteThroughMode::On;
+                        }
+                        else
+                        {
+                            fprintf(stderr, "-Sw conflicts with earlier specification of write through\n");
+                            fError = true;
+                        }
+                        break;
+                    default:
+                        fprintf(stderr, "unrecognized option provided to -S\n");
+                        fError = true;
+                        break;
+                    }
+                }
+
+                // bare -S, parse loop did not advance
+                if (!fError && idx == 1)
+                {
+                    if (t == TargetCacheMode::Undefined)
+                    {
+                        t = TargetCacheMode::DisableOSCache;
+                    }
+                    else
+                    {
+                        fprintf(stderr, "-S conflicts with earlier specification of cache mode\n");
+                        fError = true;
+                    }
                 }
             }
             break;
@@ -1178,6 +1260,20 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         return false;
     }
 
+    // apply resultant cache/writethrough modes to the targets
+    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+    {
+        if (t != TargetCacheMode::Undefined)
+        {
+            i->SetCacheMode(t);
+        }
+        if (w != WriteThroughMode::Undefined)
+        {
+            i->SetWriteThroughMode(w);
+        }
+    }
+
+    // ... and apply targets to the timespan
     for (auto i = vTargets.begin(); i != vTargets.end(); i++)
     {
         timeSpan.AddTarget(*i);

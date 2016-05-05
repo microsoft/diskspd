@@ -54,14 +54,17 @@
                                    <align> can be stated in bytes/KB/MB/GB/blocks [default access=sequential, default alignment=block size] -->
                               <xs:element name="Random" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL fDisableAllCache -->
+                              <!-- BOOL DisableAllCache combined DisableOSCache & WriteThrough (compat) -->
                               <xs:element name="DisableAllCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL fDisableLocalCache -->
+                              <!-- BOOL DisableLocalCache -->
                               <xs:element name="DisableLocalCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL fDisableOSCache -->
+                              <!-- BOOL DisableOSCache -->
                               <xs:element name="DisableOSCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+
+                              <!-- BOOL WriteThrough -->
+                              <xs:element name="WriteThrough" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
                               <xs:element name="WriteBufferContent" minOccurs="0" maxOccurs="1">
                                 <xs:complexType>

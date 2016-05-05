@@ -1404,7 +1404,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         {
             for (unsigned int i = 0; i < p->vTargets.size(); i++)
             {
-
                 hCompletionPort = CreateIoCompletionPort(p->vhTargets[i], hCompletionPort, 0, 1);
                 if (nullptr == hCompletionPort)
                 {
