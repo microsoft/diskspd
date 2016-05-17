@@ -60,6 +60,7 @@ icm ($g.Name) -ArgumentList $ProcessorCount,$MemoryStartupBytes,$MemoryMaximumBy
         if ($_.State -ne 'Offline') {
             write-host -ForegroundColor Yellow Cannot alter VM sizing on running VMs "($($_.Name))"
         } else {
+            iex "Set-VM -ComputerName $($_.OwnerNode) -Name $($_.Name) -ProcessorCount $ProcessorCount -MemoryStartupBytes $MemoryStartupBytes $dynamicMemArg $memswitch"
         }
     }
 }
