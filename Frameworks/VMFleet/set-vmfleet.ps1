@@ -50,15 +50,17 @@ icm ($g.Name) -ArgumentList $ProcessorCount,$MemoryStartupBytes,$MemoryMaximumBy
 
     Get-ClusterGroup |? GroupType -eq VirtualMachine |? OwnerNode -eq $env:COMPUTERNAME |% {
 
-        $memswitch = '-DynamicMemory'
-        if (-not $DynamicMemory) {
-            $memswitch = '-StaticMemory'
+        $memswitch = '-StaticMemory'
+        $dynamicMemArg = ""
+        if ($DynamicMemory) {
+            $memswitch = '-DynamicMemory'
+            $dynamicMemArg += "-MemoryMinimumBytes $MemoryMinimumBytes -MemoryMaximumBytes $MemoryMaximumBytes"
         }
 
         if ($_.State -ne 'Offline') {
             write-host -ForegroundColor Yellow Cannot alter VM sizing on running VMs "($($_.Name))"
         } else {
-            iex "Set-VM -ComputerName $($_.OwnerNode) -Name $($_.Name) -ProcessorCount $ProcessorCount -MemoryStartupBytes $MemoryStartupBytes -MemoryMinimumBytes $MemoryMinimumBytes -MemoryMaximumBytes $MemoryMaximumBytes $memswitch"
+            iex "Set-VM -ComputerName $($_.OwnerNode) -Name $($_.Name) -ProcessorCount $ProcessorCount -MemoryStartupBytes $MemoryStartupBytes $dynamicMemArg $memswitch"
         }
     }
 }
