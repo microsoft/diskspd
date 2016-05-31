@@ -57,7 +57,7 @@ UINT64 GetPartitionSize(HANDLE hFile)
 {
     assert(NULL != hFile && INVALID_HANDLE_VALUE != hFile);
 
-    PARTITION_INFORMATION pinf;
+    GET_LENGTH_INFORMATION pinf;
     OVERLAPPED ovlp = {};
 
     ovlp.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -72,7 +72,7 @@ UINT64 GetPartitionSize(HANDLE hFile)
     BOOL rslt;
 
     rslt = DeviceIoControl(hFile,
-        IOCTL_DISK_GET_PARTITION_INFO,
+        IOCTL_DISK_GET_LENGTH_INFO,
         NULL,
         0,
         &pinf,
@@ -107,7 +107,7 @@ UINT64 GetPartitionSize(HANDLE hFile)
         return 0;
     }
 
-    return pinf.PartitionLength.QuadPart;
+    return pinf.Length.QuadPart;
 }
 
 /*****************************************************************************/
@@ -1100,7 +1100,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         //set IO priority
         if (pTarget->GetIOPriorityHint() != IoPriorityHintNormal)
         {
-            FILE_IO_PRIORITY_HINT_INFO hintInfo;
+            _declspec(align(8)) FILE_IO_PRIORITY_HINT_INFO hintInfo;
             hintInfo.PriorityHint = pTarget->GetIOPriorityHint();
             if (!SetFileInformationByHandle(hFile, FileIoPriorityHintInfo, &hintInfo, sizeof(hintInfo)))
             {

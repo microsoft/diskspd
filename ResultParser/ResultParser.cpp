@@ -62,15 +62,15 @@ void ResultParser::_DisplayFileSize(UINT64 fsize)
 {
     if( fsize > (UINT64)10*1024*1024*1024 )    // > 10GB
     {
-        _Print("%uGB", fsize >> 30);
+        _Print("%uGiB", fsize >> 30);
     }
     else if( fsize > (UINT64)10*1024*1024 )    // > 10MB
     {
-        _Print("%uMB", fsize >> 20);
+        _Print("%uMiB", fsize >> 20);
     }
     else if( fsize > 10*1024 )                // > 10KB
     {
-        _Print("%uKB", fsize >> 10);
+        _Print("%uKiB", fsize >> 10);
     }
     else
     {
@@ -485,7 +485,7 @@ void ResultParser::_PrintCpuUtilization(const Results& results)
 
 void ResultParser::_PrintSectionFieldNames(const TimeSpan& timeSpan)
 {
-    _Print("thread |       bytes     |     I/Os     |     MB/s   |  I/O per s %s%s%s|  file\n",
+    _Print("thread |       bytes     |     I/Os     |    MiB/s   |  I/O per s %s%s%s|  file\n",
            timeSpan.GetMeasureLatency()      ? "|  AvgLat  "   : "",
            timeSpan.GetCalculateIopsStdDev() ? "| IopsStdDev " : "",
            timeSpan.GetMeasureLatency()      ? "| LatStdDev "  : "");
@@ -798,7 +798,7 @@ string ResultParser::ParseResults(Profile& profile, const SystemInformation& sys
     {
         _Print("\n\nTotals:\n");
         _Print("*******************************************************************************\n\n");
-        _Print("type   |       bytes     |     I/Os     |     MB/s   |  I/O per s\n");
+        _Print("type   |       bytes     |     I/Os     |    MiB/s   |  I/O per s\n");
         _Print("-------------------------------------------------------------------------------\n");
 
 

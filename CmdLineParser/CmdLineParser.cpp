@@ -251,7 +251,7 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("Set block size to 4KB, create 2 threads per file, 32 overlapped (outstanding)\n");
     printf("I/O operations per thread, disable all caching mechanisms and run block-aligned random\n");
     printf("access read test lasting 10 seconds:\n\n");
-    printf("  %s -b4K -t2 -r -o32 -d10 -h testfile.dat\n\n", pszFilename);
+    printf("  %s -b4K -t2 -r -o32 -d10 -Sh testfile.dat\n\n", pszFilename);
     printf("Create two 1GB files, set block size to 4KB, create 2 threads per file, affinitize threads\n");
     printf("to CPUs 0 and 1 (each file will have threads affinitized to both CPUs) and run read test\n");
     printf("lasting 10 seconds:\n\n");
