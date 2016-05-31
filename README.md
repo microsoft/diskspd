@@ -8,6 +8,15 @@ What's New?
 
 In addition DISKSPD itself, this repo hosts measurement frameworks which use DISKSPD. The initial example is the ***VM Fleet*** being used for Windows Server 2016 Hyper-Converged Storage Spaces Direct work. Look for these under the *Frameworks* directory.
 
+DISKSPD 2.0.18a 5/31/2016
+
+***IN PROGRESS***
+
+* update /? example to use -Sh v. deprecated -h
+* fix operation on volumes on GPT partitioned media (<driveletter>:)
+* fix IO priority hint to proper stack alignment (if not 8 byte, will fail)
+* use iB notation to clarify that text result output is in 2^n units (KiB/MiB/GiB)
+
 DISKSPD 2.0.17 5/01/2016
 
 * -S is expanded to control write-through independent of OS/software cache. Among other things, this allows buffered write-through to be specified (-Sbw).
