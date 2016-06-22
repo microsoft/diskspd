@@ -28,20 +28,26 @@ SOFTWARE.
 [string](get-date)
 
 # buffer size/alighment, threads/target, outstanding/thread, write%
-$b = 4; $t = 1; $o = 64; $w = 0
+$b = 4; $t = 1; $o = 8; $w = 0
 
 # io pattern, (r)andom or (s)equential (si as needed for multithread)
 $p = 'r'
 
 # durations of test, cooldown, warmup
-$d = 1*60; $cool = 30; $warm = 60
+$d = 30*60; $cool = 30; $warm = 60
+
+$addspec = 'base'
+$result = "result-b$($b)t$($t)o$($o)w$($w)p$($p)-$($addspec)-$(gc c:\vmspec.txt).xml"
+$dresult = "l:\result"
+$lresultf = join-path "c:\run" $result
+$dresultf = join-path $dresult $result
 
 # cap -> true to capture xml results, otherwise human text
-$cap = $true
-$addspec = '80vmpn'
-$result =  "l:\result\result-b$($b)t$($t)o$($o)w$($w)p$($p)-$($addspec)-$(gc c:\vmspec.txt).xml"
+$cap = $false
 
-if (-not ($cap -and [io.file]::Exists($result))) {
+### prior to this is template
+
+if (-not (gi $dresultf -ErrorAction SilentlyContinue)) {
 
     if ($cap) {
         $res = 'xml'
@@ -49,13 +55,16 @@ if (-not ($cap -and [io.file]::Exists($result))) {
         $res = 'text'
     }
 
-    $o = C:\run\diskspd.exe -h `-t$t `-o$o `-b$($b)k `-$($p)$($b)k `-w$w `-W$warm `-C$cool `-d$($d) -D -L `-R$res (dir C:\run\testfile?.dat)
+    $o = C:\run\diskspd.exe -Z20M -z -h `-t$t `-o$o `-b$($b)k `-$($p)$($b)k `-w$w `-W$warm `-C$cool `-d$($d) -D -L `-R$res (dir C:\run\testfile?.dat)
 
     if ($cap) {
 
-        # emit result and indicate done flag to master
-        # this will nominally squelch re-execution
-        $o | Out-File $result -Encoding ascii -Width 9999
+        # export result and indicate done flag to master
+        # use unbuffered copy to force IO downstream
+
+        $o | Out-File $lresultf -Encoding ascii -Width 9999
+        xcopy /j $lresultf $dresult
+        del $lresultf
         Write-Output "done"
 
     } else {
@@ -63,13 +72,15 @@ if (-not ($cap -and [io.file]::Exists($result))) {
         #emit to human watcher
         $o | Out-Host
     }
-} elseif ($cap) {
 
-    write-host -fore green already done $result
+} else {
+
+    write-host -fore green already done $dresultf
 
     # indicate done flag to master
     # this should only occur if controller does not change variation
     Write-Output "done"
 }
 
+[system.gc]::Collect()
 [string](get-date)

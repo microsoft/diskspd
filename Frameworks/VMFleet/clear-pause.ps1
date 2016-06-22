@@ -29,7 +29,9 @@ $pause = "C:\ClusterStorage\collect\control\pause"
 
 if (gi $pause -ErrorAction SilentlyContinue) {
     write-host -fore green Clearing pause from $([string](gi $pause).LastWriteTime)
-    del $pause
+    do {
+        del $pause -Force -ErrorAction SilentlyContinue
+    } while (-not $?)
     del $pause-* -ErrorAction SilentlyContinue
 } else {
     write-host -fore yellow Pause not set

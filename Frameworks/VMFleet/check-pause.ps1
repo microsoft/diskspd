@@ -79,7 +79,7 @@ $vms = get-clustergroup |? GroupType -eq VirtualMachine |? Name -like 'vm-*' |? 
 $pausedvms = $vms |? { $h[$_.Name] -eq 'Current' }
 
 if ($pausedvms.Count -eq $vms.Count) {
-    write-host -fore green OK: All VMs paused
+    write-host -fore green OK: All $vms.count VMs paused
 } else {
     write-host -fore red WARNING: of "$($vms.Count)," still waiting on ($vms.Count - $pausedvms.Count) to acknowledge pause
     return $false

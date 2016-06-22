@@ -31,12 +31,16 @@ param(
 
 $vms = (get-clustergroup |? GroupType -eq VirtualMachine |? Name -like "vm-*" |? State -ne Offline).count
 
+# spec location of control files
 $go = "c:\clusterstorage\collect\control\go"
 $done = "c:\clusterstorage\collect\control\done-*"
+
+# input template for the sweep; this is run through variable substitution
+# and dropped into the specified run file for each step of the sweep
 $runtemplate = "c:\clusterstorage\collect\control\run-sweeptemplate.ps1"
 $runfile = "c:\clusterstorage\collect\control\run-sweep.ps1"
 
-$timeout = 60
+$timeout = 120
 $checkpause = $true
 
 # ensure we start a new go epoch
@@ -44,6 +48,30 @@ $goepoch = 0
 $gocontent = gc $go -ErrorAction SilentlyContinue
 if ($gocontent -eq '0') {
     $goepoch = 1
+}
+
+#############
+
+function start-logman(
+    [string] $computer,
+    [string] $name,
+    [string] $path,
+    [string[]] $counters
+    )
+{
+    $null = logman create counter "perfctr-$name" -o "$path\perfctr-$name-$computer.blg" -f bin -si 1 --v -c $counters -s $computer
+    $null = logman start "perfctr-$name" -s $computer
+    write-host "performance counters on: $computer"
+}
+
+function stop-logman(
+    [string] $computer,
+    [string] $name
+    )
+{
+    $null = logman stop "perfctr-$name" -s $computer
+    $null = logman delete "perfctr-$name" -s $computer
+    write-host "performance counters off: $computer"
 }
 
 function new-runfile()
@@ -151,6 +179,13 @@ function set-runparam(
     }
 }
 
+function get-runparam(
+    [string] $name
+    )
+{
+    $sweep["__$($name)__"]
+}
+
 function do-run(
     $b = $null,
     $t = $null,
@@ -207,6 +242,20 @@ function do-run(
         $t0 = get-date
     }
 
+    # start performance counter capture
+    if ($pc -ne $null) {
+        $curpclabel = iex "`"$pclabel`""
+        icm (get-clusternode) -ArgumentList (get-command start-logman) {
+
+            param($fn)
+            set-item -path function:\$($fn.name) -value $fn.definition
+
+            start-logman $env:COMPUTERNAME $using:curpclabel "C:\ClusterStorage\collect\control\result" $using:pc
+        }
+    }
+
+    ######
+
     # sleep half, check for false done if possible (clear can take time/short runs), continue
     $sleep = get-runduration
 
@@ -238,6 +287,19 @@ function do-run(
         sleep $remainingsleep
     }
 
+    ######
+
+    # stop performance counter capture
+    if ($pc -ne $null) {
+        icm (get-clusternode) -ArgumentList (get-command stop-logman) {
+
+            param($fn)
+            set-item -path function:\$($fn.name) -value $fn.definition
+
+            stop-logman $env:COMPUTERNAME $using:curpclabel
+        }
+    }
+
     if (-not (get-doneflags)) {
         return $false
     }
@@ -248,11 +310,20 @@ function do-run(
     return $true
 }
 
+#############
+
 ############################
 ############################
 ## Modify from here down
 ############################
 ############################
+
+# specify a (potentially $null) list of performance counter sets to capture.
+# these will be labeled per the $pclabel, per node
+# note that pclabel must be single-quoted for later evaluation
+
+#$pc = "\Cluster CSVFS(*)\*", "\Hyper-V Hypervisor Logical Processor(*)\*"
+#$pclabel = 'b$(get-runparam b)tvo$(get-runparam o)w$(get-runparam w)p$(get-runparam p)-$(get-runparam addspec)'
 
 # substitutions
 # keys match substitution markers in $runtemplate.
@@ -264,16 +335,16 @@ $sweep = @{
     '__o__' = $null;
     '__w__' = $null;
     '__p__' = 'r';
-    '__d__' = 10;
-    '__Warm__' = 10;
-    '__Cool__' = 10;
+    '__d__' = 60;
+    '__Warm__' = 60;
+    '__Cool__' = 60;
     '__AddSpec__' = $addspec;
 }
 
-foreach ($b in 8) {
-foreach ($t in 1) {
-foreach ($o in 1,2,4,8,16,24,32,48,64) {
-foreach ($w in 0) {
+foreach ($b in 4) {
+foreach ($t in '(gwmi win32_processor | measure -sum -Property numberoflogicalprocessors).sum') {
+foreach ($o in 1,2,4,8,16,32,64) {
+foreach ($w in 0,10,30) {
 
     $r = do-run -b $b -t $t -o $o -w $w
 

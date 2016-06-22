@@ -102,7 +102,7 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
 
         # create run directory
 
-        del -Recurse -Force z:\run
+        del -Recurse -Force z:\run -ErrorAction SilentlyContinue
         mkdir z:\run
         $ok = $ok -band $?
         if (-not $ok) {
@@ -139,7 +139,7 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
             return $ok
         }
 
-        del -Force z:\users\administrator\launch.ps1
+        del -Force z:\users\administrator\launch.ps1 -ErrorAction SilentlyContinue
         gc C:\ClusterStorage\collect\control\launch-template.ps1 |% { $_ -replace '__CONNECTUSER__',$connectuser -replace '__CONNECTPASS__',$connectpass } > z:\users\administrator\launch.ps1
         $ok = $ok -band $?
         if (-not $ok) {

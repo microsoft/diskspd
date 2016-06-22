@@ -3,10 +3,14 @@ DiskSpd
 
 DISKSPD is a storage load generator / performance test tool from the Microsoft Windows, Windows Server and Cloud Server Infrastructure Engineering teams. Please see the included documentation (docx and pdf formats).
 
+This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+
 What's New?
 ===========
 
 In addition DISKSPD itself, this repo hosts measurement frameworks which use DISKSPD. The initial example is the ***VM Fleet*** being used for Windows Server 2016 Hyper-Converged Storage Spaces Direct work. Look for these under the *Frameworks* directory.
+
+## DISKSPD ##
 
 DISKSPD 2.0.18a 5/31/2016
 
@@ -35,6 +39,16 @@ DISKSPD 2.0.16b 2/22/2016
 * `<ProcessorTopology>` (under `<System>`) element in XML results shows Processor Group topology of the system the test executed on
 * `<RunTime>` (under `<System>`) element shows run start time in GMT
 * -ft : specifies `FILE_ATTRIBUTE_TEMPORARY_FILE` on open (note: work in progress, effect of this attribute is not fully lit up yet)
+
+## VM Fleet ##
+
+VM Fleet 0.5 6/22/2016
+
+* start-sweep now supports gathering performance counters from the physical nodes (hv root)
+* bugfix: clear-pause needs to loop on the pause file in case of competing access
+* run.ps1 and run-sweeptemplate.ps1 updated to show use of random seed and write source buffer (best practice), changes to push result file down with noncached copy
+* check-pause comments on the number of (un)paused vms
+* update documentation to mention change in QoS policy type names
 
 VM Fleet 0.4 4/14/2016
 

@@ -36,25 +36,29 @@ $p = '__p__'
 # durations of test, cooldown, warmup
 $d = __d__; $cool = __Cool__; $warm = __Warm__
 
-# cap -> true to capture xml results, otherwise human text
+# sweep template always captures
 $addspec = '__AddSpec__'
-$result =  "l:\result\result-b$($b)t$($t)o$($o)w$($w)p$($p)-$($addspec)-$(gc c:\vmspec.txt).xml"
+$result = "result-b$($b)t$($t)o$($o)w$($w)p$($p)-$($addspec)-$(gc c:\vmspec.txt).xml"
+$dresult = "l:\result"
+$lresultf = join-path "c:\run" $result
+$dresultf = join-path $dresult $result
 
 ### prior to this is template
 
-if (-not (gi $result -ErrorAction SilentlyContinue)) {
+if (-not (gi $dresultf -ErrorAction SilentlyContinue)) {
 
     $res = 'xml'
-    $o = C:\run\diskspd.exe -h `-t$t `-o$o `-b$($b)k `-$($p)$($b)k `-w$w `-W$warm `-C$cool `-d$($d) -D -L `-R$res (dir C:\run\testfile?.dat)
+    C:\run\diskspd.exe -Z20M -z -h `-t$t `-o$o `-b$($b)k `-$($p)$($b)k `-w$w `-W$warm `-C$cool `-d$($d) -D -L `-R$res (dir C:\run\testfile?.dat) > $lresultf
 
-    # emit result and indicate done flag to master
-    # this will nominally squelch re-execution
-    $o | Out-File $result -Encoding ascii -Width 9999
+    # export result and indicate done flag to master
+    # use unbuffered copy to force IO downstream
+    xcopy /j $lresultf $dresult
+    del $lresultf
     Write-Output "done"
 
 } else {
 
-    write-host -fore green already done $result
+    write-host -fore green already done $dresultf
 
     # indicate done flag to master
     # this should only occur if controller does not change variation
@@ -62,5 +66,4 @@ if (-not (gi $result -ErrorAction SilentlyContinue)) {
 }
 
 [system.gc]::Collect()
-
 [string](get-date)

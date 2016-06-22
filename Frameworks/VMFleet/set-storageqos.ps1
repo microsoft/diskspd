@@ -34,20 +34,23 @@ param (
 if ($policyname -ne $null) {
 
     # QoS policy must exist, else error out
-    $id = $(get-storageqospolicy -name $policyname).PolicyId
-    if (-not $id) {
+    $qosp = get-storageqospolicy -name $policyname
+    if ($qosp -eq $null) {
         # cmdlet error sufficient
         return
     }
+    $id = $qosp.PolicyId
+    write-host applying qos policy $policyname "(id $id)"
+
 } else {
 
     # clears QoS policy
+    write-host clearing qos policy
     $id = $null
 }
 
-icm $node -arg $id {
-    param ($p)
+icm $node {
 
     # note: set-vhdqos should be replaced with set-vmharddiskdrive
-    get-vm |% { get-vmharddiskdrive $_ |% { Set-VMHardDiskDrive -QoSPolicyID $p -VMHardDiskDrive $_ }}
+    get-vm |% { get-vmharddiskdrive $_ |% { Set-VMHardDiskDrive -QoSPolicyID $using:id -VMHardDiskDrive $_ }}
 }
