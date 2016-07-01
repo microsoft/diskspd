@@ -26,28 +26,154 @@ SOFTWARE.
 #>
 
 param(
-    [string] $addspec = "base"
+    [string] $addspec = "base",
+    [string] $runtemplate = "c:\clusterstorage\collect\control\run-sweeptemplate.ps1",
+    [string] $runfile = "c:\clusterstorage\collect\control\run-sweep.ps1",
+    [string[]] $labeltemplate = @('b','t','o','w','p','-$addspec'),
+    [Parameter(Mandatory =$true)]
+        [int[]] $b,
+    [Parameter(Mandatory =$true)]
+        [int[]] $t,
+    [Parameter(Mandatory =$true)]
+        [int[]] $o,
+    [Parameter(Mandatory =$true)]
+        [int[]] $w,
+    [ValidateSet('r','s','si')]
+        [string[]] $p = 'r',
+    [ValidateRange(1,[int]::MaxValue)]
+        [int] $d = 60,
+    [ValidateRange(0,[int]::MaxValue)]
+        [int] $warm = 60,
+    [ValidateRange(0,[int]::MaxValue)]
+        [int] $cool = 60,
+    [string[]] $pc = $null
     )
 
-$vms = (get-clustergroup |? GroupType -eq VirtualMachine |? Name -like "vm-*" |? State -ne Offline).count
+#############
 
-# spec location of control files
-$go = "c:\clusterstorage\collect\control\go"
-$done = "c:\clusterstorage\collect\control\done-*"
+# a single named variable with a set of values
+class variable {
 
-# input template for the sweep; this is run through variable substitution
-# and dropped into the specified run file for each step of the sweep
-$runtemplate = "c:\clusterstorage\collect\control\run-sweeptemplate.ps1"
-$runfile = "c:\clusterstorage\collect\control\run-sweep.ps1"
+    [int] $_ordinal
+    [object[]] $_list
+    [string] $_label
 
-$timeout = 120
-$checkpause = $true
+    variable([string] $label, [object[]] $list)
+    {
+        $this._list = $list
+        $this._ordinal = 0
+        $this._label = $label
+    }
 
-# ensure we start a new go epoch
-$goepoch = 0
-$gocontent = gc $go -ErrorAction SilentlyContinue
-if ($gocontent -eq '0') {
-    $goepoch = 1
+    # current value of the variable ("red"/"blue"/"green")
+    [object] value()
+    {
+        return $this._list[$this._ordinal]
+    }
+
+    # label/name of the variable ("color")
+    [object] label()
+    {
+        return $this._label
+    }
+
+    # increment to the next member, return whether a logical carry
+    # has occured (overflow)
+    [bool] increment()
+    {
+        $this._ordinal += 1
+        if ($this._ordinal -eq $this._list.Count) {
+            $this._ordinal = 0
+            return $true
+        }
+        return $false
+    }
+
+    # back to initial state
+    [void] reset()
+    {
+        $this._ordinal = 0
+    }
+}
+
+# a set of variables which allows enumeration of their combinations
+# this behaves as a numbering system indexing the respective variables
+# order is not specified
+class variableset {
+
+    [hashtable] $_set = @{}
+
+    variableset([variable[]] $list)
+    {
+        $list |% { $this._set[$_.label()] = $_ }
+        $this._set.Values |% { $_.reset() }
+    }
+
+    # increment the enumeration
+    # returns true if the enumeration is complete
+    [bool] increment()
+    {
+        $carry = $false
+        foreach ($v in $this._set.Values) {
+
+            # if the variable returns the carry flag, increment
+            # the next, and so forth
+            $carry = $v.increment()
+            if (-not $carry) { break }
+        }
+
+        # done if the most significant carried over
+        return $carry
+    }
+
+    # enumerator of all variables
+    [object] getset()
+    {
+        return $this._set.Values
+    }
+
+    # return value of specific variable
+    [object] get([string]$label)
+    {
+        return $this._set[$label].value()
+    }
+
+    # return a label representing the current value of the set, following the input label template
+    # add a leading '-' to get a seperator
+    # use a leading '$' to eliminate repetition of label (just produce value)
+    [string] label([string[]] $template)
+    {
+        return $($template |% {
+
+            $str = $_
+            $pfx = ''
+            $done = $false
+            $norep = $false
+            do {
+                switch ($str[0])
+                {
+                    '-' {
+                        $pfx = '-'
+                        $str = $str.TrimStart('-')
+                    }
+                    '$' {
+                        $norep = $true
+                        $str = $str.TrimStart('$')
+                    }
+                    default {
+                        $done = $true
+                    }
+                }
+            } while (-not $done)
+
+            $lookstr = $str
+            if ($norep) {
+                $str = ''
+            }
+
+            "$pfx$str" + $this._set[$lookstr].value()
+        }) -join $null
+    }
 }
 
 #############
@@ -74,15 +200,17 @@ function stop-logman(
     write-host "performance counters off: $computer"
 }
 
-function new-runfile()
+function new-runfile(
+    [variableset] $vs
+    )
 {
     # apply current subsitutions to produce a new run file
     gc $runtemplate |% {
 
         $line = $_
 
-        foreach ($subst in $sweep.keys) {
-            $line = $line -replace $subst,$sweep[$subst]
+        foreach ($v in $vs.getset()) {
+            $line = $line -replace "__$($v.label())__",$v.value()
         }
 
         $line
@@ -90,19 +218,22 @@ function new-runfile()
     } | out-file $runfile -Encoding ascii -Width 9999
 }
 
-function show-run()
+function show-run(
+    [variableset] $vs
+    )
 {
     # show current substitions (minus the underscore bracketing)
     write-host -fore green RUN SPEC `@ (get-date)
-    foreach ($subst in $sweep.keys | sort) {
-        $p = $subst -replace '_',''
-        write-host -fore green "`t$p = $($sweep[$subst])"
+    foreach ($v in $vs.getset()) {
+        write-host -fore green "`t$($v.label()) = $($v.value())"
     }
 }
 
-function get-runduration()
+function get-runduration(
+    [variableset] $vs
+    )
 {
-    $sweep['__d__'] + $sweep['__Warm__'] + $sweep['__Cool__']
+    $vs.get('d') + $vs.get('Warm') + $vs.get('Cool')
 }
 
 function get-doneflags(
@@ -168,50 +299,15 @@ function get-doneflags(
     return $true
 }
 
-function set-runparam(
-    [string] $name,
-    $value
-    )
-{
-    # apply substitution if spec'd
-    if ($value -ne $null) {
-        $sweep["__$($name)__"] = $value
-    }
-}
-
-function get-runparam(
-    [string] $name
-    )
-{
-    $sweep["__$($name)__"]
-}
-
 function do-run(
-    $b = $null,
-    $t = $null,
-    $o = $null,
-    $w = $null,
-    $p = $null,
-    $d = $null,
-    $Warm = $null,
-    $Cool = $null,
-    $AddSpec = $null
+    [variableset] $vs
     )
 {
     # apply specified run parameters. note null is ignored.
-    set-runparam b $b
-    set-runparam t $t
-    set-runparam o $o
-    set-runparam w $w
-    set-runparam p $p
-    set-runparam d $d
-    set-runparam Warm $Warm
-    set-runparam Cool $Cool
-    set-runparam AddSpec $AddSpec
-    show-run
+    show-run $vs
 
     write-host -fore yellow Generating new runfile `@ (get-date)
-    new-runfile
+    new-runfile $vs
 
     # if we do not have a pause to clear, need the sleep here since go
     # will release the fleet.
@@ -244,7 +340,7 @@ function do-run(
 
     # start performance counter capture
     if ($pc -ne $null) {
-        $curpclabel = iex "`"$pclabel`""
+        $curpclabel = $vs.label($labeltemplate)
         icm (get-clusternode) -ArgumentList (get-command start-logman) {
 
             param($fn)
@@ -257,7 +353,7 @@ function do-run(
     ######
 
     # sleep half, check for false done if possible (clear can take time/short runs), continue
-    $sleep = get-runduration
+    $sleep = get-runduration $vs
 
     $t1 = get-date
     $td = $t1 - $t0
@@ -312,44 +408,59 @@ function do-run(
 
 #############
 
+$vms = (get-clustergroup |? GroupType -eq VirtualMachine |? Name -like "vm-*" |? State -ne Offline).count
+
+# spec location of control files
+$go = "c:\clusterstorage\collect\control\go"
+$done = "c:\clusterstorage\collect\control\done-*"
+
+$timeout = 120
+$checkpause = $true
+
+# ensure we start a new go epoch
+$goepoch = 0
+$gocontent = gc $go -ErrorAction SilentlyContinue
+if ($gocontent -eq '0') {
+    $goepoch = 1
+}
+
+# construct the variable list describing the sweep
+
 ############################
 ############################
 ## Modify from here down
 ############################
 ############################
 
-# specify a (potentially $null) list of performance counter sets to capture.
-# these will be labeled per the $pclabel, per node
-# note that pclabel must be single-quoted for later evaluation
+# add any additional sweep parameters here to match those specified on the command line
+# ensure your sweep template script contains substitutable elements for each
+#
+#      __somename__
+#
+# bracketed by two underscore characters. Consider adding your new parameters to
+# the label template so that result files are well-named and distinguishable.
 
-#$pc = "\Cluster CSVFS(*)\*", "\Hyper-V Hypervisor Logical Processor(*)\*"
-#$pclabel = 'b$(get-runparam b)tvo$(get-runparam o)w$(get-runparam w)p$(get-runparam p)-$(get-runparam addspec)'
+$v = @()
+$v += [variable]::new('b',$b)
+$v += [variable]::new('t',$t)
+$v += [variable]::new('o',$o)
+$v += [variable]::new('w',$w)
+$v += [variable]::new('p',$p)
+$v += [variable]::new('d',$d)
+$v += [variable]::new('Warm',$warm)
+$v += [variable]::new('Cool',$cool)
+$v += [variable]::new('AddSpec',$addspec)
 
-# substitutions
-# keys match substitution markers in $runtemplate.
-# add keys as needed, use $null as placeholder for
-# values which will be iterated in loops.
-$sweep = @{
-    '__b__' = $null;
-    '__t__' = $null;
-    '__o__' = $null;
-    '__w__' = $null;
-    '__p__' = 'r';
-    '__d__' = 60;
-    '__Warm__' = 60;
-    '__Cool__' = 60;
-    '__AddSpec__' = $addspec;
-}
+$sweep = [variableset]::new($v)
 
-foreach ($b in 4) {
-foreach ($t in '(gwmi win32_processor | measure -sum -Property numberoflogicalprocessors).sum') {
-foreach ($o in 1,2,4,8,16,32,64) {
-foreach ($w in 0,10,30) {
+do {
 
-    $r = do-run -b $b -t $t -o $o -w $w
+    write-host -ForegroundColor Cyan '---'
+
+    $r = do-run $sweep
 
     if (-not $r) {
         return
     }
 
-}}}}
+} while (-not $sweep.increment())

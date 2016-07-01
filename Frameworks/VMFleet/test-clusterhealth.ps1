@@ -154,7 +154,7 @@ $fns = {
 
 # Detect RDMA its type (by manufacturer) so that, if needed, we can assert QoS/Cos for RoCE
 
-$netadapters = Get-NetAdapterRdma | Get-NetAdapter
+$netadapters = Get-NetAdapterRdma | Get-NetAdapter |? HardwareInterface
 
 $rdma = $false
 $roce = $false
@@ -389,9 +389,9 @@ if ($rdma) {
     # it would be good to extend this more generally
 
     $t = @()
-    $t += new-namedblock 'RDMA Adapter IP Check' { Get-NetAdapterRdma |? Enabled | Get-NetAdapter | Get-NetIPAddress -ErrorAction SilentlyContinue |? AddressState -eq 'Preferred' }
-    $t += new-namedblock 'RDMA Adapter (Virtual) IP Check' { Get-NetAdapterRdma |? Enabled |? Name -match vethernet | Get-NetAdapter | Get-NetIPAddress -ErrorAction SilentlyContinue |? AddressState -eq 'Preferred' }
-    $t += new-namedblock 'RDMA Adapter (Physical) IP Check' { Get-NetAdapterRdma |? Enabled |? Name -notmatch vethernet | Get-NetAdapter | Get-NetIPAddress -ErrorAction SilentlyContinue |? AddressState -eq 'Preferred' }
+    $t += new-namedblock 'RDMA Adapter IP Check' { Get-NetAdapterRdma |? Enabled | Get-NetAdapter |? HardwareInterface | Get-NetIPAddress -ErrorAction SilentlyContinue |? AddressState -eq 'Preferred' }
+    $t += new-namedblock 'RDMA Adapter (Virtual) IP Check' { Get-NetAdapterRdma |? Enabled | Get-NetAdapter |? { -not $_.HardwareInterface } | Get-NetIPAddress -ErrorAction SilentlyContinue |? AddressState -eq 'Preferred' }
+    $t += new-namedblock 'RDMA Adapter (Physical) IP Check' { Get-NetAdapterRdma |? Enabled | Get-NetAdapter |? HardwareInterface | Get-NetIPAddress -ErrorAction SilentlyContinue |? AddressState -eq 'Preferred' }
     $f = @($totalf)
 
     $j += start-job -InitializationScript $fns -Name $t[0].name {
@@ -401,7 +401,7 @@ if ($rdma) {
 }
 
 ###
-$t = new-namedblock 'RDMA Adapters Symmetry Check' { Get-NetAdapterRdma | Get-NetAdapter }
+$t = new-namedblock 'RDMA Adapters Symmetry Check' { Get-NetAdapterRdma | Get-NetAdapter |? HardwareInterface }
 $f = @($totalf)
 $f += ,(new-namedblock 'Operational' { $_.Speed -gt 0 } -nullpass:$(-not $rdma))
 $f += ,(new-namedblock 'Up' { $_.ifOperStatus -eq 'Up' } -nullpass:$(-not $rdma))
