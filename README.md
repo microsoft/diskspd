@@ -42,6 +42,11 @@ DISKSPD 2.0.16b 2/22/2016
 
 ## VM Fleet ##
 
+VM Fleet *In Progress*
+
+* CPU Target Sweep: a sweep script using StorageQoS and a linear CPU/IOPS model to build an empirical sweep of IOPS as a function of CPU, initially for the three classic small IOPS mixes (100r, 90:10 and 70:30 4K). Includes an analysis script which provides the linear model for each off of the results.
+* Update sweep mechanics which allow generalized specification of DISKSPD sweep parameters and host performance counter capture.
+
 VM Fleet 0.5 6/22/2016
 
 * start-sweep now supports gathering performance counters from the physical nodes (hv root)
