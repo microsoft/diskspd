@@ -69,7 +69,7 @@ $evfns = {
     function get-fltevents(
         [decimal] $timedeltams,
         [string] $provider,
-        [string] $evid,
+        [string[]] $evid,
         [scriptblock] $flt = { $true },
         [string] $source = $null
         )
@@ -79,7 +79,7 @@ $evfns = {
 $qstr = @"
 <QueryList>
     <Query Id="0" Path="_PROV_">
-    <Select Path="_PROV_">*[System[_SOURCE_(EventID=_EVID_) and TimeCreated[timediff(@SystemTime) &lt;= _MS_]]]</Select>
+    <Select Path="_PROV_">*[System[_SOURCE_(_EVENTS_) and TimeCreated[timediff(@SystemTime) &lt;= _MS_]]]</Select>
     </Query>
 </QueryList>
 "@
@@ -88,7 +88,11 @@ $srcstr = @"
 Provider[@Name='_SOURCE_'] and 
 "@
 
-        $query = $qstr -replace '_MS_',$timedeltams -replace '_PROV_',$provider -replace '_EVID_',$evid
+        $events = ($evid |% {
+            "EventID=$_"
+        }) -join " or "
+
+        $query = $qstr -replace '_MS_',$timedeltams -replace '_PROV_',$provider -replace '_EVENTS_',$events
         if ($source) {
             $query = $query -replace '_SOURCE_',($srcstr -replace '_SOURCE_',$source)
         } else {
@@ -303,10 +307,10 @@ $j += start-job -name 'SMB Connectivity Error Check' -InitializationScript $evfn
         $lastday = (1000*60*60*24)
 
         new-object psobject -Property @{
-            'RDMA LastHour' = (get-fltevents -flt $fltrdma -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30804).count;
-            'RDMA LastDay' = (get-fltevents -flt $fltrdma -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30804).count;
-            'TCP LastHour' = (get-fltevents -flt $flttcp -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30804).count;
-            'TCP LastDay' = (get-fltevents -flt $flttcp -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30804).count;
+            'RDMA LastHour' = (get-fltevents -flt $fltrdma -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
+            'RDMA LastDay' = (get-fltevents -flt $fltrdma -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
+            'TCP LastHour' = (get-fltevents -flt $flttcp -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
+            'TCP LastDay' = (get-fltevents -flt $flttcp -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
         }
     }
 
