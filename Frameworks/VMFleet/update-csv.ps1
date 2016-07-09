@@ -70,7 +70,8 @@ function move-csv(
 
         $csv = Get-ClusterSharedVolume
         Get-ClusterNode |% {
-            $csv |? Name -match "\($($_.Name)" |% {
+            $node = $_.Name
+            $csv |? Name -match "\($node(?:-.+){1}\)" |% {
                 $_ | Move-ClusterSharedVolume $nh[$_.OwnerNode.Name]
             }
         }
@@ -82,7 +83,7 @@ function move-csv(
         # move all csvs named by node names back to their named node
         get-clusternode |? State -eq Up |% {
             $node = $_.Name
-            $csv |? Name -match "\($node" |? OwnerNode -ne $node |% { $_ | move-clustersharedvolume $node }
+            $csv |? Name -match "\($node(?:-.+){1}\)" |? OwnerNode -ne $node |% { $_ | Move-ClusterSharedVolume $node }
         }
     }
 }
@@ -98,9 +99,9 @@ if ($shiftcsv) {
 
 if ($movevm) {
 
-    icm (get-clusternode |? State -eq Up) {
+    icm (Get-ClusterNode |? State -eq Up) {
 
-        get-clustergroup |? GroupType -eq VirtualMachine |% {
+        Get-ClusterGroup |? GroupType -eq VirtualMachine |% {
 
             if ($_.Name -like "vm-*-$env:COMPUTERNAME-*") {
                 if ($env:COMPUTERNAME -ne $_.OwnerNode) {
