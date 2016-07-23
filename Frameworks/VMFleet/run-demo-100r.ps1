@@ -25,7 +25,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-# System Config:    16 Systems x 8 VMs/System#Storage Config:   3-way S2D Mirror#Current Workload: 100% 4K Random Read
+#-# System Config:    __CNODES__ Systems x __CVMS__ VMs/System#Storage Config:   3-way S2D Mirror#Current Workload: 100% 4K Random Read
 
 [string](get-date)
 

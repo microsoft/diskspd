@@ -25,13 +25,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-# System Config:    16 Systems x 8 VMs/System#Storage Config:   3-way S2D Mirror#Current Workload: 90:10 4K Random Read/Write
+#-# System Config:    __CNODES__ Systems x __CVMS__ VMs/System#Storage Config:   3-way S2D Mirror#Current Workload: 70:30 4K Random Read/Write
 [string](get-date)
 
 $b = 4
 $t = 8
 $o = 20
-$w = 10
+$w = 30
 
 C:\run\diskspd.exe -n -h `-t$t `-o$o `-b$($b)k `-r$($b)k `-w$w -W10 -d60 -C10 -D -L (dir C:\run\testfile?.dat)
 

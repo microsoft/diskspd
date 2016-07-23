@@ -42,10 +42,17 @@ DISKSPD 2.0.16b 2/22/2016
 
 ## VM Fleet ##
 
-VM Fleet *In Progress*
+VM Fleet 0.6 7/18/2016
 
 * CPU Target Sweep: a sweep script using StorageQoS and a linear CPU/IOPS model to build an empirical sweep of IOPS as a function of CPU, initially for the three classic small IOPS mixes (100r, 90:10 and 70:30 4K). Includes an analysis script which provides the linear model for each off of the results.
 * Update sweep mechanics which allow generalized specification of DISKSPD sweep parameters and host performance counter capture.
+* install-vmfleet to automate placement after CSV/VD structure is in place (add path, create dirs, copyin, pause)
+* add non-linearity detection to analyze-cputarget
+* get-linfit is now a utility script (produces objects describing fits)
+* all flag files (pause/go/done) pushed down to control\flag directory
+* demo scripting works again and autofills vm/node counts
+* watch-cluster handles downed/recovered nodes gracefully
+* update-csv now handles node names which are logical prefixes of another (node1, node10)
 
 VM Fleet 0.5 6/22/2016
 
@@ -54,15 +61,6 @@ VM Fleet 0.5 6/22/2016
 * run.ps1 and run-sweeptemplate.ps1 updated to show use of random seed and write source buffer (best practice), changes to push result file down with noncached copy
 * check-pause comments on the number of (un)paused vms
 * update documentation to mention change in QoS policy type names
-
-VM Fleet 0.4 4/14/2016
-
-* bugfix: master.ps1 now takes connection credentials as parameters; this allows master to be edited on the fly, it is no longer templated
-* credential templating moves to launch.ps1, which is now generated into the VMs
-* pause handling now uses an epoch ask/response from the VMs
-* check-pause uses the epoch to directly test whether a given VM has indeed acknowledged the current pause request, and is definitive with respect to all running VMs
-* new automated sweep mechanic
-
 
 Compiling / Source
 =========
