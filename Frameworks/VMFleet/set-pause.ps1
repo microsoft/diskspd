@@ -25,10 +25,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-$pause = "C:\ClusterStorage\collect\control\pause"
+$pause = "C:\ClusterStorage\collect\control\flag\pause"
+$p = gi $pause -ErrorAction SilentlyContinue
 
-if (gi $pause -ErrorAction SilentlyContinue) {
-    write-host -fore green Pause already set
+if ($p) {
+    write-host -fore green Pause already set $p.CreationTime
 } else {
     echo (get-random) > $pause
     write-host -fore red Pause set `@ (get-date)

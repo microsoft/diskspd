@@ -36,7 +36,7 @@ param(
     [switch] $isactive = $false
     )
 
-$pause = "C:\ClusterStorage\collect\control\pause"
+$pause = "C:\ClusterStorage\collect\control\flag\pause"
 $pauseepoch = gc $pause -ErrorAction SilentlyContinue
 
 if ($pauseepoch -eq $null) {
@@ -82,6 +82,8 @@ if ($pausedvms.Count -eq $vms.Count) {
     write-host -fore green OK: All $vms.count VMs paused
 } else {
     write-host -fore red WARNING: of "$($vms.Count)," still waiting on ($vms.Count - $pausedvms.Count) to acknowledge pause
+
+    compare-object $vms $pausedvms -Property Name -PassThru | sort -Property Name | ft -AutoSize Name,OwnerNode | Out-Host
     return $false
 }
 

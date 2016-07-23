@@ -30,10 +30,8 @@ param(
     [string]$delimeter = "`t",
     [string]$xcol = $(throw "please specify column containing x values"),
     [string]$ycol = $(throw "please specify column containing y values"),
-    [string]$idxcol,
-    [string]$idxval = $null,
-    [switch]$zerointercept = $false,
-    [int]$sigfigs = 5
+    [string[]]$idxcol,
+    [switch]$zerointercept = $false
     )
 
 # given the input data, produce the linear fit coefficients for
@@ -47,96 +45,99 @@ param(
 #
 # method: ordinary least squares
 
-function get-sigfigs(
-    [decimal]$value,
-    [int]$sigfigs
+function do-linfit(
+    [string] $xcol,
+    [string] $ycol,
+    [string] $key
     )
 {
-    $log = [math]::Ceiling([math]::log10([math]::abs($value)))
-    $decimalpt = $sigfigs - $log
+    BEGIN
+    {
+        $sumxy = [decimal]0
+        $sumx2 = [decimal]0
+        $sumx = [decimal]0
+        $sumy = [decimal]0
 
-    # if all sigfigs are above the decimal point, round off to
-    # appropriate power of 10
-    if ($decimalpt -lt 0) {
-        $pow = [math]::Abs($decimalpt)
-        $decimalpt = 0
-        $value = [math]::Round($value/[math]::Pow(10,$pow))*[math]::pow(10,$pow)
+        $n = 0
+
+        $pipe = @()
     }
 
-    "{0:F$($decimalpt)}" -f $value
+    PROCESS
+    {
+        $x = [decimal]$_.$xcol
+        $y = [decimal]$_.$ycol
+
+        $sumxy += $x*$y
+        $sumx2 += $x*$x
+        $sumx += $x
+        $sumy += $y
+
+        $n += 1
+
+        # accumulate pipeline for second pass
+        $pipe += $_
+    }
+
+    END
+    {
+        if ($n -eq 0) {
+            Write-Error "ERROR: no measurements matched"
+            return
+        }
+
+        # perform requested fit
+
+        $a = 0
+        $b = 0
+
+        if ($zerointercept) {
+
+            $a = 0
+            $b = ($sumxy/$sumx2)
+
+        } else {
+
+            $b = ($sumxy - (($sumx*$sumy)/$n)) / ($sumx2 - (($sumx*$sumx)/$n))
+            $a = ($sumy - $b*$sumx)/$n
+        }
+
+        # calculate r2 (coefficient of determination) with respect to the fit
+        $meany = $sumy/$n
+
+        # total sum of squares
+        $sstot = [decimal]0
+        $pipe |% {
+            $v = [decimal]$_.$ycol - $meany
+            $sstot += $v*$v
+        }
+
+        # residual sum of squares
+        $ssres = [decimal]0
+        $pipe |% {
+            $v = [decimal]$_.$ycol - ($a + $b*[decimal]$_.$xcol)
+            $ssres += $v*$v
+        }
+
+        $r2 = 1 - ($ssres/$sstot)
+
+        new-object -TypeName psobject -Property @{ 'A' = $a; 'B' = $b; 'R2' = $r2; 'N' = $n; 'Key' = $key; 'X' = $xcol; 'Y' = $ycol }
+    }
 }
 
-$sumxy = [decimal]0
-$sumx2 = [decimal]0
-$sumx = [decimal]0
-$sumy = [decimal]0
+# process the results into a hash keyed by the index columns
+$h = @{}
+import-csv -Path $csvfile -Delimiter $delimeter |% {
 
-$results = import-csv -Path $csvfile -Delimiter $delimeter |? {
+    $key = ""
+    foreach ($col in $idxcol) {
+        $key += "$col $($_.$col)"
+    }
 
-    $idxval -eq $null -or $_.$idxcol -eq $idxval
+    $h[$key] += ,$_
 }
 
-# pass 1 to produce the linear fit parameters
-$results |% {
+$h.Keys |% {
 
-    $x = [decimal]$_.$xcol
-    $y = [decimal]$_.$ycol
-
-    $sumxy += $x*$y
-    $sumx2 += $x*$x
-    $sumx += $x
-    $sumy += $y
+    $h[$_] | do-linfit -xcol $xcol -ycol $ycol -key $_
 }
-
-$n = [decimal]$results.count
-
-if ($n -eq 0) {
-    Write-Error "ERROR: no measurements matched"
-    return
-} else {
-    write-host "n = $n"
-}
-
-# perform requested fit
-
-$a = 0
-$b = 0
-
-if ($zerointercept) {
-
-    $a = 0
-    $b = ($sumxy/$sumx2)
-    $bstr = get-sigfigs $b $sigfigs
-
-    write-host "$ycol = b($xcol)`nb = $bstr"
-
-} else {
-
-    $b = ($sumxy - (($sumx*$sumy)/$n)) / ($sumx2 - (($sumx*$sumx)/$n))
-    $a = ($sumy - $b*$sumx)/$n
-
-    $bstr = get-sigfigs $b $sigfigs
-    $astr = get-sigfigs $a $sigfigs
-
-    write-host "$ycol = a + b($xcol)`na = $astr`nb = $bstr"
-}
-
-# calculate r2 (coefficient of determination) with respect to the fit
-$meany = $sumy/$n
-
-# total sum of squares
-$sstot = [decimal]0
-$results |% {
-    $v = [decimal]$_.$ycol - $meany
-    $sstot += $v*$v
-}
-
-# residual sum of squares
-$ssres = [decimal]0
-$results |% {
-    $v = [decimal]$_.$ycol - ($a + $b*[decimal]$_.$xcol)
-    $ssres += $v*$v
-}
-
-$r2 = 1 - ($ssres/$sstot)
-write-host ("r2 goodness of fit = {0:P2}" -f $r2)

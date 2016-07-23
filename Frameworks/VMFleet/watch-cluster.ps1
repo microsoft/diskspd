@@ -74,7 +74,6 @@ function get-aggregate(
     PROCESS {
         $n += 1
         $v += $_
-
     }
     END {
         if ($n -gt 0) {
@@ -117,60 +116,105 @@ new-ctr $ctrs "Write Lat" "Cluster CSVFS" @("Avg. sec/Write") 8 15 '0.000' 1000 
 $order = $ctrs.values | sort -property order
 
 $query = $ctrs.keys |? { $ctrs[$_].CtrName.Count -eq 1 } |% { "\$($ctrs[$_].SetName)(_Total)\$($ctrs[$_].CtrName[0])" } 
-$cfmt = ,"{0,-16}" + ($order |% { if ($_.divider) { '| ' }; "{$($_.order),-$($_.width)}"}) -join ''
-$vfmt = ,"{0,-16}" + ($order |% { if ($_.divider) { '| ' }; "{$($_.order),-$($_.width):$($_.fmt)}"}) -join ''
+$colfmt = ,"{0,-16}" + ($order |% { if ($_.divider) { '| ' }; "{$($_.order),-$($_.width)}"}) -join ''
+$linfmt = ,"{0,-16}" + ($order |% { if ($_.divider) { '| ' }; "{$($_.order),-$($_.width):$($_.fmt)}"}) -join ''
 
 ###
 
-# clear any previous job instance
-Get-Job -Name watch-cluster -ErrorAction SilentlyContinue | Stop-Job
-Get-Job -Name watch-cluster -ErrorAction SilentlyContinue | Remove-Job
+function start-sample(
+    [object[]] $query,
+    [int] $SampleInterval
+    )
+{
+    # clear any previous job instance
+    Get-Job -Name watch-cluster -ErrorAction SilentlyContinue | Stop-Job
+    Get-Job -Name watch-cluster -ErrorAction SilentlyContinue | Remove-Job
 
-$j = icm -AsJob -JobName watch-cluster (Get-ClusterNode |? State -eq Up) -arg @(,$query,$SampleInterval) {
+    icm -AsJob -JobName watch-cluster (Get-ClusterNode) {
 
-    param($query,$SampleInterval)
-
-    # extract countersamples, the object does not survive transfer between powershell sessions
-    # extract as a list, not as the individual counters
-    get-counter -Continuous -SampleInterval $SampleInterval $($query |% { $_ -replace 'COMPUTERNAME',$env:COMPUTERNAME }) |% {
-        ,$_.countersamples
+        # extract countersamples, the object does not survive transfer between powershell sessions
+        # extract as a list, not as the individual counters
+        get-counter -Continuous -SampleInterval $using:SampleInterval $($using:query |% { $_ -replace 'COMPUTERNAME',$env:COMPUTERNAME }) |% {
+            ,$_.countersamples
+        }
     }
+    
+    #get-job -Name watch-cluster
 }
+
+# start the first sample job and allow frame draw the first time through
+$j = start-sample $query $SampleInterval
+$downtime = $null
+$skipone = $false
 
 # hash of most recent samples/node
 $samples = @{}
+Get-ClusterNode |% { $samples[$_.Name] = $null }
 
 while ($true) {
 
+    # sleep again if needed to prime the sample pipeline
+    # there are no samples if we just restarted the sampling jobs
     sleep $SampleInterval
+    if ($skipone) {
+        $skipone = $false
+        continue
+    }
 
     # receive updates into the per-node hash
-    # this automatically discards all but the latest sample from a given node
-    # if multiple are received due to skew
-    $j | receive-job |% {
-        $samples[$_.PsComputerName] = $_
+    foreach ($child in $j.ChildJobs) {
+        $samples[$child.Location] = $child | receive-job -ErrorAction SilentlyContinue
+    }
+
+    # null out downed nodes and remember first time we saw one drop out
+    $down = 0
+    $j.ChildJobs |? State -ne Running |% {
+        $samples[$_.Location] = $null
+        $down += 1
+    }
+    if ($down -and $downtime -eq $null) {
+        $downtime = get-date
+    }
+
+    # if it has been 30 seconds with a downed node, restart the jobs to retry
+    if ($downtime -ne $null -and ((get-date)-$downtime).totalseconds -gt 30) {
+        $j | stop-job
+        $j | remove-job
+        $j = start-sample $query $SampleInterval
+        $downtime = $null
+        $skipone = $true
     }
 
     # now process samples into per-node hashes of set/ctr containing lists of the
     # cooked values acrosss the (possible) multiple instances
     $psamples = @{}
-
     foreach ($node in $samples.keys) {
 
-        $nsamples = @{}
-        $samples[$node] |% {
+        if ($samples[$node]) {
 
-            ($setinst,$ctr) = $($_.path -split '\\')[3..4]
-            $set = ($setinst -split '\(')[0]
-            $nsamples["$set+$ctr"] += ,$_.cookedvalue
+            $nsamples = @{}
+            $samples[$node] |% {
+
+                ($setinst,$ctr) = $($_.path -split '\\')[3..4]
+                $set = ($setinst -split '\(')[0]
+
+                # trim out to last sample - if we are lagged, there may be a
+                # set of measurements for a single counter
+                $nsamples["$set+$ctr"] += ,$(
+                    if ($_.cookedvalue.count -gt 1) {
+                        ($_.cookedvalue)[-1]
+                    } else {
+                        $_.cookedvalue
+                    }
+                )
+            }
+
+            $psamples[$node] = $nsamples
         }
-
-        $psamples[$node] = $nsamples
     }
-
     
     # aggregate each column across all nodes
-    $totline =  $vfmt -f $(
+    $totline =  $linfmt -f $(
         "Total"
         foreach ($col in $order) {
 
@@ -178,7 +222,6 @@ while ($true) {
             if ($col.aggregate -ne 'Average') {
                 $(foreach ($node in $psamples.keys) {
                     get-samples $psamples $node $col
-
                 }) | get-aggregate $col
             } else {
                 $null
@@ -187,19 +230,29 @@ while ($true) {
     )
 
     # individual nodes
-    $lines = foreach ($node in $psamples.keys | sort) {
-        $vfmt -f $(
-            $node
-            foreach ($col in $order) {
-                get-samples $psamples $node $col | get-aggregate $col
-            }
-        )
+    # flags downed/non-responsive nodes by noting which had
+    # failed measurement jobs in the last poll
+    $lines = foreach ($node in $samples.keys | sort) {
+        if ($psamples.ContainsKey($node)) {
+            $linfmt -f $(
+                $node
+                foreach ($col in $order) {
+                    get-samples $psamples $node $col | get-aggregate $col
+
+                }
+            )
+        } else {
+            $colfmt -f $(
+                $node
+                0..($order.count - 1) |% { "-" }
+            )
+        }
     }
 
     # clear and dump headers/lines
     cls
 
-    write-host ($cfmt -f (,"" + $order.DisplayName))
+    write-host ($colfmt -f (,"" + $order.DisplayName))
     write-host -fore green $totline
     $lines |% { write-host $_ }
 }

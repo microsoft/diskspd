@@ -26,11 +26,11 @@ SOFTWARE.
 #>
 
 param(
-    $disableintegrity = $false,
-    $renamecsvmounts = $false,
-    $movecsv = $true,
-    $movevm = $true,
-    $shiftcsv = $false
+    [switch]$disableintegrity = $false,
+    [switch]$renamecsvmounts = $false,
+    [switch]$movecsv = $true,
+    [switch]$movevm = $true,
+    [switch]$shiftcsv = $false
 )
 
 $csv = get-clustersharedvolume
@@ -71,7 +71,7 @@ function move-csv(
         $csv = Get-ClusterSharedVolume
         Get-ClusterNode |% {
             $node = $_.Name
-            $csv |? Name -match "\($node(?:-.+){1}\)" |% {
+            $csv |? Name -match "\($node(?:-.+){0,1}\)" |% {
                 $_ | Move-ClusterSharedVolume $nh[$_.OwnerNode.Name]
             }
         }
@@ -83,7 +83,7 @@ function move-csv(
         # move all csvs named by node names back to their named node
         get-clusternode |? State -eq Up |% {
             $node = $_.Name
-            $csv |? Name -match "\($node(?:-.+){1}\)" |? OwnerNode -ne $node |% { $_ | Move-ClusterSharedVolume $node }
+            $csv |? Name -match "\($node(?:-.+){0,1}\)" |? OwnerNode -ne $node |% { $_ | Move-ClusterSharedVolume $node }
         }
     }
 }

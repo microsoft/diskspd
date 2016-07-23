@@ -40,12 +40,10 @@ if ($policyname -ne $null) {
         return
     }
     $id = $qosp.PolicyId
-    write-host applying qos policy $policyname "(id $id)"
 
 } else {
 
     # clears QoS policy
-    write-host clearing qos policy
     $id = $null
 }
 

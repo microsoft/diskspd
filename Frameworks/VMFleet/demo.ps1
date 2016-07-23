@@ -25,13 +25,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
+param([int] $interval = 60)
+
+$cnodes = (Get-ClusterNode).Count
+$cvms = (Get-ClusterGroup |? GroupType -eq 'VirtualMachine').Count/$cnodes
+
 # loop through the set of run scripts
-$d = gi C:\ClusterStorage\collect\control
-$f = gi $d\run-*.ps1
+$f = gi C:\clusterstorage\collect\control\run-demo-*.ps1
+
+# qos policies to loop
+$policy = 'SilverVM','GoldVM','PlatinumVM',$null,$null
 
 while ($true) {
 
-    $null = & $d\update-csv.ps1
+    $null = & update-csv.ps1
 
     foreach ($run in $f) {
 
@@ -41,21 +48,25 @@ while ($true) {
         # see the master script
         (gi $run).LastWriteTime = (get-date)
 
-        # tear off the first line of the run script (assume a comment, and trim it)
+        # pull the show-me line of the run script (comment, trimmed)
         # format is a single line, with # standing in for newline for multi-line output
-        $comm = gc $run | select -first 1
-        write-host -fore green $($comm.trimstart('# ') -replace '#',"`n")
+        # substitute in the configuration's node and vms/node count
+        # TBD: autodetect vd configuration
+        $comm = (gc $run | sls '^#-#').Line
+
+        write-host -fore green $($comm.trimstart('#- ') -replace '__CVMS__',$cvms -replace '__CNODES__',$cnodes -replace '#',"`n")
         
         # apply random QoS policy
-        $policy = 'SilverVM','GoldVM','PlatinumVM','NoLimit','NoLimit'
-        $p = $policy | get-random
-        $null = & $d\set-storageqos -policyname $p 2>&1
+        $p = $policy[(0..($policy.count - 1) | Get-Random)]
+        $null = & set-storageqos.ps1 -policyname $p 2>&1
 
-        write-host -fore yellow Active QoS Policy
-        Get-StorageQosPolicy -Name $p | ft -AutoSize
+        write-host -fore yellow `nActive QoS Policy
+        if ($p) {
+            Get-StorageQosPolicy -Name $p | ft -AutoSize
+        } else {
+            write-host NONE
+        }
 
-        sleep 60
+        sleep $interval
     }
 }
-
-return

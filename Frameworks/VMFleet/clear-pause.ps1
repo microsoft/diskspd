@@ -25,14 +25,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-$pause = "C:\ClusterStorage\collect\control\pause"
+$pause = "C:\ClusterStorage\collect\control\flag\pause"
 
 if (gi $pause -ErrorAction SilentlyContinue) {
     write-host -fore green Clearing pause from $([string](gi $pause).LastWriteTime)
     do {
         del $pause -Force -ErrorAction SilentlyContinue
     } while (-not $?)
-    del $pause-* -ErrorAction SilentlyContinue
+    # del $pause-* -ErrorAction SilentlyContinue
 } else {
     write-host -fore yellow Pause not set
 }

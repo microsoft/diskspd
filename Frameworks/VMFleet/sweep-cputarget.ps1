@@ -59,11 +59,14 @@ function is-within(
      $value -le ($target + ($target*($percentage/100))))
 }
 
+# limit the number of attempts per sweep (mix) to 4 per targeted cpu util
+$sweeplimit = ($cputargets.count * 4)
+
 foreach ($w in 0,10,30) {
 
     # track measured qos points, starting at given value
     $h = @{}
-    $qosinitial = $qos = 100
+    $qosinitial = $qos = 1000
 
     foreach ($cputarget in $cputargets) {
 
@@ -79,13 +82,13 @@ foreach ($w in 0,10,30) {
 
             # failsafes
             if ($h[$qos]) { write-host -ForegroundColor Red already measured $qos; break }
-            if ($h.Keys.Count -ge 10) { write-host -ForegroundColor Red 10 tries giving up; break }
+            if ($h.Keys.Count -ge $sweeplimit) { write-host -ForegroundColor Red $sweeplimit tries giving up; break }
    
             Set-StorageQosPolicy -Name SweepQoS -MaximumIops $qos
             write-host -fore Cyan Starting loop with QoS target $qos
 
             $curaddspec = "$($addspec)w$($w)qos$qos"
-            start-sweep.ps1 -addspec $curaddspec -b 4 -o 32 -t 1 -w $w -p r -d 60 -warm 60 -cool 60 -pc "\Hyper-V Hypervisor Logical Processor(*)\*"
+            start-sweep.ps1 -addspec $curaddspec -b 4 -o 32 -t 1 -w $w -p r -d 60 -warm 15 -cool 15 -pc "\Hyper-V Hypervisor Logical Processor(*)\*"
 
             # HACKHACK bounce collect
             get-clustersharedvolume "Cluster Virtual Disk (collect)" | Move-ClusterSharedVolume

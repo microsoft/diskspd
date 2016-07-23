@@ -46,7 +46,8 @@ param(
         [int] $warm = 60,
     [ValidateRange(0,[int]::MaxValue)]
         [int] $cool = 60,
-    [string[]] $pc = $null
+    [string[]] $pc = $null,
+    [switch] $midcheck = $false
     )
 
 #############
@@ -181,22 +182,28 @@ class variableset {
 function start-logman(
     [string] $computer,
     [string] $name,
-    [string] $path,
     [string[]] $counters
     )
 {
-    $null = logman create counter "perfctr-$name" -o "$path\perfctr-$name-$computer.blg" -f bin -si 1 --v -c $counters -s $computer
+    $f = "c:\perfctr-$name-$computer.blg"
+
+    $null = logman create counter "perfctr-$name" -o $f -f bin -si 1 --v -c $counters -s $computer
     $null = logman start "perfctr-$name" -s $computer
     write-host "performance counters on: $computer"
 }
 
 function stop-logman(
     [string] $computer,
-    [string] $name
+    [string] $name,
+    [string] $path
     )
 {
+    $f = "c:\perfctr-$name-$computer.blg"
+    
     $null = logman stop "perfctr-$name" -s $computer
     $null = logman delete "perfctr-$name" -s $computer
+    xcopy /j $f $path
+    del -force $f
     write-host "performance counters off: $computer"
 }
 
@@ -346,7 +353,7 @@ function do-run(
             param($fn)
             set-item -path function:\$($fn.name) -value $fn.definition
 
-            start-logman $env:COMPUTERNAME $using:curpclabel "C:\ClusterStorage\collect\control\result" $using:pc
+            start-logman $env:COMPUTERNAME $using:curpclabel $using:pc
         }
     }
 
@@ -358,29 +365,36 @@ function do-run(
     $t1 = get-date
     $td = $t1 - $t0
 
-    $remainingsleep = $sleep/2 - $td.TotalSeconds
-    if ($remainingsleep -gt 0) {
-        write-host SLEEP TO MID-RUN "($('{0:F2}' -f $remainingsleep) seconds)" `@ (get-date)
-        sleep $remainingsleep
-    }
+    if ($midcheck) {
 
-    if ($td.TotalSeconds -lt ($sleep - 5)) {
-        write-host MID-RUN CHECK Go Epoch: $goepoch `@ (get-date)
-        # check for early completions, assert none are done yet
-        if (-not (get-doneflags -assertnone:$true)) {
-            return $false
+        $remainingsleep = $sleep/2 - $td.TotalSeconds
+        if ($remainingsleep -gt 0) {
+            write-host SLEEP TO MID-RUN "($('{0:F2}' -f $remainingsleep) seconds)" `@ (get-date)
+            sleep $remainingsleep
         }
-        write-host -fore green MID-RUN CHECK PASS Go Epoch: $goepoch `@ (get-date)
-    }
 
-    # capture time and sleep for the remaining interval
-    $t1 = get-date
-    $td = $t1 - $t0
+        if ($td.TotalSeconds -lt ($sleep - 5)) {
+            write-host MID-RUN CHECK Go Epoch: $goepoch `@ (get-date)
+            # check for early completions, assert none are done yet
+            if (-not (get-doneflags -assertnone:$true)) {
+                return $false
+            }
+            write-host -fore green MID-RUN CHECK PASS Go Epoch: $goepoch `@ (get-date)
+        }
 
-    $remainingsleep = $sleep - $td.TotalSeconds
-    if ($remainingsleep -gt 0) {
-        write-host SLEEP TO END "($('{0:F2}' -f $remainingsleep) seconds)" `@ (get-date)
-        sleep $remainingsleep
+        # capture time and sleep for the remaining interval
+        $t1 = get-date
+        $td = $t1 - $t0
+
+        $remainingsleep = $sleep - $td.TotalSeconds
+        if ($remainingsleep -gt 0) {
+            write-host SLEEP TO END "($('{0:F2}' -f $remainingsleep) seconds)" `@ (get-date)
+            sleep $remainingsleep
+        }
+
+    } else {
+
+        sleep ($sleep - $td.TotalSeconds)
     }
 
     ######
@@ -392,7 +406,7 @@ function do-run(
             param($fn)
             set-item -path function:\$($fn.name) -value $fn.definition
 
-            stop-logman $env:COMPUTERNAME $using:curpclabel
+            stop-logman $env:COMPUTERNAME $using:curpclabel "C:\ClusterStorage\collect\control\result"
         }
     }
 
@@ -411,8 +425,8 @@ function do-run(
 $vms = (get-clustergroup |? GroupType -eq VirtualMachine |? Name -like "vm-*" |? State -ne Offline).count
 
 # spec location of control files
-$go = "c:\clusterstorage\collect\control\go"
-$done = "c:\clusterstorage\collect\control\done-*"
+$go = "c:\clusterstorage\collect\control\flag\go"
+$done = "c:\clusterstorage\collect\control\flag\done-*"
 
 $timeout = 120
 $checkpause = $true

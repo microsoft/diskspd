@@ -54,8 +54,8 @@ cp l:\tools\* c:\run -Force
 $run = 'c:\run\run.ps1'
 $master = 'c:\run\master.ps1'
 
-$mypause = "l:\pause-$(gc c:\vmspec.txt)"
-$mydone = "l:\done-$(gc c:\vmspec.txt)"
+$mypause = "l:\flag\pause-$(gc c:\vmspec.txt)"
+$mydone = "l:\flag\done-$(gc c:\vmspec.txt)"
 
 $done = $false
 $donetouched = $false
@@ -102,9 +102,9 @@ function get-flagfile(
     )
 {
     if ($gc) {
-        gc "l:\$flag" -ErrorAction SilentlyContinue   
+        gc "l:\flag\$flag" -ErrorAction SilentlyContinue   
     } else {
-        gi "l:\$flag" -ErrorAction SilentlyContinue
+        gi "l:\flag\$flag" -ErrorAction SilentlyContinue
     }
 }
 

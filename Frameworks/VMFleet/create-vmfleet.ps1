@@ -57,6 +57,28 @@ if ($nodes.count -eq 0) {
     $nodes = Get-ClusterNode
 }
 
+# convert to fixed vhd(x) if needed
+if ((get-vhd $basevhd).VhdType -ne 'Fixed' -and $fixedvhd) {
+                                    
+    # push dynamic vhd to tmppath and place converted at original
+    # note that converting a dynamic will leave a sparse hole on refs
+    # this is OK, since the copy will not copy the hole
+    $f = gi $basevhd
+    $tmpname = "tmp-$($f.Name)"
+    $tmppath = join-path $f.DirectoryName $tmpname
+    del -Force $tmppath -ErrorAction SilentlyContinue
+    ren $f.FullName $tmpname
+
+    write-host -ForegroundColor Yellow "convert $($f.FullName) to fixed via $tmppath"
+    convert-vhd -Path $tmppath -DestinationPath $f.FullName -VHDType Fixed
+    if (-not $?) {
+        ren $tmppath $f.Name
+        throw "ERROR: could not convert $($f.fullname) to fixed vhdx"
+    }
+    
+    del $tmppath
+}
+
 # Create the fleet vmswitches with a fixed IP at the base of the APIPA range
 icm $nodes {
 
@@ -65,7 +87,7 @@ icm $nodes {
         New-VMSwitch -name Internal -SwitchType Internal
         Get-NetAdapter |? DriverDescription -eq 'Hyper-V Virtual Ethernet Adapter' |? Name -eq 'vEthernet (Internal)' | New-NetIPAddress -PrefixLength 16 -IPAddress '169.254.1.1'
     }
-}
+} | ft -AutoSize
 
 #### STOPAFTER
 if (Stop-After "CreateVMSwitch") {
@@ -75,7 +97,7 @@ if (Stop-After "CreateVMSwitch") {
 # create $vms vms per each csv named as <nodename><group prefix>
 # vm name is vm-<group prefix><$group>-<hostname>-<number>
 
-icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$connectuser,$stopafter,$specialize,$fixedvhd,(Get-Command Stop-After) {
+icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$connectuser,$stopafter,$specialize,(Get-Command Stop-After) {
 
     param( [string[]]$basevhd,
            [int]$vms,
@@ -86,7 +108,6 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
            [string]$connectuser,
            [string]$stopafter,
            [string]$specialize,
-           [bool]$fixedvhd,
            $fn )
 
     set-item -Path function:\$($fn.name) -Value $fn.definition
@@ -249,21 +270,6 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
                                     cp $basevhd $vhd
                                 } else {
                                     write-host "vm vhd $vhd already exists"
-                                }
-
-                                # convert to fixed vhd(x) if needed
-                                if ((get-vhd $vhd).VhdType -ne 'Fixed' -and $fixedvhd) {
-                                    
-                                    # push dynamic vhd to tmppath and place converted at original
-                                    # note that converting a dynamic will leave a sparse hole on refs
-                                    $f = gi $vhd
-                                    $tmpname = "$($f.BaseName)-tmp$($f.Extension)"
-                                    $tmppath = join-path $f.DirectoryName $tmpname
-                                    ren $f.FullName $tmpname
-
-                                    write-host -ForegroundColor Yellow "convert $($f.FullName) to fixed via $tmppath"
-                                    convert-vhd -Path $tmppath -DestinationPath $f.FullName -VHDType Fixed
-                                    del $tmppath
                                 }
 
                                 #### STOPAFTER
