@@ -26,7 +26,9 @@ SOFTWARE.
 #>
 
 param(
-    $SampleInterval = 2
+    $SampleInterval = 2,
+    [ValidateSet("CSV FS","SSB Cache","SBL","S2D BW","*")]
+    [string[]] $sets = "CSV FS"
 )
 
 # display name
@@ -35,36 +37,146 @@ param(
 # format string
 # scalar multiplier
 
-function new-ctr(
-    [hashtable] $ctrs,
-    [string] $displayname,
-    [string] $setname,
-    [string[]] $ctrname,
-    [int] $order,
-    [int] $width,
-    [string] $fmt,
-    [decimal] $multipler,
-    [string] $aggregate,
-    [boolean] $divider = $false
+class CounterColumn {
+
+    [string] $displayname
+    [string] $setname
+    [string[]] $ctrname
+    [int] $width
+    [string] $fmt
+    [decimal] $multiplier
+    [ValidateSet("Average","Sum")][string] $aggregate
+    [boolean] $divider
+
+    CounterColumn(
+        [string] $displayname,
+        [string] $setname,
+        [string[]] $ctrname,
+        [int] $width,
+        [string] $fmt,
+        [decimal] $multiplier,
+        [string] $aggregate,
+        [boolean] $divider
     )
-{
-    $o = New-Object psobject -Property @{
-        'DisplayName' = $displayname;
-        'SetName' = $setname;
-        'CtrName' = $ctrname;
-        'Order' = $order;
-        'Width' = $width;
-        'Fmt' = $fmt;
-        'Multiplier' = $multipler;
-        'Aggregate' = $aggregate;
-        'Divider' = $divider
+    {
+        $this.displayname = $displayname
+        $this.setname = $setname
+        $this.ctrname = $ctrname
+        $this.width = $width
+        $this.fmt = $fmt
+        $this.multiplier = $multiplier
+        $this.aggregate = $aggregate
+        $this.divider = $divider
+    }
+}
+
+class CounterColumnSet {
+
+    [CounterColumn[]] $columns
+    [string[]] $counters
+    [string] $topfmt
+    [string] $linfmt
+    [string] $name
+
+    [string] $totalline
+    [string[]] $nodelines
+
+    CounterColumnSet($name)
+    {
+        $this.columns = $null
+        $this.name = $name
     }
 
-    $ctrs[$o.DisplayName] = $o
+    [void] Add([CounterColumn] $c)
+    {
+        $this.columns += $c
+    }
+
+    [void] Seal()
+    {
+        # assemble the top-line fmt and per-line fmt strings
+        # top-line is just strings/width
+        # per-line adds the (likely numeric) format specifier
+        $n = 1
+        $this.topfmt = $this.linfmt = "{0,-16}"
+        foreach ($col in $this.columns) {
+            $str = ''
+            if ($col.divider) {
+                $str += '| '
+            }
+            $str += "{$n,-$($col.width)"
+            $this.topfmt += "$str}"
+            $this.linfmt += "$($str):$($col.fmt)}"
+
+            $n += 1
+        }
+
+        # assemble the list of counter instances that will be needed
+        # note that some may be internally aggregated (i.e., total = read + write)
+        # in cases where a counterset does not provide an explicit total
+        $this.counters = ($this.columns |% {
+            $s = $_.setname
+            $_.ctrname |% { "\$($s)(_Total)\$($_)" }
+        } | group -NoElement).Name
+    }
+
+    [void] DisplayPre(
+        [hashtable] $samples,
+        [hashtable] $psamples
+        )
+    {
+        # aggregate each column across all nodes
+        $this.totalline =  $this.linfmt -f $(
+            "Total"
+            foreach ($col in $this.columns) {
+
+                # average aggreate doesn't work across nodes (and/or make this optin)
+                if ($col.aggregate -ne 'Average') {
+                    $(foreach ($node in $psamples.keys) {
+                        get-samples $psamples $node $col
+                    }) | get-aggregate $col
+                } else {
+                    $null
+                }
+            }
+        )
+
+        # individual nodes
+        # flags downed/non-responsive nodes by noting which are not
+        # present in the processed samples
+        $this.nodelines = foreach ($node in $samples.keys | sort) {
+            if ($psamples.ContainsKey($node)) {
+                $this.linfmt -f $(
+                    $node
+                    foreach ($col in $this.columns) {
+                        $s = get-samples $psamples $node $col
+                        if ($s -ne $null) {
+                            $a = $s | get-aggregate $col
+                            $a
+                        } else {
+                            "-"
+                        }
+                    }
+                )
+            } else {
+                $this.topfmt -f $(
+                    $node
+                    0..($this.columns.count - 1) |% { "-" }
+                )
+            }
+        }
+    }
+
+    [void] Display()
+    {
+        write-host ($this.topfmt -f (,$this.name + $this.columns.displayname))
+        write-host -fore green $this.totalline
+        $this.nodelines |% { write-host $_ }
+    }
 }
 
 function get-aggregate(
-    $ctr
+    [CounterColumn] $col
     )
 {
     BEGIN {
@@ -77,10 +189,15 @@ function get-aggregate(
     }
     END {
         if ($n -gt 0) {
-            switch ($ctr.aggregate) {
-                'Sum' { $ctr.multiplier * $v }
-                'Average' { $ctr.multiplier * $v / $n }
-                default { throw "Internal Error: bad aggregate for $ctr" }
+            switch ($col.aggregate) {
+                'Sum' {
+                    #write-host $col.displayname $col.multipler $v
+                    $col.multiplier * $v
+                }
+                'Average' {
+                    #write-host $col.displayname $col.multiplier $v $n
+                    $col.multiplier * $v / $n
+                }
             }
         } else {
             $null
@@ -92,37 +209,93 @@ function get-aggregate(
 function get-samples(
     [hashtable] $h,
     [string] $node,
-    $col
+    [CounterColumn] $col
     )
 {
-    foreach ($i in $col.CtrName) {
-        $h[$node]["$($col.SetName)+$($i)"]
+    foreach ($i in $col.ctrname) {
+        $h[$node]["$($col.setname)+$($i)"]
     }
 }
 
-$ctrs = @{}
-new-ctr $ctrs "IOPS" "Cluster CSVFS" @("Reads/sec","Writes/sec") 1 12 '#,#' 1 'Sum'
-new-ctr $ctrs "Reads" "Cluster CSVFS" @("Reads/sec") 2 12 '#,#' 1 'Sum'
-new-ctr $ctrs "Writes" "Cluster CSVFS" @("Writes/sec") 3 12 '#,#' 1 'Sum'
-
-new-ctr $ctrs "BW (MB/s)" "Cluster CSVFS" @("Read Bytes/sec","Write Bytes/sec") 4 12 '#,#' 0.000001 'Sum' $true
-new-ctr $ctrs "Read" "Cluster CSVFS" @("Read Bytes/sec") 5 8 '#,#' 0.000001 'Sum'
-new-ctr $ctrs "Write" "Cluster CSVFS" @("Write Bytes/sec") 6 8 '#,#' 0.000001 'Sum'
-
-new-ctr $ctrs "Read Lat (ms)" "Cluster CSVFS" @("Avg. sec/Read") 7 15 '0.000' 1000 'Average' $true
-new-ctr $ctrs "Write Lat" "Cluster CSVFS" @("Avg. sec/Write") 8 15 '0.000' 1000 'Average'
-
-
-$order = $ctrs.values | sort -property order
-
-$query = $ctrs.keys |? { $ctrs[$_].CtrName.Count -eq 1 } |% { "\$($ctrs[$_].SetName)(_Total)\$($ctrs[$_].CtrName[0])" } 
-$colfmt = ,"{0,-16}" + ($order |% { if ($_.divider) { '| ' }; "{$($_.order),-$($_.width)}"}) -join ''
-$linfmt = ,"{0,-16}" + ($order |% { if ($_.divider) { '| ' }; "{$($_.order),-$($_.width):$($_.fmt)}"}) -join ''
+$allctrs = @()
 
 ###
+$c = [CounterColumnSet]::new("CSV FS")
+$c.Add([CounterColumn]::new("IOPS", "Cluster CSVFS", @("Reads/sec","Writes/sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Reads", "Cluster CSVFS", @("Reads/sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Writes", "Cluster CSVFS", @("Writes/sec"), 12, '#,#', 1, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("BW (MB/s)", "Cluster CSVFS", @("Read Bytes/sec","Write Bytes/sec"), 13, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Read", "Cluster CSVFS", @("Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Write", "Cluster CSVFS", @("Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Read Lat (ms)", "Cluster CSVFS", @("Avg. sec/Read"), 15, '0.000', 1000, 'Average', $true))
+$c.Add([CounterColumn]::new("Write Lat", "Cluster CSVFS", @("Avg. sec/Write"), 15, '0.000', 1000, 'Average', $false))
+
+$c.Seal()
+$allctrs += $c
+
+###
+$c = [CounterColumnSet]::new("SSB Cache")
+
+$c.Add([CounterColumn]::new("Hit/Sec", "Cluster Storage Hybrid Disks", @("Cache Hit Reads/Sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Miss/Sec", "Cluster Storage Hybrid Disks", @("Cache Miss Reads/Sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Remap/Sec" ,"Cluster Storage Cache Stores", @("Page ReMap/sec"), 12, '#,#', 1, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Cache (MB/s)", "Cluster Storage Hybrid Disks", @("Cache Populate Bytes/sec","Cache Write Bytes/sec"), 13, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Read", "Cluster Storage Hybrid Disks", @("Cache Populate Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Write", "Cluster Storage Hybrid Disks", @("Cache Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Destage (MB/s)", "Cluster Storage Cache Stores", @("Destage Bytes/sec"), 15, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Update (MB/s)", "Cluster Storage Cache Stores", @("Update Bytes/sec"), 11, '#,#', 0.000001, 'Sum', $false))
+
+$c.Seal()
+$allctrs += $c
+
+###
+$c = [CounterColumnSet]::new("SBL")
+
+$c.Add([CounterColumn]::new("IOPS", "Cluster Disk Counters", @("Read/sec","Writes/sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Reads", "Cluster Disk Counters", @("Read/sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Writes", "Cluster Disk Counters", @("Writes/sec"), 12, '#,#', 1, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("BW (MB/s)", "Cluster Disk Counters", @("Read - Bytes/sec","Write - Bytes/sec"), 13, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Read", "Cluster Disk Counters", @("Read - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Write", "Cluster Disk Counters", @("Write - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Read Lat (ms)", "Cluster Disk Counters", @("Read Latency"), 15, '0.000', 1000, 'Average', $true))
+$c.Add([CounterColumn]::new("Write Lat", "Cluster Disk Counters", @("Write Latency"), 15, '0.000', 1000, 'Average', $false))
+
+$c.Seal()
+$allctrs += $c
+
+##
+$c = [CounterColumnSet]::new("S2D BW")
+
+$c.Add([CounterColumn]::new("CSV(MB/s)", "Cluster CSVFS", @("Read Bytes/sec","Write Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("CSVRead", "Cluster CSVFS", @("Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("CSVWrite", "Cluster CSVFS", @("Write Bytes/sec"), 8 ,'#,#', 0.000001, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("SBL(MB/s)", "Cluster Disk Counters", @("Read - Bytes/sec","Write - Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("SBLRead", "Cluster Disk Counters", @("Read - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("SBLWrite", "Cluster Disk Counters", @("Write - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Disk(MB/s)", "Cluster Storage Hybrid Disks", @("Disk Read Bytes/sec","Disk Write Bytes/sec"), 11, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("DiskRead", "Cluster Storage Hybrid Disks", @("Disk Read Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("DiskWrite", "Cluster Storage Hybrid Disks", @("Disk Write Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Cache(MB/s)", "Cluster Storage Hybrid Disks", @("Cache Hit Read Bytes/sec","Cache Write Bytes/sec"), 12, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("CacheRead", "Cluster Storage Hybrid Disks", @("Cache Hit Read Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("CacheWrite", "Cluster Storage Hybrid Disks", @("Cache Write Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+
+$c.Seal()
+$allctrs += $c
+
+##
+$ctrs = $allctrs |? { $sets[0] -eq '*' -or $sets -contains $_.name }
 
 function start-sample(
-    [object[]] $query,
+    [CounterColumnSet[]] $ctrs,
     [int] $SampleInterval
     )
 {
@@ -130,20 +303,22 @@ function start-sample(
     Get-Job -Name watch-cluster -ErrorAction SilentlyContinue | Stop-Job
     Get-Job -Name watch-cluster -ErrorAction SilentlyContinue | Remove-Job
 
+    # flatten list of counters and uniquify for the total counter set
+    # some display counter sets may repeat specific values (which is fine)
+    $counters = ($ctrs.counters |% { $_ |% { $_ }} | group -NoElement).Name
+
     icm -AsJob -JobName watch-cluster (Get-ClusterNode) {
 
         # extract countersamples, the object does not survive transfer between powershell sessions
         # extract as a list, not as the individual counters
-        get-counter -Continuous -SampleInterval $using:SampleInterval $($using:query |% { $_ -replace 'COMPUTERNAME',$env:COMPUTERNAME }) |% {
+        get-counter -Continuous -SampleInterval $using:SampleInterval $using:ctrs.counters |% {
             ,$_.countersamples
         }
     }
-    
-    #get-job -Name watch-cluster
 }
 
 # start the first sample job and allow frame draw the first time through
-$j = start-sample $query $SampleInterval
+$j = start-sample $ctrs $SampleInterval
 $downtime = $null
 $skipone = $false
 
@@ -153,9 +328,10 @@ Get-ClusterNode |% { $samples[$_.Name] = $null }
 
 while ($true) {
 
-    # sleep again if needed to prime the sample pipeline
+    sleep -Seconds $SampleInterval
+
+    # sleep again if needed to prime the sample pipeline;
     # there are no samples if we just restarted the sampling jobs
-    sleep $SampleInterval
     if ($skipone) {
         $skipone = $false
         continue
@@ -172,6 +348,7 @@ while ($true) {
         $samples[$_.Location] = $null
         $down += 1
     }
+
     if ($down -and $downtime -eq $null) {
         $downtime = get-date
     }
@@ -193,6 +370,7 @@ while ($true) {
         if ($samples[$node]) {
 
             $nsamples = @{}
+            #write-host $samples[$node].Count
             $samples[$node] |% {
 
                 ($setinst,$ctr) = $($_.path -split '\\')[3..4]
@@ -200,7 +378,7 @@ while ($true) {
 
                 # trim out to last sample - if we are lagged, there may be a
                 # set of measurements for a single counter
-                $nsamples["$set+$ctr"] += ,$(
+                $nsamples["$set+$ctr"] = $(
                     if ($_.cookedvalue.count -gt 1) {
                         ($_.cookedvalue)[-1]
                     } else {
@@ -213,46 +391,16 @@ while ($true) {
         }
     }
     
-    # aggregate each column across all nodes
-    $totline =  $linfmt -f $(
-        "Total"
-        foreach ($col in $order) {
-
-            # average aggreate doesn't work across nodes (and/or make this optin)
-            if ($col.aggregate -ne 'Average') {
-                $(foreach ($node in $psamples.keys) {
-                    get-samples $psamples $node $col
-                }) | get-aggregate $col
-            } else {
-                $null
-            }
-        }
-    )
-
-    # individual nodes
-    # flags downed/non-responsive nodes by noting which had
-    # failed measurement jobs in the last poll
-    $lines = foreach ($node in $samples.keys | sort) {
-        if ($psamples.ContainsKey($node)) {
-            $linfmt -f $(
-                $node
-                foreach ($col in $order) {
-                    get-samples $psamples $node $col | get-aggregate $col
-
-                }
-            )
-        } else {
-            $colfmt -f $(
-                $node
-                0..($order.count - 1) |% { "-" }
-            )
-        }
-    }
-
-    # clear and dump headers/lines
+    # post-process the samples into the counterset, then clear and dump
+    $ctrs.DisplayPre($samples, $psamples)
     cls
-
-    write-host ($colfmt -f (,"" + $order.DisplayName))
-    write-host -fore green $totline
-    $lines |% { write-host $_ }
+    $drawsep = $false
+    $ctrs |% {
+        if ($drawsep) {
+            write-host -fore Green $('-'*20)
+        }
+        $drawsep = $true
+        $_.Display()
+        
+    }
 }

@@ -27,7 +27,8 @@ SOFTWARE.
 
 param(
     [string[]] $group = @('*'),
-    [ValidateSet('Save','Shutdown')][string] $method = 'Shutdown')
+    [ValidateSet('Save','Shutdown','TurnOff')][string] $method = 'Shutdown'
+    )
 
 icm (get-clusternode |? State -eq Up) -arg $group,$method {
     param([string[]] $group, $method)
@@ -40,6 +41,8 @@ icm (get-clusternode |? State -eq Up) -arg $group,$method {
         # use remoted stop-vm for the shutdown case
         if ($method -eq 'Save') {
             $g | Stop-ClusterGroup
+        } elseif ($method -eq 'TurnOff') {
+            $g |% { Stop-VM -ComputerName $_.OwnerNode -Name $_.Name -Force -TurnOff }
         } else {
             $g |% { Stop-VM -ComputerName $_.OwnerNode -Name $_.Name -Force }
         }

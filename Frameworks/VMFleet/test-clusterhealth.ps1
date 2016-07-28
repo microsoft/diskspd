@@ -351,7 +351,9 @@ $totalf = new-namedblock 'Total' { $true }
 $t = new-namedblock 'Clusport Device Symmetry Check' { gwmi -namespace root\wmi ClusportDeviceInformation }
 $f = @($totalf)
 $f += ,(new-namedblock 'Disk Type' { $_.DeviceType -eq 0} -nullpass:$false)
-$f += ,(new-namedblock 'Hybrid Media' { $_.DeviceAttribute -band 0x4})
+# temporarily remove hybrid check - the attribute is not synchronously updated
+# and so may be (harmlessly) inaccurate for a period of time in early configuration
+#$f += ,(new-namedblock 'Hybrid Media' { $_.DeviceAttribute -band 0x4})
 $f += ,(new-namedblock 'Solid/Non-Rotational Media' { $_.DeviceAttribute -band 0x8})
 $f += ,(new-namedblock 'Enclosure Type' { $_.DeviceType -eq 1} -nullpass:$false)
 $f += ,(new-namedblock 'Virtual' { $_.DeviceAttribute -band 0x1} -nullpass:$true)
