@@ -27,7 +27,7 @@ SOFTWARE.
 
 param(
     $SampleInterval = 2,
-    [ValidateSet("CSV FS","SSB Cache","SBL","S2D BW","*")]
+    [ValidateSet("CSV FS","SSB Cache","SBL","S2D BW","Hyper-V LCPU","*")]
     [string[]] $sets = "CSV FS",
     $log = $null
 )
@@ -234,10 +234,9 @@ function get-samples(
 
         if ($h.ContainsKey($node)) {
             if ($h[$node].ContainsKey($k)) {
-
                 $h[$node][$k]
             } else {
-                write-log "missing $node[$k] : $($h[$node].Keys.Count) total keys : $($h[$node].Keys)"
+                write-log "missing $node[$k] : $($h[$node].Keys.Count) total keys"
             }
         } else {
             write-log "missing $node"
@@ -315,6 +314,15 @@ $c.Add([CounterColumn]::new("DiskWrite", "Cluster Storage Hybrid Disks", @("Disk
 $c.Add([CounterColumn]::new("Cache(MB/s)", "Cluster Storage Hybrid Disks", @("Cache Hit Read Bytes/sec","Cache Write Bytes/sec"), 12, '#,#', 0.000001, 'Sum', $true))
 $c.Add([CounterColumn]::new("CacheRead", "Cluster Storage Hybrid Disks", @("Cache Hit Read Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
 $c.Add([CounterColumn]::new("CacheWrite", "Cluster Storage Hybrid Disks", @("Cache Write Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+
+$c.Seal()
+$allctrs += $c
+
+##
+$c = [CounterColumnSet]::new("Hyper-V LCPU")
+$c.Add([CounterColumn]::new("Total%", "Hyper-V Hypervisor Logical Processor", @("% Total Run Time"), 10, "0.00", 1, 'Average', $false))
+$c.Add([CounterColumn]::new("Guest%", "Hyper-V Hypervisor Logical Processor", @("% Guest Run Time"), 10, "0.00", 1, 'Average', $false))
+$c.Add([CounterColumn]::new("Hypervisor%", "Hyper-V Hypervisor Logical Processor", @("% Hypervisor Run Time"), 10, "0.00", 1, 'Average', $false))
 
 $c.Seal()
 $allctrs += $c
