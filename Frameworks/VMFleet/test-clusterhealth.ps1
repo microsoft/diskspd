@@ -303,12 +303,15 @@ $j += start-job -name 'SMB Connectivity Error Check' -InitializationScript $evfn
             [int]($x.Event.EventData.Data |? Name -eq 'ConnectionType').'#text' -eq 2
         }
 
+        $last5 = (1000*60*5)
         $lasthour = (1000*60*60)
         $lastday = (1000*60*60*24)
 
         new-object psobject -Property @{
+            'RDMA Last5Min' = (get-fltevents -flt $fltrdma -timedeltams $last5 -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
             'RDMA LastHour' = (get-fltevents -flt $fltrdma -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
             'RDMA LastDay' = (get-fltevents -flt $fltrdma -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
+            'TCP Last5Min' = (get-fltevents -flt $flttcp -timedeltams $last5 -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
             'TCP LastHour' = (get-fltevents -flt $flttcp -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
             'TCP LastDay' = (get-fltevents -flt $flttcp -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
         }

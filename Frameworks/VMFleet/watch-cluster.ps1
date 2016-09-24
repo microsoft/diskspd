@@ -28,8 +28,24 @@ SOFTWARE.
 param(
     $SampleInterval = 2,
     [ValidateSet("CSV FS","SSB Cache","SBL","S2D BW","*")]
-    [string[]] $sets = "CSV FS"
+    [string[]] $sets = "CSV FS",
+    $log = $null
 )
+
+if ($log -ne $null) {
+    del -Force $log -ErrorAction SilentlyContinue
+}
+
+function write-log(
+    [string[]] $str
+    )
+{
+    if ($log -ne $null) {
+        $str |% {
+            "$(get-date) $_" | Out-File -Append -FilePath $log -Width 9999 -Encoding ascii
+        }
+    }
+}
 
 # display name
 # ctr name
@@ -125,7 +141,7 @@ class CounterColumnSet {
         [hashtable] $psamples
         )
     {
-        # aggregate each column across all nodes
+        # aggregate each column across all live sampled nodes
         $this.totalline =  $this.linfmt -f $(
             "Total"
             foreach ($col in $this.columns) {
@@ -213,7 +229,19 @@ function get-samples(
     )
 {
     foreach ($i in $col.ctrname) {
-        $h[$node]["$($col.setname)+$($i)"]
+
+        $k = "$($col.setname)+$($i)"
+
+        if ($h.ContainsKey($node)) {
+            if ($h[$node].ContainsKey($k)) {
+
+                $h[$node][$k]
+            } else {
+                write-log "missing $node[$k] : $($h[$node].Keys.Count) total keys : $($h[$node].Keys)"
+            }
+        } else {
+            write-log "missing $node"
+        }
     }
 }
 
@@ -370,21 +398,18 @@ while ($true) {
         if ($samples[$node]) {
 
             $nsamples = @{}
-            #write-host $samples[$node].Count
-            $samples[$node] |% {
+
+            # flatten samples - if we are lagging, we'll have a list
+            # of consecutive (increasing by timestamp) samples
+            # we could try to be more efficient by dumping all but the
+            # final sample, but later ...
+            $samples[$node] |% { $_ } |% {
 
                 ($setinst,$ctr) = $($_.path -split '\\')[3..4]
                 $set = ($setinst -split '\(')[0]
 
-                # trim out to last sample - if we are lagged, there may be a
-                # set of measurements for a single counter
-                $nsamples["$set+$ctr"] = $(
-                    if ($_.cookedvalue.count -gt 1) {
-                        ($_.cookedvalue)[-1]
-                    } else {
-                        $_.cookedvalue
-                    }
-                )
+                $k = "$set+$ctr"
+                $nsamples[$k] = $_.cookedvalue
             }
 
             $psamples[$node] = $nsamples
