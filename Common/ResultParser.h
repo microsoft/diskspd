@@ -52,7 +52,7 @@ private:
     void _PrintSectionBorderLine(const TimeSpan& timeSpan);
     void _PrintSection(_SectionEnum, const TimeSpan&, const Results&);
     void _PrintLatencyPercentiles(const Results&);
-	void _PrintTotalLatency(const Histogram<float> readLatencyHistogram,
+	void _PrintLatencyChart(const Histogram<float> readLatencyHistogram,
 		const Histogram<float> writeLatencyHistogram,
 		const Histogram<float> totalLatencyHistogram);
     void _PrintTimeSpan(const TimeSpan &timeSpan);
