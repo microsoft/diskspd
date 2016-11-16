@@ -647,22 +647,29 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
 
 void ResultParser::_PrintLatencyPercentiles(const Results& results)
 {
-    Histogram<float> readLatencyHistogram;
-    Histogram<float> writeLatencyHistogram;
-    Histogram<float> totalLatencyHistogram;
+	Histogram<float> readLatencyHistogram;
+	Histogram<float> writeLatencyHistogram;
+	Histogram<float> totalLatencyHistogram;
 
-    for (const auto& thread : results.vThreadResults)
-    {
-        for (const auto& target : thread.vTargetResults)
-        {
-            readLatencyHistogram.Merge(target.readLatencyHistogram);
+	for (const auto& thread : results.vThreadResults)
+	{
+		for (const auto& target : thread.vTargetResults)
+		{
+			readLatencyHistogram.Merge(target.readLatencyHistogram);
 
-            writeLatencyHistogram.Merge(target.writeLatencyHistogram);
+			writeLatencyHistogram.Merge(target.writeLatencyHistogram);
 
-            totalLatencyHistogram.Merge(target.writeLatencyHistogram);
-            totalLatencyHistogram.Merge(target.readLatencyHistogram);
-        }
-    }
+			totalLatencyHistogram.Merge(target.writeLatencyHistogram);
+			totalLatencyHistogram.Merge(target.readLatencyHistogram);
+		}
+	}
+	_PrintTotalLatency(readLatencyHistogram, writeLatencyHistogram, totalLatencyHistogram);
+}
+
+void ResultParser::_PrintTotalLatency(const Histogram<float> readLatencyHistogram,
+									  const Histogram<float> writeLatencyHistogram,
+									  const Histogram<float> totalLatencyHistogram)
+{
 
     bool fHasReads = readLatencyHistogram.GetSampleSize() > 0;
     bool fHasWrites = writeLatencyHistogram.GetSampleSize() > 0;
