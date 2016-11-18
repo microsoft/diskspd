@@ -699,9 +699,9 @@ void ResultParser::_PrintLatencyPercentiles(const Results& results)
 	_PrintLatencyChart(readLatencyHistogram, writeLatencyHistogram, totalLatencyHistogram);
 }
 
-void ResultParser::_PrintLatencyChart(const Histogram<float> readLatencyHistogram,
-									  const Histogram<float> writeLatencyHistogram,
-									  const Histogram<float> totalLatencyHistogram)
+void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogram,
+									  const Histogram<float>& writeLatencyHistogram,
+									  const Histogram<float>& totalLatencyHistogram)
 {
 
     bool fHasReads = readLatencyHistogram.GetSampleSize() > 0;
