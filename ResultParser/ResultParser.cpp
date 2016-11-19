@@ -647,22 +647,62 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
 
 void ResultParser::_PrintLatencyPercentiles(const Results& results)
 {
-    Histogram<float> readLatencyHistogram;
-    Histogram<float> writeLatencyHistogram;
-    Histogram<float> totalLatencyHistogram;
+	//Print one chart for each target
+	unordered_map<std::string, Histogram<float>> perTargetReadHistogram;
+	unordered_map<std::string, Histogram<float>> perTargetWriteHistogram;
+	unordered_map<std::string, Histogram<float>> perTargetTotalHistogram;
 
-    for (const auto& thread : results.vThreadResults)
-    {
-        for (const auto& target : thread.vTargetResults)
-        {
-            readLatencyHistogram.Merge(target.readLatencyHistogram);
+	for (const auto& thread : results.vThreadResults)
+	{
+		for (const auto& target : thread.vTargetResults)
+		{
+			std::string path = target.sPath;
 
-            writeLatencyHistogram.Merge(target.writeLatencyHistogram);
+			perTargetReadHistogram[path].Merge(target.readLatencyHistogram);
 
-            totalLatencyHistogram.Merge(target.writeLatencyHistogram);
-            totalLatencyHistogram.Merge(target.readLatencyHistogram);
-        }
-    }
+			perTargetWriteHistogram[path].Merge(target.writeLatencyHistogram);
+
+			perTargetTotalHistogram[path].Merge(target.readLatencyHistogram);
+			perTargetTotalHistogram[path].Merge(target.writeLatencyHistogram);
+		}
+	}
+
+	for (auto i : perTargetReadHistogram)
+	{
+		std::string path = i.first;
+		_Print("\n%10s\n", path.c_str());
+		_PrintLatencyChart(perTargetReadHistogram[path], 
+			perTargetWriteHistogram[path], 
+			perTargetTotalHistogram[path]);
+	}
+
+
+	//Print one chart for the latencies aggregated across all targets
+	Histogram<float> readLatencyHistogram;
+	Histogram<float> writeLatencyHistogram;
+	Histogram<float> totalLatencyHistogram;
+
+	for (const auto& thread : results.vThreadResults)
+	{
+		for (const auto& target : thread.vTargetResults)
+		{
+			readLatencyHistogram.Merge(target.readLatencyHistogram);
+
+			writeLatencyHistogram.Merge(target.writeLatencyHistogram);
+
+			totalLatencyHistogram.Merge(target.writeLatencyHistogram);
+			totalLatencyHistogram.Merge(target.readLatencyHistogram);
+		}
+	}
+
+	_Print("\ntotal:\n");
+	_PrintLatencyChart(readLatencyHistogram, writeLatencyHistogram, totalLatencyHistogram);
+}
+
+void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogram,
+									  const Histogram<float>& writeLatencyHistogram,
+									  const Histogram<float>& totalLatencyHistogram)
+{
 
     bool fHasReads = readLatencyHistogram.GetSampleSize() > 0;
     bool fHasWrites = writeLatencyHistogram.GetSampleSize() > 0;

@@ -52,6 +52,9 @@ private:
     void _PrintSectionBorderLine(const TimeSpan& timeSpan);
     void _PrintSection(_SectionEnum, const TimeSpan&, const Results&);
     void _PrintLatencyPercentiles(const Results&);
+	void _PrintLatencyChart(const Histogram<float>& readLatencyHistogram,
+		const Histogram<float>& writeLatencyHistogram,
+		const Histogram<float>& totalLatencyHistogram);
     void _PrintTimeSpan(const TimeSpan &timeSpan);
     void _PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fCompletionRoutines);
 
