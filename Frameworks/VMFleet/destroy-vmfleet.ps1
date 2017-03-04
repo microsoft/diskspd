@@ -36,8 +36,22 @@ icm (Get-ClusterNode) {
 
 # delete all vm content from csv
 $csv = Get-ClusterSharedVolume
+
+# handle restore cases by mapping the csv to the friendly name of the volume
+# don't rely on the csv name to contain this data
+
+$vh = @{}
+Get-Volume |? FileSystem -eq CSVFS |% { $vh[$_.Path] = $_ }
+
+$csv |% {
+    $v = $vh[$_.SharedVolumeInfo.Partition.Name] 
+    if ($v -ne $null) {
+        $_ | Add-Member -NotePropertyName VDName -NotePropertyValue $v.FileSystemLabel
+    }
+}
+
 Get-ClusterNode |% {
-    $csv |? Name -match "\($($_.Name)(-.+)?"
+    $csv |? VDName -match "$($_.Name)(-.+)?"
 } |% {
 
     del -Recurse -Force "$($_.sharedvolumeinfo.friendlyvolumename)\vm*"

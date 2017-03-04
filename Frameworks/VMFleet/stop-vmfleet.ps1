@@ -37,14 +37,17 @@ icm (get-clusternode |? State -eq Up) -arg $group,$method {
 
         $g = Get-ClusterGroup |? GroupType -eq VirtualMachine |? OwnerNode -eq $env:COMPUTERNAME |? Name -like "vm-$_-*" |? State -ne 'Offline'
 
-        # stop-clustergroup currently defaults to vm save
-        # use remoted stop-vm for the shutdown case
-        if ($method -eq 'Save') {
-            $g | Stop-ClusterGroup
-        } elseif ($method -eq 'TurnOff') {
-            $g |% { Stop-VM -ComputerName $_.OwnerNode -Name $_.Name -Force -TurnOff }
-        } else {
-            $g |% { Stop-VM -ComputerName $_.OwnerNode -Name $_.Name -Force }
+        if ($g) {
+
+            # stop-clustergroup currently defaults to vm save
+            # use remoted stop-vm for the shutdown case
+            if ($method -eq 'Save') {
+                $g | Stop-ClusterGroup
+            } elseif ($method -eq 'TurnOff') {
+                Stop-VM -ComputerName $env:COMPUTERNAME -Name $g.Name -Force -TurnOff
+            } else {
+                Stop-VM -ComputerName $env:COMPUTERNAME -Name $g.Name -Force
+            }
         }
     }
 } | ft -AutoSize

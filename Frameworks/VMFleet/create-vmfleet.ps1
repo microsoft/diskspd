@@ -26,17 +26,17 @@ SOFTWARE.
 #>
 
 param(
-    [string]$basevhd = $(throw "please specify a base vhd"),
-    [int]$vms = $(throw "please specify a number of vms per node csv"),
-    [string[]]$groups = @(),
-    [string]$adminpass = $(throw "need admin password for autologin"),
-    [string]$admin = 'administrator',
-    [string]$connectpass = $(throw "need password for loopback host connection"),
-    [string]$connectuser = $(throw "need username for loopback host connection"),
-    [validateset("CreateVMSwitch","CopyVHD","CreateVM","CreateVMGroup","AssertComplete")][string]$stopafter,
-    [validateset("Force","Auto","None")][string]$specialize = "Auto",
-    [switch]$fixedvhd = $true,
-    [string[]]$nodes = @()
+    [string]$BaseVHD = $(throw "please specify a base vhd"),
+    [int]$VMs = $(throw "please specify a number of vms per node csv"),
+    [string[]]$Groups = @(),
+    [string]$AdminPass = $(throw 'need admin password for autologin'),
+    [string]$Admin = 'administrator',
+    [string]$ConnectPass = $(throw 'need password for loopback host connection'),
+    [string]$ConnectUser = $(throw 'need username for loopback host connection'),
+    [validateset('CreateVMSwitch','CopyVHD','CreateVM','CreateVMGroup','AssertComplete')][string]$StopAfter,
+    [validateset('Force','Auto','None')][string]$Specialize = 'Auto',
+    [switch]$FixedVHD = $true,
+    [string[]]$Nodes = @()
     )
 
 function Stop-After($step)
@@ -46,6 +46,13 @@ function Stop-After($step)
         return $true
     }
     return $false
+}
+
+##################
+
+# validate existence of basevhd
+if (!(test-path -path $BaseVHD)) {
+    throw "Base VHD $BaseVHD not found"
 }
 
 if (Get-ClusterNode |? State -ne Up) {
@@ -97,17 +104,9 @@ if (Stop-After "CreateVMSwitch") {
 # create $vms vms per each csv named as <nodename><group prefix>
 # vm name is vm-<group prefix><$group>-<hostname>-<number>
 
-icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$connectuser,$stopafter,$specialize,(Get-Command Stop-After) {
+icm $nodes -ArgumentList $stopafter,(Get-Command Stop-After) {
 
-    param( [string[]]$basevhd,
-           [int]$vms,
-           [string[]]$groups,
-           [string]$admin,
-           [string]$adminpass,
-           [string]$connectpass,
-           [string]$connectuser,
-           [string]$stopafter,
-           [string]$specialize,
+    param( [string]$stopafter,
            $fn )
 
     set-item -Path function:\$($fn.name) -Value $fn.definition
@@ -134,9 +133,9 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
         # autologon
         $null = reg load 'HKLM\tmp' z:\windows\system32\config\software
         $ok = $ok -band $?
-        $null = reg add 'HKLM\tmp\Microsoft\Windows NT\CurrentVersion\WinLogon' /f /v DefaultUserName /t REG_SZ /d $admin
+        $null = reg add 'HKLM\tmp\Microsoft\Windows NT\CurrentVersion\WinLogon' /f /v DefaultUserName /t REG_SZ /d $using:admin
         $ok = $ok -band $?
-        $null = reg add 'HKLM\tmp\Microsoft\Windows NT\CurrentVersion\WinLogon' /f /v DefaultPassword /t REG_SZ /d $adminpass
+        $null = reg add 'HKLM\tmp\Microsoft\Windows NT\CurrentVersion\WinLogon' /f /v DefaultPassword /t REG_SZ /d $using:adminpass
         $ok = $ok -band $?
         $null = reg add 'HKLM\tmp\Microsoft\Windows NT\CurrentVersion\WinLogon' /f /v AutoAdminLogon /t REG_DWORD /d 1
         $ok = $ok -band $?
@@ -161,7 +160,7 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
         }
 
         del -Force z:\users\administrator\launch.ps1 -ErrorAction SilentlyContinue
-        gc C:\ClusterStorage\collect\control\launch-template.ps1 |% { $_ -replace '__CONNECTUSER__',$connectuser -replace '__CONNECTPASS__',$connectpass } > z:\users\administrator\launch.ps1
+        gc C:\ClusterStorage\collect\control\launch-template.ps1 |% { $_ -replace '__CONNECTUSER__',$using:connectuser -replace '__CONNECTPASS__',$using:connectpass } > z:\users\administrator\launch.ps1
         $ok = $ok -band $?
         if (-not $ok) {
             Write-Error "failed injection of launch.ps1 for $vhdpath"
@@ -213,32 +212,52 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
         return $ok
     }
 
-    foreach ($csv in get-clustersharedvolume) {
+    $csvs = Get-ClusterSharedVolume
 
-        if ($groups.Length -eq 0) {
+    # handle restore cases by mapping the csv to the friendly name of the volume
+    # don't rely on the csv name to contain this data
+
+    $vh = @{}
+    Get-Volume |? FileSystem -eq CSVFS |% { $vh[$_.Path] = $_ }
+
+    $csvs |% {
+        $v = $vh[$_.SharedVolumeInfo.Partition.Name] 
+        if ($v -ne $null) {
+            $_ | Add-Member -NotePropertyName VDName -NotePropertyValue $v.FileSystemLabel
+        }
+    }
+
+    foreach ($csv in $csvs) {
+
+        if ($($using:groups).Length -eq 0) {
             $groups = @( 'base' )
+        } else {
+            $groups = $using:groups
         }
 
         # identify the CSvs for which this node should create its VMs
         # the trailing characters (if any) are the group prefix
-        if ($csv.Name -match "\(($env:COMPUTERNAME)") {
+        if ($csv.VDName -match "^$env:COMPUTERNAME(?:-.+){0,1}") {
 
             foreach ($group in $groups) {
 
-                if ($csv.Name -match "\(($env:COMPUTERNAME)-([^-]+)?\)") {
-                    $g = $group+$matches[2]
+                if ($csv.VDName -match "^$env:COMPUTERNAME-([^-]+)$") {
+                    $g = $group+$matches[1]
                 } else {
                     $g = $group
                 }
 
-                foreach ($vm in 1..$vms) {
+                foreach ($vm in 1..$using:vms) {
 
                     $stop = $false
 
                     $newvm = $false
                     $name = "vm-$g-$env:COMPUTERNAME-$vm"
                     $path = Join-Path $csv.SharedVolumeInfo.FriendlyVolumeName $name
-                    $vhd = $path+".vhdx"
+
+                    # place vhdx in subdirectory, per scvmm layout defaults
+                    # $vhd = $path+".vhdx"
+                    $vhd = join-path $path "$name.vhdx"
 
                     # if the vm cluster group exists, we are already deployed
                     if (-not (Get-ClusterGroup -Name $name -ErrorAction SilentlyContinue)) {
@@ -267,7 +286,7 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
                                 $null = mkdir -ErrorAction SilentlyContinue $path
 
                                 if (-not (gi $vhd -ErrorAction SilentlyContinue)) {
-                                    cp $basevhd $vhd
+                                    cp $using:basevhd $vhd
                                 } else {
                                     write-host "vm vhd $vhd already exists"
                                 }
@@ -279,6 +298,9 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
 
                                 if (-not $stop) {
                                     $o = new-vm -VHDPath $vhd -Generation 2 -SwitchName Internal -Path $path -Name $name
+
+                                    # create A1 VM. use set-vmfleet to alter fleet sizing post-creation.
+                                    $o | set-vm -ProcessorCount 1 -MemoryStartupBytes 1.75GB -StaticMemory
 
                                     # do not monitor the internal switch connection; this allows live migration
                                     $o | Get-VMNetworkAdapter| Set-VMNetworkAdapter -NotMonitoredInCluster $true
@@ -307,10 +329,10 @@ icm $nodes -ArgumentList $basevhd,$vms,$groups,$admin,$adminpass,$connectpass,$c
                         $stop = Stop-After "CreateVMGroup"
                     }
 
-                    if (-not $stop -or ($specialize -eq 'Force')) {
+                    if (-not $stop -or ($using:specialize -eq 'Force')) {
                         # specialize as needed
                         # auto only specializes new vms; force always; none skips it
-                        if (($specialize -eq 'Auto' -and $newvm) -or ($specialize -eq 'Force')) {
+                        if (($using:specialize -eq 'Auto' -and $newvm) -or ($using:specialize -eq 'Force')) {
                             write-host -fore yellow specialize $vhd
                             if (-not (specialize-vhd $vhd)) {
                                 write-host -fore red "Failed specialize of $vhd, halting."

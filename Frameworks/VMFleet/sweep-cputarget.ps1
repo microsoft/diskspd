@@ -41,7 +41,7 @@ $cputargetwindow = 5
 $qoswindow = 5
 
 # clean result file and set column headers
-del -Force $outfile
+del -Force $outfile -ErrorAction SilentlyContinue
 'WriteRatio','QOS','AVCPU','IOPS' -join "`t" > $outfile
 
 # make qos policy and reset
@@ -59,6 +59,20 @@ function is-within(
      $value -le ($target + ($target*($percentage/100))))
 }
 
+function get-pc(
+    [string] $blg,
+    [int] $center,
+    [string] $ctr
+)
+{
+    # get central n samples of a performance counter's sample
+    $pc = Import-Counter -Path $blg -Counter "\\*\$ctr"
+
+    $t0 = ($pc.length - $center)/2
+    $t1 = $t0 + $center - 1
+    ($pc[$t0 .. $t1].CounterSamples.CookedValue | measure -Average).Average
+}
+
 # limit the number of attempts per sweep (mix) to 4 per targeted cpu util
 $sweeplimit = ($cputargets.count * 4)
 
@@ -66,7 +80,7 @@ foreach ($w in 0,10,30) {
 
     # track measured qos points, starting at given value
     $h = @{}
-    $qosinitial = $qos = 1000
+    $qosinitial = $qos = 400
 
     foreach ($cputarget in $cputargets) {
 
@@ -88,10 +102,10 @@ foreach ($w in 0,10,30) {
             write-host -fore Cyan Starting loop with QoS target $qos
 
             $curaddspec = "$($addspec)w$($w)qos$qos"
-            start-sweep.ps1 -addspec $curaddspec -b 4 -o 32 -t 1 -w $w -p r -d 60 -warm 15 -cool 15 -pc "\Hyper-V Hypervisor Logical Processor(*)\*"
+            start-sweep.ps1 -addspec $curaddspec -b 4 -o 32 -t 1 -w $w -p r -d 60 -warm 15 -cool 15 -pc '\Hyper-V Hypervisor Logical Processor(_Total)\% Total Run Time','\Processor Information(_Total)\% Processor Performance'
 
             # HACKHACK bounce collect
-            get-clustersharedvolume "Cluster Virtual Disk (collect)" | Move-ClusterSharedVolume
+             Get-ClusterSharedVolume |? { $_.SharedVolumeInfo.FriendlyVolumeName -match 'collect' } | Move-ClusterSharedVolume
 
             # get average IOPS at DISKSPD
 
@@ -105,11 +119,10 @@ foreach ($w in 0,10,30) {
 
             $avcpu = $(dir $result\*.blg |% {
 
-                $pc = Import-Counter -Path $_ -Counter "\\*\Hyper-V Hypervisor Logical Processor(_Total)\% Total Run Time"
-
-                $t0 = ($pc.length - 60)/2
-                $t1 = $t0 + 60 - 1
-                ($pc[$t0 .. $t1].CounterSamples.CookedValue | measure -Average).Average
+                $center = 60
+                $trt = get-pc $_ $center '\Hyper-V Hypervisor Logical Processor(_Total)\% Total Run Time'
+                $ppc = get-pc $_ $center '\Processor Information(_Total)\% Processor Performance'
+                $trt*$ppc/100
             } | measure -Average).Average
 
             # capture results

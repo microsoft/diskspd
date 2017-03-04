@@ -35,6 +35,19 @@ param(
 
 $csv = get-clustersharedvolume
 
+# handle restore cases by mapping the csv to the friendly name of the volume
+# don't rely on the csv name to contain this data
+
+$vh = @{}
+Get-Volume |? FileSystem -eq CSVFS |% { $vh[$_.Path] = $_ }
+
+$csv |% {
+    $v = $vh[$_.SharedVolumeInfo.Partition.Name] 
+    if ($v -ne $null) {
+        $_ | Add-Member -NotePropertyName VDName -NotePropertyValue $v.FileSystemLabel
+    }
+}
+
 if ($disableintegrity) {
     $csv |% {
         dir -r $_.SharedVolumeInfo.FriendlyVolumeName | Set-FileIntegrity -Enable:$false -ErrorAction SilentlyContinue
@@ -44,9 +57,7 @@ if ($disableintegrity) {
 if ($renamecsvmounts) {
     $csv |% {
         if ($_.SharedVolumeInfo.FriendlyVolumeName -match 'Volume\d+$') {
-            if ($_.name -match '\((.*)\)') {
-                ren $_.SharedVolumeInfo.FriendlyVolumeName $matches[1]
-            }
+            ren $_.SharedVolumeInfo.FriendlyVolumeName $_.VDName
         }
     }
 }
@@ -68,10 +79,9 @@ function move-csv(
         }
         $nh[$nodes[$nodes.Length-1]] = $nodes[0]
 
-        $csv = Get-ClusterSharedVolume
         Get-ClusterNode |% {
             $node = $_.Name
-            $csv |? Name -match "\($node(?:-.+){0,1}\)" |% {
+            $csv |? VDName -match "$node(?:-.+){0,1}" |% {
                 $_ | Move-ClusterSharedVolume $nh[$_.OwnerNode.Name]
             }
         }
@@ -83,7 +93,7 @@ function move-csv(
         # move all csvs named by node names back to their named node
         get-clusternode |? State -eq Up |% {
             $node = $_.Name
-            $csv |? Name -match "\($node(?:-.+){0,1}\)" |? OwnerNode -ne $node |% { $_ | Move-ClusterSharedVolume $node }
+            $csv |? VDName -match "$node(?:-.+){0,1}" |? OwnerNode -ne $node |% { $_ | Move-ClusterSharedVolume $node }
         }
     }
 }

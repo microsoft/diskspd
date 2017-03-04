@@ -30,8 +30,11 @@ param([string[]]$group = "*")
 icm (get-clusternode |? State -eq Up) -arg $group {
     param([string[]]$group)
 
+    # failed is an unclean offline tbd root causes (can usually be recovered)
+
     $group |% {
-        Get-ClusterGroup |? GroupType -eq VirtualMachine |? Name -like "vm-$_-$env:COMPUTERNAME-*" |? State -eq 'Offline' |
-            Start-ClusterGroup
+        Get-ClusterGroup |? OwnerNode -eq $env:COMPUTERNAME |? GroupType -eq VirtualMachine |? Name -like "vm-$_-*" |? {
+            $_.State -eq 'Offline' -or $_.State -eq 'Failed'
+        } | Start-ClusterGroup
     }
 } | ft -AutoSize

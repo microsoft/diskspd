@@ -25,6 +25,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
+param(
+    [switch] $CleanOperationalIssues = $false
+    )
+
 function new-namedblock(
     [string] $name,
     [scriptblock] $block,
@@ -158,20 +162,23 @@ $fns = {
 
 # Detect RDMA its type (by manufacturer) so that, if needed, we can assert QoS/Cos for RoCE
 
-$netadapters = Get-NetAdapterRdma | Get-NetAdapter |? HardwareInterface
+$netadapters = Get-NetAdapterRdma |? Enabled | Get-NetAdapter
 
 $rdma = $false
 $roce = $false
+$rocematch = 'Mellanox'
 
 if ($netadapters) {
     write-host -fore green Detected RDMA adapters: will require RDMA
     $rdma = $true
 
     # will need a tweak as additional non-Mellanox RoCE arrive (and/or if IB)
-    $qroce = $netadapters |? DriverProvider -like 'Mellanox*'
+    $qroce = $netadapters |? DriverProvider -match $rocematch
     if ($qroce) {
+        $drvdesc = $qroce[0].DriverDescription
+
         write-host -fore green Detected $qroce[0].DriverProvider RDMA adapters: will require RoCE configuration
-        write-host -fore green Adapter Description: $qroce[0].DriverDescription
+        write-host -fore green Adapter Description: $drvdesc
         $roce = $true
     }
 }
@@ -248,25 +255,54 @@ $j += start-job -name 'Physical Disk Health' {
 
 # consolidated op issues - should logically split?
 
-$j += start-job -name 'Operational Issues and Storage Jobs' {
+$j += start-job -name 'Operational Issues and Storage Jobs' -ArgumentList $CleanOperationalIssues {
 
-    $ev = icm (get-clusternode) { get-winevent -LogName Microsoft-Windows-Storage-Storport/Operational |? Id -eq 502 }
+    param( $CleanOperationalIssues )
+
+    $ev = icm (get-clusternode) {
+        get-winevent -LogName Microsoft-Windows-Storage-Storport/Operational |? Id -eq 502 |% {
+            $ex = [xml]$_.ToXml()
+            $guid = ($ex.Event.EventData.Data |? Name -eq ClassDeviceGuid).'#text'
+            $_ | Add-Member -NotePropertyName DeviceGuid -NotePropertyValue $guid -PassThru
+        }
+    }
     if ($ev) {
         write-host -fore yellow WARNING: unresponsive device events have been logged by storport.
         write-host -fore yellow `tThese may correspond to retired devices, and should be investigated.
-        $ev | ft -autosize
+        $ev | ft -autosize PsComputerName,TimeCreated,Id,DeviceGuid,Message
+
+        write-host -fore yellow Corresponding devices by Device GUID:
+        $d = Get-StorageSubSystem Cluster* | Get-StoragePool |? IsPrimordial -eq $false | Get-PhysicalDisk
+        $ev |% {
+            $d |? ObjectId -match "PD:$($_.DeviceGuid)"
+        } | ft -AutoSize
     }
 
     # look for livekernelreport and/or bugcheck dumps
 
-    $dmps = icm (get-clusternode) {
-        dir $($env:windir + "\livekernelreports")
-        dir $($env:windir + "\minidump") -ErrorAction SilentlyContinue
-        dir $($env:windir + "\memory.dmp") -ErrorAction SilentlyContinue
+    $dmps = icm (get-clusternode |? State -eq Up) {
+        
+        $obj = @()
+
+        $obj += dir $($env:windir + "\livekernelreports")
+        $obj += dir $($env:windir + "\minidump") -ErrorAction SilentlyContinue
+        $obj += dir $($env:windir + "\memory.dmp") -ErrorAction SilentlyContinue
+
+        if ($using:CleanOperationalIssues -and $obj.count -gt 0) {
+            $obj | del -Force -Recurse -ErrorAction SilentlyContinue
+        }
+
+        $obj
+
     } | sort -property PsParentPath,LastWriteTime,PsComputerName
 
     if ($dmps) {
-        write-host -fore yellow WARNING: there are failure reports that may require triage
+        if ($CleanOperationalIssues) {
+            write-host -fore red NOTE: the following failure reports were forcibly removed
+        } else {
+            write-host -fore yellow WARNING: there are failure reports that may require triage
+        }
+        
         $dmps | ft -AutoSize
     }
 
@@ -285,7 +321,7 @@ $j += start-job -name 'Operational Issues and Storage Jobs' {
 
 $j += start-job -name 'SMB Connectivity Error Check' -InitializationScript $evfns {
 
-    $r = icm (get-clusternode) -ArgumentList (get-command get-fltevents) {
+    $r = icm (get-clusternode |? State -eq Up) -ArgumentList (get-command get-fltevents) {
 
         param($fn)
 
@@ -317,14 +353,24 @@ $j += start-job -name 'SMB Connectivity Error Check' -InitializationScript $evfn
         }
     }
 
-    $r | sort -Property PsComputerName | ft -Property (@('PsComputerName') + (($r[0] | gm -MemberType NoteProperty |? Definition -like 'int*').Name | sort))
+    $hdr = (($r[0] | gm -MemberType NoteProperty |? Definition -like 'int*').Name | sort)
+    $rdmafail = ($r |% { $row = $_; $hdr |? {$_ -like 'RDMA*' } |% { $row.$_ }} | measure -sum).sum -ne 0
+
+    if ($rdmafail) {
+        write-host -ForegroundColor Red "WARNING: the SMB Client is receiving RDMA disconnects. This is an error whose root"
+        write-host -ForegroundColor Red "`t cause may be PFC/CoS misconfiguration (RoCE) on hosts or switches, physical"
+        write-host -ForegroundColor Red "`t issues (ex: bad cable), switch or NIC firmware issues, and will lead to severely"
+        write-host -ForegroundColor Red "`t degraded performance. Additional triage is included in other tests."
+    }
+
+    $r | sort -Property PsComputerName | ft -Property (@('PsComputerName') + $hdr)
 }
 
 if ($roce) {
 
-    $j += start-job -name 'RoCE Error Check' -InitializationScript $evfns {
+    $j += start-job -name 'RoCE: Mellanox Disable Check' -InitializationScript $evfns {
 
-        $r = icm (get-clusternode) -ArgumentList (get-command get-fltevents) {
+        $r = icm (get-clusternode |? State -eq Up) -ArgumentList (get-command get-fltevents) {
 
             param($fn)
 
@@ -344,11 +390,82 @@ if ($roce) {
             write-host -ForegroundColor Green Pass
         }
     }
+
+    $j += start-job -name 'RoCE: Mellanox Error Check' {
+        
+        switch ($using:drvdesc) {
+            "Mellanox ConnectX-3 Pro Ethernet Adapter" {
+                $pc = @{
+                    '\Mellanox Adapter Diagnostic Counters(_Total)\Responder Out-of-order Sequence Received' = 'Out Of Order';
+                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Received Bad CRC Error' = 'Rec BadCRC';
+                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Received Frame Length Error' = 'Rec FrmLenErr';
+                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Received Symbol Error' = 'Rec SymlErr';
+                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Received Discarded' = 'Rec Discard';
+                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Outbound Discarded' = 'Outbnd Err'
+                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Outbound Errors' = 'Outbnd Discard';
+                }
+            }
+            "Mellanox ConnectX-4 Adapter" {
+                $pc = @{
+                    '\Mellanox WinOF-2 Diagnostics(_Total)\Responder out of order sequence received' = 'Out Of Order';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Bad CRC Error' = 'Rec BadCRC';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Frame Length Error' = 'Rec FrmLenErr';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Symbol Error' = 'Rec SymlErr';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Discarded' = 'Rec Discard';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Discarded' = 'Outbnd Err'
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Errors' = 'Outbnd Discard';
+                }
+            }
+            default {
+                write-host -ForegroundColor Red "Unknown adapter type: $($using:drvdesc)"
+            }
+        }
+
+        $r = icm (get-clusternode |? State -eq Up) -ArgumentList $pc {
+
+            param( $pc )
+
+            $c = get-counter ($pc.Keys |% { $_ }) -ErrorAction SilentlyContinue
+            if ($c) {
+
+                $o = new-object psobject -Property @{ 'Errors' = $false }
+                $c.CounterSamples | sort -Property Path |% {
+                    if ($_.path -match '\\\\[^\\]+(\\.*$)') {
+                        $o | Add-Member -NotePropertyName $pc[$matches[1]] -NotePropertyValue $_.CookedValue
+                        if ($_.CookedValue -ne 0) { $o.Errors = $true }
+                    }
+                }
+                $o
+            }
+        }
+
+        if ($r.length -ne (get-clusternode |? State -eq Up).length) {
+
+            write-host -ForegroundColor Yellow WARNING: retransmit statistics not available from all nodes. Ensure driver updates applied.
+            write-host -ForegroundColor Yellow `t $r.length nodes responded out of $((get-clusternode |? Up).length)
+
+        }
+
+        if ($r |? Errors) {
+
+            write-host -ForegroundColor Red "WARNING: Any non-zero error counters may indicate physical or switch/NIC"
+            write-host -ForegroundColor Red "`t issues, likely leading to packet drops and retransmits, which will degrade"
+            write-host -ForegroundColor Red "`t performance. At high enough rates they can lead to SMB connection drops."
+        } else {
+            write-host -ForegroundColor Green "Pass - no errors detected"
+        }
+
+        $hdr = @( 'PsComputerName' )
+        $hdr += $($pc.Values |% { $_ })
+
+        $r | sort -property PsComputerName | ft -Property $hdr
+    }
 }
 
 ## Begin Symmetry Checks
 
 $totalf = new-namedblock 'Total' { $true }
+$totalf_nonull = new-namedblock 'Total' { $true } -nullpass:$false
 
 ###
 $t = new-namedblock 'Clusport Device Symmetry Check' { gwmi -namespace root\wmi ClusportDeviceInformation }
@@ -410,7 +527,7 @@ if ($rdma) {
 }
 
 ###
-$t = new-namedblock 'RDMA Adapters Symmetry Check' { Get-NetAdapterRdma | Get-NetAdapter |? HardwareInterface }
+$t = new-namedblock 'RDMA Adapters Symmetry Check' { Get-NetAdapterRdma |? Enabled | Get-NetAdapter }
 $f = @($totalf)
 $f += ,(new-namedblock 'Operational' { $_.Speed -gt 0 } -nullpass:$(-not $rdma))
 $f += ,(new-namedblock 'Up' { $_.ifOperStatus -eq 'Up' } -nullpass:$(-not $rdma))
@@ -420,19 +537,31 @@ $j += start-job -InitializationScript $fns -Name $t.name { do-clustersymmetry $u
 ###
 if ($roce) {
     
+    # assert SMB Direct policy defined
     $t = new-namedblock 'RoCE/QoS Configuration for SMB Direct' { Get-NetQosPolicy }
-    $f = @($totalf)
+    $f = @($totalf_nonull)
     $f += ,(new-namedblock 'SMB Direct' { $_.NetDirectPort -eq 445 -and $_.PriorityValue -ne 0 } -nullpass:$false)
 
     $j += start-job -InitializationScript $fns -Name $t.name { do-clustersymmetry $using:t $using:f }
-
+    
     # this is strictly insufficient, should ensure the enabled one is the same as that defined for SMB Direct
     $t = new-namedblock 'RoCE/CoS Definitions' { Get-NetQosFlowControl }
-    $f = @($totalf)
+    $f = @($totalf_nonull)
     $f += ,(new-namedblock 'Enabled' { $_.Enabled } -nullpass:$false)
     $f += ,(new-namedblock 'Disabled' { -not $_.Enabled } -nullpass:$false)
 
     $j += start-job -InitializationScript $fns -Name $t.name { do-clustersymmetry $using:t $using:f }
+
+    <#
+    #
+    $t = new-namedblock 'RoCE/CoS Applied to RoCE RNICs' { Get-NetAdapterRdma | get-netadapter -Physical -ErrorAction SilentlyContinue |? DriverProvider -match $using:rocematch }
+    $f = @($totalf_nonull)
+    $f += ,(new-namedblock 'Operational FlowControl Specs' { $_.OperationalFlowControl } -nullpass:$false)
+    $f += ,(new-namedblock 'Operational Port/Protocol Classification Specs' { $_.OperationalClassifications } -nullpass:$false)
+    $f += ,(new-namedblock 'Operational CoS Traffic Classes' { $_.OperationalTrafficClasses } -nullpass:$false)
+
+    $j += start-job -InitializationScript $fns -Name $t.name { do-clustersymmetry $using:t $using:f }
+    #>
 }
 
 ###
