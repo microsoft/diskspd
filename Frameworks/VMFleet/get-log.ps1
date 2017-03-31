@@ -1,4 +1,4 @@
-<#
+﻿<#
 DISKSPD - VM Fleet
 
 Copyright(c) Microsoft Corporation
@@ -25,14 +25,56 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-#-# System Config:    __CNODES__ Systems x __CVMS__ VMs/System#Storage Config:   3-way S2D Mirror#Current Workload: 90:10 4K Random Read/Write
-[string](get-date)
+param(
+    [string] $zip = $(throw "please provide zip filename for compressed logs"),
+    [ValidateSet("*","HyperV","FailoverClustering","SMB")][string[]] $set = "*",
+    [int] $timespan = 0
+    )
 
-$b = 4
-$t = 8
-$o = 20
-$w = 10
+# convert minutes to milliseconds
+if ($timespan -gt 0) {
+    $timespan *= 60*1000
+}
 
-C:\run\diskspd.exe -n -h `-t$t `-o$o `-b$($b)k `-r$($b)k `-w$w -W10 -d60 -C10 -D -L (dir C:\run\testfile?.dat)
+$logs = icm (get-clusternode) {
 
-[string](get-date)
+    $map = @{
+        "HyperV" = "Microsoft-Windows-Hyper-V";
+        "FailoverClustering" = "Microsoft-Windows-FailoverClustering"
+        "SMB" = "Microsoft-Windows-SMB"
+    }
+
+    if ($using:set -eq "*") {
+        $lset = $map.Keys |% { $_ }
+    } else {
+        $lset = $using:set
+    }
+
+$q = @"
+/q:"*[System[TimeCreated[timediff(@SystemTime) <= __TIME__]]]"
+"@
+
+    if ($using:timespan -gt 0) {
+        $timefilt = $q -replace '__TIME__',$using:timespan
+    } else {
+        $timefilt = $null
+    }
+
+    $lset |% {
+
+        # get logs and normalize to legal filenames
+        $prov = wevtutil el | sls $map[$_]
+        $provf = $prov -replace '/','-'
+
+        foreach ($i in 0..($prov.Count - 1)) {
+
+            $localpath = "$($provf[$i])--$env:computername.evtx"
+            del -Force $localpath -ErrorAction SilentlyContinue
+            wevtutil epl $prov[$i] "c:\$localpath" $timefilt
+            write-output "\\$env:computername\c$\$localpath"
+        }
+    }
+}
+
+compress-archive -Path $logs -DestinationPath $zip
+del -force $logs
