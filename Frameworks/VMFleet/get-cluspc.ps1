@@ -1,4 +1,4 @@
-<#
+﻿<#
 DISKSPD - VM Fleet
 
 Copyright(c) Microsoft Corporation
@@ -25,14 +25,146 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-#-# System Config:    __CNODES__ Systems x __CVMS__ VMs/System#Storage Config:   3-way S2D Mirror#Current Workload: 90:10 4K Random Read/Write
-[string](get-date)
+param(
+    [ValidateSet('PhysicalDisk','CPU','SSB','SSB Cache','CSVFS','Storage','Spaces')]
+        [string[]] $pcset = '*',
+    [string] $addspec,
+    [ValidateRange(1,[int]::MaxValue)]
+        [int] $seconds = $(throw "please specify a number of seconds to capture for"),
+    [string] $destination = $(throw "please specify a destination for the blg zip"),
+    [int] $sampleinterval = 1
+    )
 
-$b = 4
-$t = 8
-$o = 20
-$w = 10
+$sets = @{
+    'PhysicalDisk' = '\PhysicalDisk(*)\*','+getclusport';
+    'CSVFS' = '\Cluster CSVFS(*)\*','\Cluster CSV Volume Cache(*)\*','\Cluster CSV Volume Manager(*)\*','\Cluster CSVFS Block Cache(*)\*','\Cluster CSVFS Direct IO(*)\*','\Cluster CSVFS Redirected IO(*)\*','+getcsv';
+    'SSB' = '\Cluster Disk Counters(*)\*','+getclusport';
+    'SSB Cache' = '\Cluster Storage Hybrid Disks(*)\*','\Cluster Storage Cache Stores(*)\*';
+    'Spaces' = '\Storage Spaces Write Cache(*)\*','\Storage Spaces Tier(*)\*','\Storage Spaces Virtual Disk(*)\*'
+    'ReFS' = '\ReFS(*)\*';
+    'CPU' = '\Hyper-V Hypervisor Logical Processor(*)\*','\Processor Information(*)\*';
 
-C:\run\diskspd.exe -n -h `-t$t `-o$o `-b$($b)k `-r$($b)k `-w$w -W10 -d60 -C10 -D -L (dir C:\run\testfile?.dat)
+    'Storage' = 'PhysicalDisk','CSVFS','SSB','SSB Cache','ReFS','Spaces';
+}
 
-[string](get-date)
+$special = @{
+    "getclusport" = $false;
+    "getcsv" = $false;
+}
+
+$cleanup = @()
+
+$pc = @()
+if ($pcset.count -eq 1 -and $pcset[0] -eq '*') {
+    # list of all keys
+    $pc = $sets.keys |% { $_ }
+} else {
+    $pc = $pcset
+}
+
+# repeat expansion (sets in sets, possibly containing special collection rules)
+do {
+    $expansion = $false
+    $pc = $pc |% {
+        $n = $_
+        switch ($n[0]) {
+            # performance counter - passthru
+            '\' { $n }
+            # special collection (sets variable -> $true)
+            '+' {
+
+                if ($special.ContainsKey($n.Substring(1))) {
+                    $special[$n.Substring(1)] = $true
+                } else {
+                    throw "unrecognized special gather command $($n.Substring(1))"
+                }
+            }
+            # set expansion
+            default {
+                $sets[$n]
+                $expansion = $true
+            }
+        }
+    }
+} while ($expansion)
+
+# uniq the counters
+$pc = ($pc | group -NoElement).Name
+
+# --
+
+function start-logman(
+    [string] $computer,
+    [string] $name,
+    [string[]] $counters,
+    [int] $sampleinterval
+    )
+{
+    $f = "c:\perfctr-$name-$computer.blg"
+
+    $null = logman create counter "perfctr-$name" -o $f -f bin -si $sampleinterval --v -c $counters -s $computer
+    $null = logman start "perfctr-$name" -s $computer
+    write-host "performance counters on: $computer"
+}
+
+function stop-logman(
+    [string] $computer,
+    [string] $name
+    )
+{
+    $f = "c:\perfctr-$name-$computer.blg"
+    
+    $null = logman stop "perfctr-$name" -s $computer
+    $null = logman delete "perfctr-$name" -s $computer
+    write-host "performance counters off: $computer"
+
+    echo $("\\$computer\$f" -replace ':','$')
+}
+
+icm (get-clusternode) -ArgumentList (get-command start-logman) {
+
+    param($fn)
+    set-item -path function:\$($fn.name) -value $fn.definition
+
+    start-logman $env:COMPUTERNAME $using:addspec $using:pc -sampleinterval $using:sampleinterval
+}
+
+sleep $seconds
+
+$f = icm (get-clusternode) -ArgumentList (get-command stop-logman) {
+
+    param($fn)
+    set-item -path function:\$($fn.name) -value $fn.definition
+
+    stop-logman $env:COMPUTERNAME $using:addspec $using:destination
+}
+$cleanup += $f
+
+#--
+# specials
+#--
+
+# make capture directory
+$t = New-TemporaryFile
+del $t
+$null = md $t
+$cleanup += $t
+
+if ($special['getclusport']) {
+
+    $exp = "$t\clusport.xml"
+    gwmi -Namespace root\wmi ClusPortDeviceInformation | export-clixml -Path $exp
+    $f += $exp
+}
+
+if ($special['getcsv']) {
+
+    $exp = "$t\csv.xml"
+    Get-ClusterSharedVolume | export-clixml -Path $exp
+    $f += $exp
+}
+
+compress-archive -DestinationPath $destination -Path $f
+del -Force -Recurse $cleanup
+
+write-host "performance counters: $destination"
