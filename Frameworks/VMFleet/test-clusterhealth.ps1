@@ -190,32 +190,59 @@ $j = @()
 $j += start-job -Name 'Basic Health Checks' {
 
     # nodes up
-
     $cn = Get-ClusterNode
 
     if ($cn.count -eq $($cn |? State -eq Up).count) {
-        write-host -fore green All cluster nodes Up
+        write-host -ForegroundColor Green All cluster nodes Up
     } else {
-        write-host -fore red Following cluster nodes not Up:
+        write-host -ForegroundColor Red Following cluster nodes not Up:
         $cn |? State -ne Up
     }
 
+    # node uptime
+    $o = icm ($cn |? State -eq Up) {
+        $w = gwmi win32_operatingsystem
+        $w.ConvertToDateTime($w.localdatetime) - $w.ConvertToDateTime($w.lastbootuptime)
+    }
+
+    $reboots = $o |? TotalHours -lt 1
+
+    if ($reboots.length -and $reboots.length -ne $o.length) {
+        write-host -ForegroundColor Yellow WARNING: $reboots.length nodes have rebooted in the last hour. Ensure that
+        write-host -ForegroundColor Yellow `t no unexpected events are occuring in the cluster.
+    }
+
+    write-host -ForegroundColor Green Cluster node uptime:
+    $o | sort PsComputerName | ft PsComputerName,@{ Label="Uptime"; Expression={"{0}d:{1:00}h:{2:00}m.{3:00}s" -f $_.Days,$_.Hours,$_.Minutes,$_.Seconds}}
+
+    # subsystem check
     $ss = Get-StorageSubSystem |? Model -eq 'Clustered Windows Storage'
 
     if (($ss | measure).count -ne 1) {
-        write-host -fore red Expected single clustered storage subsystem, found:
+        write-host -ForegroundColor Red Expected single clustered storage subsystem, found:
         $ss | ft -autosize
         return
     }
 
-    # pool health
+    $ssuh = $ss |? HealthStatus -ne Healthy
 
+    if ($ssuh) {
+        write-host -ForegroundColor Red WARNING: clustered storage subsystem is not healthy
+        $ssuh | ft -AutoSize
+
+        write-host -ForegroundColor Red Output of Debug-StorageSubSystem follows
+        $ssuh | Debug-StorageSubSystem
+    } else {
+        write-host -ForegroundColor Green Clustered storage subsystem Healthy
+    }
+
+    # pool health
     $p = $ss | Get-StoragePool |? IsPrimordial -ne $true |? HealthStatus -ne Healthy
 
     if ($p -eq $null) {
-        write-host -fore green All operational pools Healthy
+        write-host -ForegroundColor Green All pools Healthy
     } else {
-        write-host -fore red Following pools not Healthy:
+        write-host -ForegroundColor Red Following pools not Healthy:
         $p | ft -autosize
     }
 }
@@ -309,9 +336,9 @@ $j += start-job -name 'Operational Issues and Storage Jobs' -ArgumentList $Clean
     # Storage Jobs
 
     $sj = get-storagejob
-    if ($sj) {
+    if ($sj |? JobState -ne Completed) {
         write-host -ForegroundColor red WARNING: there are active storage jobs running. Investigate the root cause before continuing.
-        get-storagejob | ft -autosize
+        $sj | ft -autosize
     } else {
         write-host -fore green No storage rebuild or regeneration jobs are active
     }
@@ -393,6 +420,9 @@ if ($roce) {
 
     $j += start-job -name 'RoCE: Mellanox Error Check' {
         
+        $r = $null
+        $pc = $null
+
         switch ($using:drvdesc) {
             "Mellanox ConnectX-3 Pro Ethernet Adapter" {
                 $pc = @{
@@ -401,8 +431,8 @@ if ($roce) {
                     '\Mellanox Adapter Traffic Counters(_Total)\Packets Received Frame Length Error' = 'Rec FrmLenErr';
                     '\Mellanox Adapter Traffic Counters(_Total)\Packets Received Symbol Error' = 'Rec SymlErr';
                     '\Mellanox Adapter Traffic Counters(_Total)\Packets Received Discarded' = 'Rec Discard';
-                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Outbound Discarded' = 'Outbnd Err'
-                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Outbound Errors' = 'Outbnd Discard';
+                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Outbound Discarded' = 'Outbnd Discard'
+                    '\Mellanox Adapter Traffic Counters(_Total)\Packets Outbound Errors' = 'Outbnd Err';
                 }
             }
             "Mellanox ConnectX-4 Adapter" {
@@ -412,8 +442,8 @@ if ($roce) {
                     '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Frame Length Error' = 'Rec FrmLenErr';
                     '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Symbol Error' = 'Rec SymlErr';
                     '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Discarded' = 'Rec Discard';
-                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Discarded' = 'Outbnd Err'
-                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Errors' = 'Outbnd Discard';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Discarded' = 'Outbnd Discard'
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Errors' = 'Outbnd Err';
                 }
             }
             default {
@@ -421,21 +451,26 @@ if ($roce) {
             }
         }
 
-        $r = icm (get-clusternode |? State -eq Up) -ArgumentList $pc {
+        # no counters, no results
 
-            param( $pc )
+        if ($pc -ne $null) {
 
-            $c = get-counter ($pc.Keys |% { $_ }) -ErrorAction SilentlyContinue
-            if ($c) {
+            $r = icm (get-clusternode |? State -eq Up) -ArgumentList $pc {
 
-                $o = new-object psobject -Property @{ 'Errors' = $false }
-                $c.CounterSamples | sort -Property Path |% {
-                    if ($_.path -match '\\\\[^\\]+(\\.*$)') {
-                        $o | Add-Member -NotePropertyName $pc[$matches[1]] -NotePropertyValue $_.CookedValue
-                        if ($_.CookedValue -ne 0) { $o.Errors = $true }
+                param($pc)
+
+                $c = get-counter ($pc.Keys |% { $_ }) -ErrorAction SilentlyContinue
+                if ($c) {
+
+                    $o = new-object psobject -Property @{ 'Errors' = $false }
+                    $c.CounterSamples | sort -Property Path |% {
+                        if ($_.path -match '\\\\[^\\]+(\\.*$)') {
+                            $o | Add-Member -NotePropertyName $pc[$matches[1]] -NotePropertyValue $_.CookedValue
+                            if ($_.CookedValue -ne 0) { $o.Errors = $true }
+                        }
                     }
+                    $o
                 }
-                $o
             }
         }
 
@@ -501,7 +536,7 @@ $f += ,(new-namedblock 'Selected & Non-Failed' { $_.Selected -and -not $_.Failed
 $j += start-job -InitializationScript $fns -Name $t.name { do-clustersymmetry $using:t $using:f }
 
 ###
-$t = new-namedblock 'SMB CSV Multichannel Symmetry Check' { Get-SmbMultichannelConnection -SmbInstance SBL }
+$t = new-namedblock 'SMB CSV Multichannel Symmetry Check' { Get-SmbMultichannelConnection -SmbInstance CSV }
 $f = @($totalf)
 $f += ,(new-namedblock 'RDMA Capable' { $_.ClientRdmaCapable -and $_.ServerRdmaCapable } -nullpass:$(-not $rdma))
 $f += ,(new-namedblock 'Selected & Non-Failed' { $_.Selected -and -not $_.Failed } -nullpass:$(-not $rdma))

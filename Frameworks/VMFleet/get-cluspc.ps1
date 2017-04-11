@@ -32,8 +32,18 @@ param(
     [ValidateRange(1,[int]::MaxValue)]
         [int] $seconds = $(throw "please specify a number of seconds to capture for"),
     [string] $destination = $(throw "please specify a destination for the blg zip"),
-    [int] $sampleinterval = 1
+    [int] $sampleinterval = 1,
+    [switch] $force = $false
     )
+
+if (gi -ErrorAction SilentlyContinue $destination) {
+    if (-not $force) {
+        Write-Error "$destination already exists, please delete or use -Force to overwrite"
+        return
+    } else {
+        del -ErrorAction SilentlyContinue $destination
+    }
+}
 
 $sets = @{
     'PhysicalDisk' = '\PhysicalDisk(*)\*','+getclusport';
@@ -131,20 +141,26 @@ icm (get-clusternode) -ArgumentList (get-command start-logman) {
 
 sleep $seconds
 
-$f = icm (get-clusternode) -ArgumentList (get-command stop-logman) {
+# now capture all counter files
+$f = @()
+$f += icm (get-clusternode) -ArgumentList (get-command stop-logman) {
 
     param($fn)
     set-item -path function:\$($fn.name) -value $fn.definition
 
     stop-logman $env:COMPUTERNAME $using:addspec $using:destination
 }
+
+# add all counter to the cleanup step
 $cleanup += $f
 
 #--
 # specials
 #--
 
-# make capture directory
+# make capture directory, and add to cleanup list
+# note that all specials are generated into this directory,
+# and will be automatically cleaned up when it is deleted
 $t = New-TemporaryFile
 del $t
 $null = md $t

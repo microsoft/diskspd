@@ -28,7 +28,11 @@ SOFTWARE.
 [string](get-date)
 
 # buffer size/alighment, threads/target, outstanding/thread, write%
-$b = 4; $t = 1; $o = 8; $w = 0
+$b = 4; $t = 1; $o = 8; $w = 10
+
+# optional - specify rate limit in iops, translated to bytes/ms for DISKSPD
+$iops = 500
+if ($iops -ne $null) { $g = $iops * $b * 1KB / 1000 }
 
 # io pattern, (r)andom or (s)equential (si as needed for multithread)
 $p = 'r'
@@ -37,7 +41,9 @@ $p = 'r'
 $d = 30*60; $cool = 30; $warm = 60
 
 $addspec = 'base'
-$result = "result-b$($b)t$($t)o$($o)w$($w)p$($p)-$($addspec)-$(gc c:\vmspec.txt).xml"
+$gspec = $null
+if ($g -ne $null) { $gspec = "g$($g)" }
+$result = "result-b$($b)t$($t)o$($o)w$($w)p$($p)$($gspec)-$($addspec)-$(gc c:\vmspec.txt).xml"
 $dresult = "l:\result"
 $lresultf = join-path "c:\run" $result
 $dresultf = join-path $dresult $result
@@ -55,7 +61,9 @@ if (-not (gi $dresultf -ErrorAction SilentlyContinue)) {
         $res = 'text'
     }
 
-    $o = C:\run\diskspd.exe -Z20M -z -h `-t$t `-o$o `-b$($b)k `-$($p)$($b)k `-w$w `-W$warm `-C$cool `-d$($d) -D -L `-R$res (dir C:\run\testfile?.dat)
+    $gspec = $null
+    if ($g -ne $null) { $gspec = "-g$($g)" }
+    $o = C:\run\diskspd.exe -Z20M -z -h `-t$t `-o$o $gspec `-b$($b)k `-$($p)$($b)k `-w$w `-W$warm `-C$cool `-d$($d) -D -L `-R$res (dir C:\run\testfile?.dat)
 
     if ($cap) {
 

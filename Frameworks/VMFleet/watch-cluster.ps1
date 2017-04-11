@@ -61,7 +61,7 @@ class CounterColumn {
     [int] $width
     [string] $fmt
     [decimal] $multiplier
-    [ValidateSet("Average","Sum")][string] $aggregate
+    [ValidateSet("Average","AverageAggregate","Sum")][string] $aggregate
     [boolean] $divider
 
     CounterColumn(
@@ -83,6 +83,10 @@ class CounterColumn {
         $this.multiplier = $multiplier
         $this.aggregate = $aggregate
         $this.divider = $divider
+
+        if ($this.width -lt $this.displayname.length + 1) {
+            $this.width = $this.displayname.length + 1
+        }
     }
 }
 
@@ -146,8 +150,9 @@ class CounterColumnSet {
             "Total"
             foreach ($col in $this.columns) {
 
-                # average aggreate doesn't work across nodes (and/or make this optin)
-                if ($col.aggregate -ne 'Average') {
+                # average aggreate doesn't work across nodes if the base is not consistent
+                # for instance: cannot average latency safely, but can average cpu utilization
+                if ($col.aggregate -ne 'Average' -or $col.aggregate -eq 'AverageAggregate') {
                     $(foreach ($node in $psamples.keys) {
                         get-samples $psamples $node $col
                     }) | get-aggregate $col
@@ -205,12 +210,12 @@ function get-aggregate(
     }
     END {
         if ($n -gt 0) {
-            switch ($col.aggregate) {
+            switch -wildcard ($col.aggregate) {
                 'Sum' {
                     #write-host $col.displayname $col.multipler $v
                     $col.multiplier * $v
                 }
-                'Average' {
+                'Average*' {
                     #write-host $col.displayname $col.multiplier $v $n
                     $col.multiplier * $v / $n
                 }
@@ -249,11 +254,11 @@ $allctrs = @()
 ###
 $c = [CounterColumnSet]::new("CSV FS")
 $c.Add([CounterColumn]::new("IOPS", "Cluster CSVFS", @("Reads/sec","Writes/sec"), 12, '#,#', 1, 'Sum', $false))
-$c.Add([CounterColumn]::new("Reads", "Cluster CSVFS", @("Reads/sec"), 12, '#,#', 1, 'Sum', $false))
-$c.Add([CounterColumn]::new("Writes", "Cluster CSVFS", @("Writes/sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Reads", "Cluster CSVFS", @("Reads/sec"), 12, '#,#', 1, 'Sum',  $false))
+$c.Add([CounterColumn]::new("Writes", "Cluster CSVFS", @("Writes/sec"), 12, '#,#', 1, 'Sum',  $false))
 
 $c.Add([CounterColumn]::new("BW (MB/s)", "Cluster CSVFS", @("Read Bytes/sec","Write Bytes/sec"), 13, '#,#', 0.000001, 'Sum', $true))
-$c.Add([CounterColumn]::new("Read", "Cluster CSVFS", @("Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Read", "Cluster CSVFS", @("Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum',  $false))
 $c.Add([CounterColumn]::new("Write", "Cluster CSVFS", @("Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
 
 $c.Add([CounterColumn]::new("Read Lat (ms)", "Cluster CSVFS", @("Avg. sec/Read"), 15, '0.000', 1000, 'Average', $true))
@@ -320,9 +325,14 @@ $allctrs += $c
 
 ##
 $c = [CounterColumnSet]::new("Hyper-V LCPU")
-$c.Add([CounterColumn]::new("Total%", "Hyper-V Hypervisor Logical Processor", @("% Total Run Time"), 10, "0.00", 1, 'Average', $false))
-$c.Add([CounterColumn]::new("Guest%", "Hyper-V Hypervisor Logical Processor", @("% Guest Run Time"), 10, "0.00", 1, 'Average', $false))
-$c.Add([CounterColumn]::new("Hypervisor%", "Hyper-V Hypervisor Logical Processor", @("% Hypervisor Run Time"), 10, "0.00", 1, 'Average', $false))
+$c.Add([CounterColumn]::new("Logical Total%", "Hyper-V Hypervisor Logical Processor", @("% Total Run Time"), 8, "0.00", 1, 'AverageAggregate', $false))
+$c.Add([CounterColumn]::new("Guest%", "Hyper-V Hypervisor Logical Processor", @("% Guest Run Time"), 8, "0.00", 1, 'AverageAggregate', $false))
+$c.Add([CounterColumn]::new("Hypervisor%", "Hyper-V Hypervisor Logical Processor", @("% Hypervisor Run Time"), 13, "0.00", 1, 'AverageAggregate', $false))
+
+$c.Add([CounterColumn]::new("Root Total%", "Hyper-V Hypervisor Root Virtual Processor", @("% Total Run Time"), 12, "0.00", 1, 'AverageAggregate', $true))
+$c.Add([CounterColumn]::new("Guest%", "Hyper-V Hypervisor Root Virtual Processor", @("% Guest Run Time"), 8, "0.00", 1, 'AverageAggregate', $false))
+$c.Add([CounterColumn]::new("Hypervisor%", "Hyper-V Hypervisor Root Virtual Processor", @("% Hypervisor Run Time"), 12, "0.00", 1, 'AverageAggregate', $false))
+$c.Add([CounterColumn]::new("Remote%", "Hyper-V Hypervisor Root Virtual Processor", @("% Remote Run Time"), 7, "0.00", 1, 'AverageAggregate', $false))
 
 $c.Seal()
 $allctrs += $c

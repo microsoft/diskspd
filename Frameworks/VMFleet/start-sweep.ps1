@@ -38,6 +38,7 @@ param(
         [int[]] $o,
     [Parameter(Mandatory =$true)]
         [int[]] $w,
+    [int[]] $iops = $null,
     [ValidateSet('r','s','si')]
         [string[]] $p = 'r',
     [ValidateRange(1,[int]::MaxValue)]
@@ -69,7 +70,11 @@ class variable {
     # current value of the variable ("red"/"blue"/"green")
     [object] value()
     {
-        return $this._list[$this._ordinal]
+        if ($this._list.count -gt 0) {
+            return $this._list[$this._ordinal]
+        } else {
+            return $null
+        }
     }
 
     # label/name of the variable ("color")
@@ -82,6 +87,12 @@ class variable {
     # has occured (overflow)
     [bool] increment()
     {
+        # empty list passes through
+        if ($this._list.Count -eq 0) {
+            return $true
+        }
+
+        # non-empty list, increment
         $this._ordinal += 1
         if ($this._ordinal -eq $this._list.Count) {
             $this._ordinal = 0
@@ -172,7 +183,10 @@ class variableset {
                 $str = ''
             }
 
-            "$pfx$str" + $this._set[$lookstr].value()
+            # only produce labels for non-null values
+            if ($this._set[$lookstr].value() -ne $null) {
+                "$pfx$str" + $this._set[$lookstr].value()
+            }
         }) -join $null
     }
 }
@@ -217,7 +231,13 @@ function new-runfile(
         $line = $_
 
         foreach ($v in $vs.getset()) {
-            $line = $line -replace "__$($v.label())__",$v.value()
+            # non-null goes in as is, null goes in as evaluatable $null
+            if ($v.value() -ne $null) {
+                $vsub = $v.value()
+            } else {
+                $vsub = '$null'
+            }
+            $line = $line -replace "__$($v.label())__",$vsub
         }
 
         $line
@@ -232,7 +252,12 @@ function show-run(
     # show current substitions (minus the underscore bracketing)
     write-host -fore green RUN SPEC `@ (get-date)
     foreach ($v in $vs.getset()) {
-        write-host -fore green "`t$($v.label()) = $($v.value())"
+            if ($v.value() -ne $null) {
+                $vsub = $v.value()
+            } else {
+                $vsub = '$null'
+            }
+            write-host -fore green "`t$($v.label()) = $($vsub)"
     }
 }
 
@@ -460,6 +485,7 @@ $v += [variable]::new('t',$t)
 $v += [variable]::new('o',$o)
 $v += [variable]::new('w',$w)
 $v += [variable]::new('p',$p)
+$v += [variable]::new('iops',$iops)
 $v += [variable]::new('d',$d)
 $v += [variable]::new('Warm',$warm)
 $v += [variable]::new('Cool',$cool)
