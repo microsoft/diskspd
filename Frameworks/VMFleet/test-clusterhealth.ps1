@@ -231,7 +231,7 @@ $j += start-job -Name 'Basic Health Checks' {
         $ssuh | ft -AutoSize
 
         write-host -ForegroundColor Red Output of Debug-StorageSubSystem follows
-        $ssuh | Debug-StorageSubSystem
+        $ssuh | Debug-StorageSubSystem | fl
     } else {
         write-host -ForegroundColor Green Clustered storage subsystem Healthy
     }

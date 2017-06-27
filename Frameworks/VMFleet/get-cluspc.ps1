@@ -26,7 +26,7 @@ SOFTWARE.
 #>
 
 param(
-    [ValidateSet('PhysicalDisk','CPU','SSB','SSB Cache','CSVFS','Storage','Spaces')]
+    [ValidateSet('PhysicalDisk','CPU','SMB','SMBD','SSB','SSB Cache','CSVFS','Storage','Spaces')]
         [string[]] $pcset = '*',
     [string] $addspec,
     [ValidateRange(1,[int]::MaxValue)]
@@ -49,6 +49,8 @@ $sets = @{
     'PhysicalDisk' = '\PhysicalDisk(*)\*','+getclusport';
     'CSVFS' = '\Cluster CSVFS(*)\*','\Cluster CSV Volume Cache(*)\*','\Cluster CSV Volume Manager(*)\*','\Cluster CSVFS Block Cache(*)\*','\Cluster CSVFS Direct IO(*)\*','\Cluster CSVFS Redirected IO(*)\*','+getcsv';
     'SSB' = '\Cluster Disk Counters(*)\*','+getclusport';
+    'SMB' = '\SMB Client Shares(*)\*','\SMB Server Shares(*)\*';
+    'SMBD' = '\SMB Direct Connection(*)\*';
     'SSB Cache' = '\Cluster Storage Hybrid Disks(*)\*','\Cluster Storage Cache Stores(*)\*';
     'Spaces' = '\Storage Spaces Write Cache(*)\*','\Storage Spaces Tier(*)\*','\Storage Spaces Virtual Disk(*)\*'
     'ReFS' = '\ReFS(*)\*';
