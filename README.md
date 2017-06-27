@@ -42,6 +42,13 @@ DISKSPD 2.0.16b 2/22/2016
 
 ## VM Fleet ##
 
+VM Fleet 0.8 6/2017
+
+* get-cluspc: add SMB Client/Server and SMB Direct (not defaulted in Storage group yet)
+* test-clusterhealth: flush output pipeline for Debug-StorageSubsystem output
+* watch-cluster: restart immediately if all child jobs are no longer running
+* watch-cpu: new, visualizer for CPU core utilization distributions
+
 VM Fleet 0.7 3/2017
 
 * create/destroy-vmfleet & update-csv: don't rely on the csv name containing the friendlyname of the vd
@@ -73,14 +80,6 @@ VM Fleet 0.6 7/18/2016
 * demo scripting works again and autofills vm/node counts
 * watch-cluster handles downed/recovered nodes gracefully
 * update-csv now handles node names which are logical prefixes of another (node1, node10)
-
-VM Fleet 0.5 6/22/2016
-
-* start-sweep now supports gathering performance counters from the physical nodes (hv root)
-* bugfix: clear-pause needs to loop on the pause file in case of competing access
-* run.ps1 and run-sweeptemplate.ps1 updated to show use of random seed and write source buffer (best practice), changes to push result file down with noncached copy
-* check-pause comments on the number of (un)paused vms
-* update documentation to mention change in QoS policy type names
 
 Compiling / Source
 =========
