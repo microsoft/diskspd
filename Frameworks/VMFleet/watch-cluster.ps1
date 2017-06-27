@@ -399,8 +399,13 @@ while ($true) {
         $downtime = get-date
     }
 
-    # if it has been 30 seconds with a downed node, restart the jobs to retry
-    if ($downtime -ne $null -and ((get-date)-$downtime).totalseconds -gt 30) {
+    $downnow = $false
+    if ($down -eq $j.ChildJobs.Count) {
+        $downnow = $true
+    }
+
+    # if everything is down, or it has been 30 seconds with a downed node, restart the jobs to retry
+    if ($downnow -or ($downtime -ne $null -and ((get-date)-$downtime).totalseconds -gt 30)) {
         $j | stop-job
         $j | remove-job
         $j = start-sample $query $SampleInterval
