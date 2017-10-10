@@ -122,7 +122,11 @@ if ($clip -lt 10) {
     $clip = 10
 }
 
+# set window and buffer size simultaneously so we don't have extra scrollbars
+cls
 [console]::SetWindowSize($width,$clip + $legend.Count + 1)
+[console]::BufferWidth = [console]::WindowWidth
+[console]::BufferHeight = [console]::WindowHeight
 
 # scale divisions at x%
 # this should evenly divide 100%
@@ -137,10 +141,12 @@ while ($true) {
     }
 
     # get all specific instances and count them into appropriate measurement bucket
-    (get-counter -ComputerName $ComputerName -SampleInterval $SampleInterval '\Hyper-V Hypervisor Logical Processor(*)\% Total Run Time').Countersamples |% {
+    (get-counter -ComputerName $ComputerName -SampleInterval $SampleInterval '\Hyper-V Hypervisor Logical Processor(*)\% Total Run Time','\Processor Information(_Total)\% Processor Performance').Countersamples |% {
     
-        if ($_.InstanceName -ne '_Total') {
-            $m[[int]($_.CookedValue/$div)] += 1
+        if ($_.Path -match 'Processor Information') {
+            $pperf = $_.CookedValue/100
+        } elseif ($_.InstanceName -ne '_Total') {
+            $m[[math]::Floor($_.CookedValue/$div)] += 1
         } else {
             $total = $_.CookedValue
         }
@@ -174,8 +180,9 @@ while ($true) {
 
     cls
     write-host -NoNewline ($lines + $legend -join "`n")
-    write-host -NoNewLine ("`n" + (center-pad ("{1} Total: {0:0.0}%" -f $total,$ComputerName) $width))
+    write-host -NoNewLine ("`n" + (center-pad ("{2} Total: {0:0.0}% Normalized: {1:0.0}%" -f $total,($total*$pperf),$ComputerName) $width))
 
     # move the cursor to indicate average utilization
-    [console]::SetCursorPosition([console]::WindowWidth*$total/100,[console]::CursorTop-$legend.Count)
+    # column number is zero based, width is 1-based
+    [console]::SetCursorPosition([math]::Floor(($width - 1)*$total/100),[console]::CursorTop-$legend.Count)
 }
