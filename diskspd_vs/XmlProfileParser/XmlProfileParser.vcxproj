@@ -134,12 +134,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Common\XmlProfileParser.h" />
-    <ClInclude Include="diskspd.h">
-      <DependentUpon>..\..\XmlProfileParser\diskspd.xsd</DependentUpon>
-    </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <Xsd Include="..\..\XmlProfileParser\diskspd.xsd" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\XmlProfileParser\XmlProfileParser.cpp" />
