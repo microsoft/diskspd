@@ -84,7 +84,6 @@ struct ETWEventCounters
     UINT64 ullRegQueryMultipleValue;    // NtQueryMultipleValueKey
     UINT64 ullRegSetInformation;        // NtSetInformationKey
     UINT64 ullRegFlush;                 // NtFlushKey
-    UINT64 ullRegKcbDmp;                // KcbDump/create
     UINT64 ullThreadStart;
     UINT64 ullThreadEnd;
     UINT64 ullProcessStart;

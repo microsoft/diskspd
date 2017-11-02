@@ -96,16 +96,16 @@ void ResultParser::_DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo)
         sessionInfo.ulFlushTimer,
         sessionInfo.lAgeLimit);
 
-    _Print("Allocated Buffers: %lu\n",
+    _Print("Allocated Buffers:\t%lu\n",
         sessionInfo.ulNumberOfBuffers);
 
-    _Print("LOST EVENTS:%15lu\n",
+    _Print("Lost Events:\t\t%lu\n",
         sessionInfo.ulEventsLost);
 
-    _Print("LOST LOG BUFFERS:%10lu\n",
+    _Print("Lost Log Buffers:\t%lu\n",
         sessionInfo.ulLogBuffersLost);
 
-    _Print("LOST REAL TIME BUFFERS:%4lu\n",
+    _Print("Lost Real Time Buffers:\t%lu\n",
         sessionInfo.ulRealTimeBuffersLost);
 }
 
@@ -186,9 +186,6 @@ void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters E
 
         _Print("\t\tNtFlushKey: %I64u\n",
             EtwEventCounters.ullRegFlush);
-
-        _Print("\t\tKcbDump/create: %I64u\n",
-            EtwEventCounters.ullRegKcbDmp);
 
         _Print("\t\tNtOpenKey: %I64u\n",
             EtwEventCounters.ullRegOpen);

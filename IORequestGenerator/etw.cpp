@@ -337,10 +337,6 @@ void WINAPI eventRegistry(PEVENT_TRACE pEvent)
     {
         ++g_EtwEventCounters.ullRegFlush;
     }
-//    else if( EVENT_TRACE_TYPE_REGKCBDMP == pEvent->Header.Class.Type )
-//    {
-//        ++ETWEventCounters.ullRegKcbDmp;
-//    }
     else if( EVENT_TRACE_TYPE_REGOPEN == pEvent->Header.Class.Type )
     {
         ++g_EtwEventCounters.ullRegOpen;
@@ -394,7 +390,7 @@ TRACEHANDLE StartETWSession(const Profile& profile)
     if (profile.GetEtwProcess())
     {
         pProperties->EnableFlags |= EVENT_TRACE_FLAG_PROCESS;
-        SetTraceCallback(&ProcessGuid, eventThread);
+        SetTraceCallback(&ProcessGuid, eventProcess);
     }
 
     if (profile.GetEtwThread())
