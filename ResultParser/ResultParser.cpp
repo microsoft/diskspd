@@ -432,7 +432,6 @@ void ResultParser::_PrintProfile(const Profile& profile)
 void ResultParser::_PrintCpuUtilization(const Results& results)
 {
     size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
-    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
 
     char szFloatBuffer[1024];
 
@@ -451,9 +450,12 @@ void ResultParser::_PrintCpuUtilization(const Results& results)
         double krnlTime;
         double thisTime;
 
-        idleTime = 100.0 * results.vSystemProcessorPerfInfo[x].IdleTime.QuadPart / 10000000 / fTime;
-        krnlTime = 100.0 * results.vSystemProcessorPerfInfo[x].KernelTime.QuadPart / 10000000 / fTime;
-        userTime = 100.0 * results.vSystemProcessorPerfInfo[x].UserTime.QuadPart / 10000000 / fTime;
+        LONGLONG fTime = results.vSystemProcessorPerfInfo[x].UserTime.QuadPart +
+                         results.vSystemProcessorPerfInfo[x].KernelTime.QuadPart;
+
+        idleTime = 100.0 * results.vSystemProcessorPerfInfo[x].IdleTime.QuadPart / fTime;
+        krnlTime = 100.0 * results.vSystemProcessorPerfInfo[x].KernelTime.QuadPart / fTime;
+        userTime = 100.0 * results.vSystemProcessorPerfInfo[x].UserTime.QuadPart / fTime;
 
         thisTime = (krnlTime + userTime) - idleTime;
 
