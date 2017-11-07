@@ -135,17 +135,10 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
         {
             hr = spXmlDoc->put_validateOnParse(VARIANT_TRUE);
         }
-        // work in progress to complete XML schema validation
-        // load schema and attach to schema collection, attach schema collection to spec doc, then load specification
-#if 0
-		//
-		// Issue at the moment: load fails with error as follows.
-		// ERROR: failed to load schema, line 1, line position 1, errorCode c00ce556
-		// ERROR: reason : Invalid at the top level of the document.
         if (SUCCEEDED(hr))
         {
             VARIANT_BOOL fvIsOk;
-            hr = spXmlSchema->loadXML(bSchemaXml.GetBSTR(), &fvIsOk);
+            hr = spXmlSchema->loadXML(bSchemaXml, &fvIsOk);
             if (SUCCEEDED(hr) && fvIsOk != VARIANT_TRUE)
             {
                 hr = spXmlSchema->get_parseError(&spXmlParseError);
@@ -159,15 +152,14 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
 		if (SUCCEEDED(hr))
         {
             CComVariant vXmlSchema(spXmlSchema);
-            CComBSTR bNull("");
-            hr = spXmlSchemaColl->add(bNull, vXmlSchema);
+            CComBSTR vNamespace("http://microsoft.com/diskspd/DiskSpdConfig.xsd");
+            hr = spXmlSchemaColl->add(vNamespace, vXmlSchema);
         }
         if (SUCCEEDED(hr))
         {
             CComVariant vSchemaCache(spXmlSchemaColl);
             hr = spXmlDoc->putref_schemas(vSchemaCache);
         }
-#endif
         if (SUCCEEDED(hr))
         {
             VARIANT_BOOL fvIsOk;
@@ -175,6 +167,11 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
             hr = spXmlDoc->load(vPath, &fvIsOk);
             if (SUCCEEDED(hr) && fvIsOk != VARIANT_TRUE)
             {
+                hr = spXmlDoc->get_parseError(&spXmlParseError);
+                if (SUCCEEDED(hr))
+                {
+                    ReportXmlError("profile", spXmlParseError);
+                }
                 hr = E_FAIL;
             }
         }
