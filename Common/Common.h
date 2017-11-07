@@ -386,7 +386,7 @@ public:
                     i,
                     pInformation->Group.GroupInfo[i].ActiveProcessorMask
                     );
-                _ulProcCount += _vProcessorGroupInformation[i]._maximumProcessorCount;
+                _ulProcCount += _vProcessorGroupInformation[i]._activeProcessorCount;
             }
         }
 
