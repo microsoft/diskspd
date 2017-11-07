@@ -112,12 +112,12 @@ void XmlResultParser::_PrintETWSessionInfo(struct ETWSessionInfo sessionInfo)
     _Print("<FreeBuffers>%lu</FreeBuffers>", sessionInfo.ulFreeBuffers);
     _Print("<BuffersWritten>%lu</BuffersWritten>\n", sessionInfo.ulBuffersWritten);
     _Print("<FlushTimerSeconds>%lu</FlushTimerSeconds>\n", sessionInfo.ulFlushTimer);
-    _Print("<AgeLimitMinues>%d</AgeLimitMinues>\n", sessionInfo.lAgeLimit);
+    _Print("<AgeLimitMinutes>%d</AgeLimitMinutes>\n", sessionInfo.lAgeLimit);
 
     _Print("<AllocatedBuffers>%lu</AllocatedBuffers>\n", sessionInfo.ulNumberOfBuffers);
-    _Print("<LostEvents>%15lu</LostEvents>\n", sessionInfo.ulEventsLost);
-    _Print("<LostLogBuffers>%10lu</LostLogBuffers>\n", sessionInfo.ulLogBuffersLost);
-    _Print("<LostRealTimeBuffers>%4lu</LostRealTimeBuffers>\n", sessionInfo.ulRealTimeBuffersLost);
+    _Print("<LostEvents>%lu</LostEvents>\n", sessionInfo.ulEventsLost);
+    _Print("<LostLogBuffers>%lu</LostLogBuffers>\n", sessionInfo.ulLogBuffersLost);
+    _Print("<LostRealTimeBuffers>%lu</LostRealTimeBuffers>\n", sessionInfo.ulRealTimeBuffersLost);
     _Print("</ETWSessionInfo>\n");
 }
 
@@ -179,7 +179,6 @@ void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters 
         _Print("<NtEnumerateKey>%I64u</NtEnumerateKey>\n", EtwEventCounters.ullRegEnumerateKey);
         _Print("<NtEnumerateValueKey>%I64u</NtEnumerateValueKey>\n", EtwEventCounters.ullRegEnumerateValueKey);
         _Print("<NtFlushKey>%I64u</NtFlushKey>\n", EtwEventCounters.ullRegFlush);
-        _Print("<KcbDump>%I64u</KcbDump>\n", EtwEventCounters.ullRegKcbDmp);
         _Print("<NtOpenKey>%I64u</NtOpenKey>\n", EtwEventCounters.ullRegOpen);
         _Print("<NtQueryKey>%I64u</NtQueryKey>\n", EtwEventCounters.ullRegQuery);
         _Print("<NtQueryMultipleValueKey>%I64u</NtQueryMultipleValueKey>\n", EtwEventCounters.ullRegQueryMultipleValue);
@@ -201,7 +200,6 @@ void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters 
 void XmlResultParser::_PrintCpuUtilization(const Results& results)
 {
     size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
-    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
 
     _Print("<CpuUtilization>\n");
 
@@ -217,9 +215,12 @@ void XmlResultParser::_PrintCpuUtilization(const Results& results)
         double krnlTime;
         double thisTime;
 
-        idleTime = 100.0 * results.vSystemProcessorPerfInfo[x].IdleTime.QuadPart / 10000000 / fTime;
-        krnlTime = 100.0 * results.vSystemProcessorPerfInfo[x].KernelTime.QuadPart / 10000000 / fTime;
-        userTime = 100.0 * results.vSystemProcessorPerfInfo[x].UserTime.QuadPart / 10000000 / fTime;
+        LONGLONG fTime = results.vSystemProcessorPerfInfo[x].UserTime.QuadPart +
+                         results.vSystemProcessorPerfInfo[x].KernelTime.QuadPart;
+
+        idleTime = 100.0 * results.vSystemProcessorPerfInfo[x].IdleTime.QuadPart / fTime;
+        krnlTime = 100.0 * results.vSystemProcessorPerfInfo[x].KernelTime.QuadPart / fTime;
+        userTime = 100.0 * results.vSystemProcessorPerfInfo[x].UserTime.QuadPart / fTime;
 
         thisTime = (krnlTime + userTime) - idleTime;
 
