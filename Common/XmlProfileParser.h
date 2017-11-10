@@ -44,6 +44,8 @@ private:
     HRESULT _ParseRandomDataSource(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _ParseWriteBufferContent(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget);
+    HRESULT _ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget);
+    HRESULT _ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget *pThreadTarget);
     HRESULT _ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
     HRESULT _ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
 

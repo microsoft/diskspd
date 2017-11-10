@@ -459,11 +459,31 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeS
 
     if (SUCCEEDED(hr))
     {
+        bool fRandomWriteData;
+        hr = _GetBool(pXmlNode, "RandomWriteData", &fRandomWriteData);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTimeSpan->SetRandomWriteData(fRandomWriteData);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
         UINT32 ulThreadCount;
         hr = _GetUINT32(pXmlNode, "ThreadCount", &ulThreadCount);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetThreadCount(ulThreadCount);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        UINT32 ulRequestCount;
+        hr = _GetUINT32(pXmlNode, "RequestCount", &ulRequestCount);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTimeSpan->SetRequestCount(ulRequestCount);
         }
     }
 
@@ -896,6 +916,69 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
         {
             PRIORITY_HINT hint[] = { IoPriorityHintVeryLow, IoPriorityHintLow, IoPriorityHintNormal };
             pTarget->SetIOPriorityHint(hint[ulIOPriority - 1]);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        UINT32 ulWeight;
+        hr = _GetUINT32(pXmlNode, "Weight", &ulWeight);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTarget->SetWeight(ulWeight);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        hr = _ParseThreadTargets(pXmlNode, pTarget);
+    }
+    return hr;
+}
+
+HRESULT XmlProfileParser::_ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget)
+{
+    CComVariant query("ThreadTarget");
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
+    if (SUCCEEDED(hr))
+    {
+        long cNodes;
+        hr = spNodeList->get_length(&cNodes);
+        if (SUCCEEDED(hr))
+        {
+            for (int i = 0; i < cNodes; i++)
+            {
+                CComPtr<IXMLDOMNode> spNode = nullptr;
+                hr = spNodeList->get_item(i, &spNode);
+                if (SUCCEEDED(hr))
+                {
+                    ThreadTarget threadTarget;
+                    _ParseThreadTarget(spNode, &threadTarget);
+                    pTarget->AddThreadTarget(threadTarget);
+                }
+            }
+        }
+    }
+    return hr;
+}
+
+HRESULT XmlProfileParser::_ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget *pThreadTarget)
+{
+    UINT32 ulThread;
+    HRESULT hr = _GetUINT32(pXmlNode, "Thread", &ulThread);
+    if (SUCCEEDED(hr) && (hr != S_FALSE))
+    {
+        pThreadTarget->SetThread(ulThread);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        UINT32 ulWeight;
+        hr = _GetUINT32(pXmlNode, "Weight", &ulWeight);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pThreadTarget->SetWeight(ulWeight);
         }
     }
     return hr;

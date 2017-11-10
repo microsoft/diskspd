@@ -126,6 +126,26 @@
                               <!-- 0 - not set, 1 - very low, 2 - low, 3 - normal -->
                               <xs:element name="IOPriority" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
+                              <!-- Weight to apply to this target on the specified threads - only valid when timespan
+                                   specifies ThreadCount and RequestCount, no cmd line equivalent.  The actual weight 
+                                   given to this target will depend on the weights that other targets specify.  The 
+                                   weight for this target is Weight / sum(Weight for all targets).  If the total weight 
+                                   is 100 and the weight for this target is 30, then 30% of the IOs will be to this target. -->
+                              <xs:element name="Weight" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+
+                              <!-- Threads to use - only valid when timespan specifies ThreadCount, no cmd line equivalent.
+                                   If a weight is specified it will override the overall weight for the target.  If no
+                                   ThreadTargets are specified then all threads will be used.  If any ThreadTarget is
+                                   specified then only the specified ThreadTargets will be used.  -->
+                              <xs:element name="ThreadTarget" minOccurs="0">
+                                <xs:complexType>
+                                  <xs:all>
+                                    <xs:element name="Thread" type="xs:unsignedInt" minOccurs="1" maxOccurs="1"></xs:element>
+                                    <xs:element name="Weight" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                  </xs:all>
+                                </xs:complexType>
+                              </xs:element>
+
                             </xs:all>
                           </xs:complexType>
                         </xs:element>
@@ -147,9 +167,16 @@
                        -z                 set random seed [default=0 if parameter not provided, GetTickCount() if value not provided] -->
                   <xs:element name="RandSeed" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
+                  <!-- BOOL fRandomWriteData -->
+                  <xs:element name="RandomWriteData" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+
                   <!-- DWORD dwThreadCount
                        -F<count>          total number of threads (cannot be used with -t) this cannot be used if per-file thread count is provided -->
                   <xs:element name="ThreadCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+
+                  <!-- DWORD dwRequestCount
+                       -O<count>          total number of requests per thread - for use with -F -->
+                  <xs:element name="RequestCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
                   <!-- BOOL fGroupAffinity -->
                   <xs:element name="GroupAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>

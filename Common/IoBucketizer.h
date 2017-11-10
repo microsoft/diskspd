@@ -38,15 +38,36 @@ public:
     void Initialize(unsigned __int64 bucketDuration, size_t validBuckets);
 
     size_t GetNumberOfValidBuckets() const;
-    size_t GetNumberOfBuckets() const;
-    unsigned int GetIoBucket(size_t bucketNumber) const;
-    void Add(unsigned __int64 ioCompletionTime);
-    double GetStandardDeviation() const;
+    unsigned int GetIoBucketCount(size_t bucketNumber) const;
+    double GetIoBucketMinDurationUsec(size_t bucketNumber) const;
+    double GetIoBucketMaxDurationUsec(size_t bucketNumber) const;
+    double GetIoBucketAvgDurationUsec(size_t bucketNumber) const;
+    double GetIoBucketDurationStdDevUsec(size_t bucketNumber) const;
+    void Add(unsigned __int64 ioCompletionTime, double ioDuration);
+    double GetStandardDeviationIOPS() const;
     void Merge(const IoBucketizer& other);
 private:
-    double _GetMean() const;
+    double _GetMeanIOPS() const;
+
+    struct IoBucket {
+        IoBucket() :
+            ulCount(0),
+            lfMinDuration(0),
+            lfMaxDuration(0),
+            lfSumDuration(0),
+            lfSumSqrDuration(0)
+        {
+        }
+        
+        unsigned int ulCount;
+        double lfMinDuration;
+        double lfMaxDuration;
+        double lfSumDuration;
+        double lfSumSqrDuration;
+    };
 
     unsigned __int64 _bucketDuration;
     size_t _validBuckets;
-    std::vector<unsigned int> _vBuckets;
+    size_t _totalBuckets;
+    std::vector<IoBucket> _vBuckets;
 };

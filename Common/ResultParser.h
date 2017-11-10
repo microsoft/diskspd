@@ -46,17 +46,17 @@ private:
     void _DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters);
     void _Print(const char *format, ...);
     void _PrintProfile(const Profile& profile);
-    void _PrintCpuUtilization(const Results&);
+    void _PrintCpuUtilization(const Results& results, const SystemInformation& system);
     enum class _SectionEnum {TOTAL, READ, WRITE};
     void _PrintSectionFieldNames(const TimeSpan& timeSpan);
     void _PrintSectionBorderLine(const TimeSpan& timeSpan);
     void _PrintSection(_SectionEnum, const TimeSpan&, const Results&);
     void _PrintLatencyPercentiles(const Results&);
-	void _PrintLatencyChart(const Histogram<float>& readLatencyHistogram,
-		const Histogram<float>& writeLatencyHistogram,
-		const Histogram<float>& totalLatencyHistogram);
+    void _PrintLatencyChart(const Histogram<float>& readLatencyHistogram,
+        const Histogram<float>& writeLatencyHistogram,
+        const Histogram<float>& totalLatencyHistogram);
     void _PrintTimeSpan(const TimeSpan &timeSpan);
-    void _PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fCompletionRoutines);
+    void _PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fUseRequestsPerFile, bool fCompletionRoutines);
 
     string _sResult;
 
