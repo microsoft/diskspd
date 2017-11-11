@@ -449,7 +449,6 @@ void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInfo
     size_t ulBaseProc = 0;
     size_t ulActiveProcCount = 0;
     size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
-    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
 
     char szFloatBuffer[1024];
 
@@ -484,9 +483,12 @@ void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInfo
                 continue;
             }
 
-            idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / 10000000 / fTime;
-            krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / 10000000 / fTime;
-            userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / 10000000 / fTime;
+            long long fTime = results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart +
+                              results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart;
+
+            idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / fTime;
+            krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / fTime;
+            userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / fTime;
 
             thisTime = (krnlTime + userTime) - idleTime;
 
