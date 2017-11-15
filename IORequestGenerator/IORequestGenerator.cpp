@@ -1842,7 +1842,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 
     memset(&g_EtwEventCounters, 0, sizeof(struct ETWEventCounters));  // reset all etw event counters
 
-    bool fUseETW = false;            //true if user wants ETW
+    bool fUseETW = profile.GetEtwEnabled();            //true if user wants ETW
 
     //
     // load dlls
@@ -2275,10 +2275,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
                 PrintError("Error stopping ETW session\n");
                 return false;
             }
-            else
-            {
-                free(pETWSession);
-            }
         }
     }
     else
@@ -2404,6 +2400,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         results.EtwMask.bUsePerfTimer = profile.GetEtwUsePerfTimer();
         results.EtwMask.bUseSystemTimer = profile.GetEtwUseSystemTimer();
         results.EtwMask.bUseCyclesCounter = profile.GetEtwUseCyclesCounter();
+
+        free(pETWSession);
     }
 
     // free memory used by random data write buffers

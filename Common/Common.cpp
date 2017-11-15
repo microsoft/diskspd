@@ -604,6 +604,7 @@ string Profile::GetXml() const
 
     if (_fEtwEnabled)
     {
+        sXml += "<ETW>\n";
         sXml += _fEtwProcess ? "<Process>true</Process>\n" : "<Process>false</Process>\n";
         sXml += _fEtwThread ? "<Thread>true</Thread>\n" : "<Thread>false</Thread>\n";
         sXml += _fEtwImageLoad ? "<ImageLoad>true</ImageLoad>\n" : "<ImageLoad>false</ImageLoad>\n";
@@ -616,6 +617,7 @@ string Profile::GetXml() const
         sXml += _fEtwUsePerfTimer ? "<UsePerfTimer>true</UsePerfTimer>\n" : "<UsePerfTimer>false</UsePerfTimer>\n";
         sXml += _fEtwUseSystemTimer ? "<UseSystemTimer>true</UseSystemTimer>\n" : "<UseSystemTimer>false</UseSystemTimer>\n";
         sXml += _fEtwUseCyclesCounter ? "<UseCyclesCounter>true</UseCyclesCounter>\n" : "<UseCyclesCounter>false</UseCyclesCounter>\n";
+        sXml += "</ETW>\n";
     }
 
     sXml += "<TimeSpans>\n";
