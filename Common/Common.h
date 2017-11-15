@@ -645,6 +645,7 @@ public:
         _fRandomAccessHint(false),
         _fTemporaryFileHint(false),
         _fUseLargePages(false),
+        _fIOBufferAlignmentValid(false),
         _ioPriorityHint(IoPriorityHintNormal),
         _ulWeight(1),
         _dwThroughputBytesPerMillisecond(0),
@@ -689,6 +690,13 @@ public:
 
     void SetUseLargePages(bool fBool) { _fUseLargePages = fBool; }
     bool GetUseLargePages() const { return _fUseLargePages; }
+
+    void SetIOBufferAlignment(UINT64 dwIOBufferAlignment)
+    {
+        _dwIOBufferAlignment = dwIOBufferAlignment;
+        _fIOBufferAlignmentValid = true;
+    }
+    UINT64 GetIOBufferAlignment() const { return _fIOBufferAlignmentValid ? _dwIOBufferAlignment : _dwBlockSize; }
 
     void SetRequestCount(DWORD dwRequestCount) { _dwRequestCount = dwRequestCount; }
     DWORD GetRequestCount() const { return _dwRequestCount; }
@@ -845,6 +853,8 @@ private:
     bool _fRandomAccessHint;        // open file with the FILE_FLAG_RANDOM_ACCESS hint
     bool _fTemporaryFileHint;       // open file with the FILE_ATTRIBUTE_TEMPORARY hint
     bool _fUseLargePages;           // Use large pages for IO buffers
+    UINT64 _dwIOBufferAlignment;    // Align IO buffers on this boundary
+    bool _fIOBufferAlignmentValid;
 
     UINT64 _cbRandomDataWriteBuffer;            // if > 0, then the write buffer should be filled with random data
     string _sRandomDataWriteBufferSourcePath;   // file that should be used for filling the write buffer (if the path is not available, use a crypto provider)

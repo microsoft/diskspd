@@ -872,7 +872,8 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
     }
 
     // Create separate read & write buffers so the write content doesn't get overriden by reads
-    cbDataBuffer = (size_t) target.GetBlockSizeInBytes() * requestCount * 2;
+    cbDataBuffer = max((size_t)target.GetBlockSizeInBytes(), (size_t)target.GetIOBufferAlignment()) * requestCount * 2;
+
     if (target.GetUseLargePages())
     {
         size_t cbMinLargePage = GetLargePageMinimum();
@@ -913,18 +914,22 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
 
 BYTE* ThreadParameters::GetReadBuffer(size_t iTarget, size_t iRequest)
 {
-    return vpDataBuffers[iTarget] + (iRequest * vTargets[iTarget].GetBlockSizeInBytes());
+    Target& target(vTargets[iTarget]);
+
+    return vpDataBuffers[iTarget] + (iRequest * max((size_t)vTargets[iTarget].GetBlockSizeInBytes(), (size_t)vTargets[iTarget].GetIOBufferAlignment()));
 }
 
 BYTE* ThreadParameters::GetWriteBuffer(size_t iTarget, size_t iRequest)
 {
     BYTE *pBuffer = nullptr;
-    
+
     Target& target(vTargets[iTarget]);
     size_t cb = static_cast<size_t>(target.GetRandomDataWriteBufferSize());
     if (cb == 0)
     {
-        pBuffer = vpDataBuffers[iTarget] + vulReadBufferSize[iTarget] + (iRequest * vTargets[iTarget].GetBlockSizeInBytes());
+        size_t bufSize = max((size_t)vTargets[iTarget].GetBlockSizeInBytes(), (size_t)vTargets[iTarget].GetIOBufferAlignment());
+
+        pBuffer = vpDataBuffers[iTarget] + vulReadBufferSize[iTarget] + (iRequest * bufSize);
 
         //
         // This is a very efficient algorithm for generating random content at

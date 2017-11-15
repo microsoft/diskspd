@@ -291,6 +291,7 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
         _Print("\t\tperforming mix test (read/write ratio: %d/%d)\n", 100 - target.GetWriteRatio(), target.GetWriteRatio());
     }
     _Print("\t\tblock size: %d\n", target.GetBlockSizeInBytes());
+    _Print("\t\tIO buffer alignment: %I64d\n", target.GetIOBufferAlignment());
     if (target.GetUseRandomAccessPattern())
     {
         _Print("\t\tusing random I/O (alignment: ");
