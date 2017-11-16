@@ -874,7 +874,12 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
     // Create separate read & write buffers so the write content doesn't get overriden by reads
     cbDataBuffer = max((size_t)target.GetBlockSizeInBytes(), (size_t)target.GetIOBufferAlignment()) * requestCount * 2;
 
-    if (target.GetUseLargePages())
+    //
+    // Use large pages if asked, or if the user requests that IOs be aligned to a certain PA offset. Using large pages guarantees
+    // 2MB aligned PAs as well as 2MB of contiguous physical memory. Block sizes < 2MB will not come from adjacent physical or
+    // virtual pages.
+    //
+    if (target.GetUseLargePages() || target.GetIOBufferAlignmentSpecified())
     {
         size_t cbMinLargePage = GetLargePageMinimum();
         size_t cbRoundedSize = (cbDataBuffer + cbMinLargePage - 1) & ~(cbMinLargePage - 1);

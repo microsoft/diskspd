@@ -697,6 +697,7 @@ public:
         _fIOBufferAlignmentValid = true;
     }
     UINT64 GetIOBufferAlignment() const { return _fIOBufferAlignmentValid ? _dwIOBufferAlignment : _dwBlockSize; }
+    bool GetIOBufferAlignmentSpecified() const { return _fIOBufferAlignmentValid; }
 
     void SetRequestCount(DWORD dwRequestCount) { _dwRequestCount = dwRequestCount; }
     DWORD GetRequestCount() const { return _dwRequestCount; }
