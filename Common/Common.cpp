@@ -385,9 +385,16 @@ string Target::GetXml() const
     sprintf_s(buffer, _countof(buffer), "<Weight>%u</Weight>\n", _ulWeight);
     sXml += buffer;
 
-    for (const auto& threadTarget : _vThreadTargets)
+    if (_vThreadTargets.size() > 0)
     {
-        sXml += threadTarget.GetXml();
+        sXml += "<ThreadTargets>\n";
+
+        for (const auto& threadTarget : _vThreadTargets)
+        {
+            sXml += threadTarget.GetXml();
+        }
+
+        sXml += "</ThreadTargets>\n";
     }
 
     sXml += "</Target>\n";

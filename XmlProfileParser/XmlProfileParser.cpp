@@ -938,7 +938,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
 
 HRESULT XmlProfileParser::_ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget)
 {
-    CComVariant query("ThreadTarget");
+    CComVariant query("ThreadTargets/ThreadTarget");
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
     HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
