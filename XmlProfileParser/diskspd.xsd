@@ -1,273 +1,279 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<xs:schema targetNamespace="http://microsoft.com/diskspd/DiskSpdConfig.xsd"
-    elementFormDefault="qualified"
-    xmlns="http://microsoft.com/diskspd/DiskSpdConfig.xsd"
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns="http://microsoft.com/diskspd/DiskSpdConfig.xsd"
     xmlns:xs="http://www.w3.org/2001/XMLSchema">
-  <xs:complexType name="Profile">
-    <xs:all>
-      <xs:element name="TimeSpans" minOccurs="1" maxOccurs="1">
-        <xs:complexType>
-          <xs:all>
-            <xs:element name="TimeSpan" minOccurs="1">
-              <xs:complexType>
-                <xs:all>
-                  <xs:element name="Targets" minOccurs="1" maxOccurs="1">
-                    <xs:complexType>
-                      <xs:sequence>
-                        <xs:element name="Target" minOccurs="1">
-                          <!-- file / disk -->
-                          <xs:complexType>
-                            <xs:all>
-                              <!-- string _sPath -->
-                              <xs:element name="Path" type="xs:string" minOccurs="1" maxOccurs="1"></xs:element>
+  <xs:element name="Profile">
+    <xs:complexType>
+      <xs:all>
+        <xs:element name="TimeSpans" minOccurs="1" maxOccurs="1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="TimeSpan" minOccurs="1" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:all>
+                    <xs:element name="Targets" minOccurs="1" maxOccurs="1">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="Target" minOccurs="1" maxOccurs="unbounded">
+                            <!-- file / disk -->
+                            <xs:complexType>
+                              <xs:all>
+                                <!-- string _sPath -->
+                                <xs:element name="Path" type="xs:string" minOccurs="1" maxOccurs="1"></xs:element>
 
-                              <!-- DWORD dwBlockSize -->
-                              <xs:element name="BlockSize" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- DWORD dwBlockSize -->
+                                <xs:element name="BlockSize" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- UINT64 ullStrideSize -->
-                              <xs:element name="StrideSize" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
-                              
-                              <xs:element name="InterlockedSequential" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- UINT64 ullStrideSize -->
+                                <xs:element name="StrideSize" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- UINT64 ullBaseFileOffset -->
-                              <xs:element name="BaseFileOffset" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
+                                <xs:element name="InterlockedSequential" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL fSequentialScan (open file with the FILE_FLAG_SEQUENTIAL_SCAN flag) -->
-                              <xs:element name="SequentialScan" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- UINT64 ullBaseFileOffset -->
+                                <xs:element name="BaseFileOffset" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL fRandomAccess (open file with the FILE_FLAG_RANDOM_ACCESS flag) -->
-                              <xs:element name="RandomAccess" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- BOOL fSequentialScan (open file with the FILE_FLAG_SEQUENTIAL_SCAN flag) -->
+                                <xs:element name="SequentialScan" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL fTemporaryFile (open file with the FILE_ATTRIBUTE_TEMPORARY flag) -->
-                              <xs:element name="TemporaryFile" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-                              
-                              <!-- BOOL fUseLargePages (Use large pages for IO buffers) -->
-                              <xs:element name="UseLargePages" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- BOOL fRandomAccess (open file with the FILE_FLAG_RANDOM_ACCESS flag) -->
+                                <xs:element name="RandomAccess" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- DWORD dwRequestCount -->
-                              <!-- -o<count> number of overlapped I/O requests per file per thread
+                                <!-- BOOL fTemporaryFile (open file with the FILE_ATTRIBUTE_TEMPORARY flag) -->
+                                <xs:element name="TemporaryFile" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+
+                                <!-- BOOL fUseLargePages (Use large pages for IO buffers) -->
+                                <xs:element name="UseLargePages" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+
+                                <!-- DWORD dwRequestCount -->
+                                <!-- -o<count> number of overlapped I/O requests per file per thread
                                              (1=synchronous I/O, unless more than 1 thread is specified with -F) [default=2]-->
-                              <xs:element name="RequestCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                <xs:element name="RequestCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- UINT64 ullRandom
+                                <!-- UINT64 ullRandom
                                    -r<align>[K|M|G|b] random I/O aligned to <align> bytes (doesn't make sense with -s)
                                    <align> can be stated in bytes/KB/MB/GB/blocks [default access=sequential, default alignment=block size] -->
-                              <xs:element name="Random" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
+                                <xs:element name="Random" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL DisableAllCache combined DisableOSCache & WriteThrough (compat) -->
-                              <xs:element name="DisableAllCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- BOOL DisableAllCache combined DisableOSCache & WriteThrough (compat) -->
+                                <xs:element name="DisableAllCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL DisableLocalCache -->
-                              <xs:element name="DisableLocalCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- BOOL DisableLocalCache -->
+                                <xs:element name="DisableLocalCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL DisableOSCache -->
-                              <xs:element name="DisableOSCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- BOOL DisableOSCache -->
+                                <xs:element name="DisableOSCache" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL WriteThrough -->
-                              <xs:element name="WriteThrough" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- BOOL WriteThrough -->
+                                <xs:element name="WriteThrough" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <xs:element name="WriteBufferContent" minOccurs="0" maxOccurs="1">
-                                <xs:complexType>
-                                  <xs:all>
+                                <xs:element name="WriteBufferContent" minOccurs="0" maxOccurs="1">
+                                  <xs:complexType>
+                                    <xs:all>
 
-                                    <xs:element name="Pattern">
-                                      <xs:simpleType>
-                                        <xs:restriction base="xs:string">
-                                          <xs:enumeration value="sequential"></xs:enumeration>
-                                          <xs:enumeration value="zero"></xs:enumeration>
-                                          <xs:enumeration value="random"></xs:enumeration>
-                                        </xs:restriction>
-                                      </xs:simpleType>
-                                    </xs:element>
+                                      <xs:element name="Pattern" minOccurs="1" maxOccurs="1">
+                                        <xs:simpleType>
+                                          <xs:restriction base="xs:string">
+                                            <xs:enumeration value="sequential"></xs:enumeration>
+                                            <xs:enumeration value="zero"></xs:enumeration>
+                                            <xs:enumeration value="random"></xs:enumeration>
+                                          </xs:restriction>
+                                        </xs:simpleType>
+                                      </xs:element>
 
-                                    <!-- used only with pattern == random -->
-                                    <xs:element name="RandomDataSource">
-                                      <xs:complexType>
-                                        <xs:all>
-                                          <xs:element name="SizeInBytes" type="xs:unsignedLong" minOccurs="1" maxOccurs="1"></xs:element>
-                                          <xs:element name="FilePath" type="xs:string" minOccurs="0" maxOccurs="1"></xs:element>
-                                        </xs:all>
-                                      </xs:complexType>
-                                    </xs:element>
+                                      <!-- used only with pattern == random -->
+                                      <xs:element name="RandomDataSource" minOccurs="0" maxOccurs="1">
+                                        <xs:complexType>
+                                          <xs:all>
+                                            <xs:element name="SizeInBytes" type="xs:unsignedLong" minOccurs="1" maxOccurs="1"></xs:element>
+                                            <xs:element name="FilePath" type="xs:string" minOccurs="0" maxOccurs="1"></xs:element>
+                                          </xs:all>
+                                        </xs:complexType>
+                                      </xs:element>
 
-                                  </xs:all>
-                                </xs:complexType>
-                              </xs:element>
-                              
-                              <!-- DWORD dwBurstSize (number of IOs in a burst) -->
-                              <xs:element name="BurstSize" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                    </xs:all>
+                                  </xs:complexType>
+                                </xs:element>
 
-                              <!-- DWORD dwThinkTime (time to pause before issuing the next burst of IOs) -->
-                              <xs:element name="ThinkTime" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- DWORD dwBurstSize (number of IOs in a burst) -->
+                                <xs:element name="BurstSize" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- DWORD dwThroughput (in bytes per millisecond); this can not be specified when using completion routines -->
-                              <xs:element name="Throughput" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- DWORD dwThinkTime (time to pause before issuing the next burst of IOs) -->
+                                <xs:element name="ThinkTime" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- DWORD dwThreadsPerFile -->
-                              <xs:element name="ThreadsPerFile" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- DWORD dwThroughput (in bytes per millisecond); this can not be specified when using completion routines -->
+                                <xs:element name="Throughput" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- UINT64 ullFileSize -->
-                              <!-- used by the -c (create file) switch-->
-                              <xs:element name="FileSize" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- DWORD dwThreadsPerFile -->
+                                <xs:element name="ThreadsPerFile" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- UINT64 ullMaxFileSize -->
-                              <xs:element name="MaxFileSize" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- UINT64 ullFileSize -->
+                                <!-- used by the -c (create file) switch-->
+                                <xs:element name="FileSize" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- UINT32 ulWriteRatio -->
-                              <xs:element name="WriteRatio" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- UINT64 ullMaxFileSize -->
+                                <xs:element name="MaxFileSize" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- BOOL fParallelAsyncIO
+                                <!-- UINT32 ulWriteRatio -->
+                                <xs:element name="WriteRatio" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+
+                                <!-- BOOL fParallelAsyncIO
                                    -p                 start async (overlapped) I/O operations with the same offset (makes sense only with -o2 or grater) -->
-                              <xs:element name="ParallelAsyncIO" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                                <xs:element name="ParallelAsyncIO" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- UINT64 ullThreadStride -->
-                              <xs:element name="ThreadStride" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- UINT64 ullThreadStride -->
+                                <xs:element name="ThreadStride" type="xs:unsignedLong" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- 0 - not set, 1 - very low, 2 - low, 3 - normal -->
-                              <xs:element name="IOPriority" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                <!-- 0 - not set, 1 - very low, 2 - low, 3 - normal -->
+                                <xs:element name="IOPriority" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- Weight to apply to this target on the specified threads - only valid when timespan
+                                <!-- Weight to apply to this target on the specified threads - only valid when timespan
                                    specifies ThreadCount and RequestCount, no cmd line equivalent.  The actual weight 
                                    given to this target will depend on the weights that other targets specify.  The 
                                    weight for this target is Weight / sum(Weight for all targets).  If the total weight 
                                    is 100 and the weight for this target is 30, then 30% of the IOs will be to this target. -->
-                              <xs:element name="Weight" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                <xs:element name="Weight" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                              <!-- Threads to use - only valid when timespan specifies ThreadCount, no cmd line equivalent.
+                                <!-- Threads to use - only valid when timespan specifies ThreadCount, no cmd line equivalent.
                                    If a weight is specified it will override the overall weight for the target.  If no
                                    ThreadTargets are specified then all threads will be used.  If any ThreadTarget is
                                    specified then only the specified ThreadTargets will be used.  -->
-                              <xs:element name="ThreadTarget" minOccurs="0">
-                                <xs:complexType>
-                                  <xs:all>
-                                    <xs:element name="Thread" type="xs:unsignedInt" minOccurs="1" maxOccurs="1"></xs:element>
-                                    <xs:element name="Weight" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
-                                  </xs:all>
-                                </xs:complexType>
-                              </xs:element>
+                                <xs:element name="ThreadTargets" minOccurs="0" maxOccurs="1">
+                                  <xs:complexType>
+                                    <xs:sequence>
+                                      <xs:element name="ThreadTarget" minOccurs="1" maxOccurs="unbounded">
+                                        <xs:complexType>
+                                          <xs:all>
+                                            <xs:element name="Thread" type="xs:unsignedInt" minOccurs="1" maxOccurs="1"></xs:element>
+                                            <xs:element name="Weight" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                                          </xs:all>
+                                        </xs:complexType>
+                                      </xs:element>
+                                    </xs:sequence>
+                                  </xs:complexType>
+                                </xs:element>
 
-                            </xs:all>
-                          </xs:complexType>
-                        </xs:element>
-                      </xs:sequence>
-                      
-                    </xs:complexType>
-                  </xs:element>
+                              </xs:all>
+                            </xs:complexType>
+                          </xs:element>
+                        </xs:sequence>
 
-                  <!-- UINT32 ulDuration -->
-                  <xs:element name="Duration" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                      </xs:complexType>
+                    </xs:element>
 
-                  <!-- UINT32 ulWarmUp -->
-                  <xs:element name="Warmup" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                    <!-- UINT32 ulDuration -->
+                    <xs:element name="Duration" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- UINT32 ulCoolDown -->
-                  <xs:element name="Cooldown" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                    <!-- UINT32 ulWarmUp -->
+                    <xs:element name="Warmup" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- UINT32 ulRandSeed
+                    <!-- UINT32 ulCoolDown -->
+                    <xs:element name="Cooldown" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+
+                    <!-- UINT32 ulRandSeed
                        -z                 set random seed [default=0 if parameter not provided, GetTickCount() if value not provided] -->
-                  <xs:element name="RandSeed" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                    <xs:element name="RandSeed" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- BOOL fRandomWriteData -->
-                  <xs:element name="RandomWriteData" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                    <!-- BOOL fRandomWriteData -->
+                    <xs:element name="RandomWriteData" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- DWORD dwThreadCount
+                    <!-- DWORD dwThreadCount
                        -F<count>          total number of threads (cannot be used with -t) this cannot be used if per-file thread count is provided -->
-                  <xs:element name="ThreadCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                    <xs:element name="ThreadCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- DWORD dwRequestCount
+                    <!-- DWORD dwRequestCount
                        -O<count>          total number of requests per thread - for use with -F -->
-                  <xs:element name="RequestCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                    <xs:element name="RequestCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- BOOL fGroupAffinity -->
-                  <xs:element name="GroupAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                    <!-- BOOL fGroupAffinity -->
+                    <xs:element name="GroupAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- UINT32 *puAffinity -->
-                  <xs:element name="Affinity" minOccurs="0" maxOccurs="1">
-                    <xs:complexType>
-                      <xs:sequence>
-                        <xs:element name="AffinityAssignment" type="xs:unsignedInt" minOccurs="1"></xs:element>
-                      </xs:sequence>
-                    </xs:complexType>
-                  </xs:element>
+                    <!-- UINT32 *puAffinity -->
+                    <xs:element name="Affinity" minOccurs="0" maxOccurs="1">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="AffinityAssignment" type="xs:unsignedInt" minOccurs="1"></xs:element>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
 
-                  <!-- BOOL fDisableAffinity
+                    <!-- BOOL fDisableAffinity
                        -n                 disable affinity (cannot be used with -a) -->
-                  <xs:element name="DisableAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                    <xs:element name="DisableAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <!-- BOOL fCompletionRoutines -->
-                  <!-- TODO: this should be decided on a target level -->
-                  <xs:element name="CompletionRoutines" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-                  
-                  <xs:element name="MeasureLatency" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                    <!-- BOOL fCompletionRoutines -->
+                    <!-- TODO: this should be decided on a target level -->
+                    <xs:element name="CompletionRoutines" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-                  <xs:element name="CalculateIopsStdDev" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-                  <xs:element name="IoBucketDuration" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
-                </xs:all>
-              </xs:complexType>
-            </xs:element>
-          </xs:all>
-        </xs:complexType>
-      </xs:element>
-     
-      <!-- BOOL bVerbose -->
-      <xs:element name="Verbose" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-      
-      <!-- DWORD dwProgress -->
-      <xs:element name="Progress" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                    <xs:element name="MeasureLatency" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
-      <xs:element name="ResultFormat" minOccurs="0" maxOccurs="1">
-        <xs:simpleType>
-          <xs:restriction base="xs:string">
-            <xs:enumeration value="text"></xs:enumeration>
-            <xs:enumeration value="xml"></xs:enumeration>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      
-      <!-- ETWMask -->
-      <xs:element name="ETW">
-        <xs:complexType>
-          <xs:all>
-            <!-- BOOL bProcess -->
-            <xs:element name="Process" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bThread -->
-            <xs:element name="Thread" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bImageLoad -->
-            <xs:element name="ImageLoad" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bDiskIO -->
-            <xs:element name="DiskIO" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bMemoryPageFaults -->
-            <xs:element name="MemoryPageFaults" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bMemoryHardFaults -->
-            <xs:element name="MemoryHardFaults" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bNetwork -->
-            <xs:element name="Network" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bRegistry -->
-            <xs:element name="Registry" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bUsePagedMemory -->
-            <xs:element name="UsePagedMemory" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bUsePerfTimer -->
-            <xs:element name="UsePerfTimer" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bUseSystemTimer -->
-            <xs:element name="UseSystemTimer" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-            <!-- BOOL bUseCyclesCounter -->
-            <xs:element name="UseCyclesCounter" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
-          </xs:all>
-        </xs:complexType>
-      </xs:element>
+                    <xs:element name="CalculateIopsStdDev" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+                    <xs:element name="IoBucketDuration" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+                  </xs:all>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
 
-      <!-- files should be created before the first time span -->
-      <xs:element name="PrecreateFiles" minOccurs="0" maxOccurs="1">
-        <xs:simpleType>
-          <xs:restriction base="xs:string">
-            <!-- if the same path exists in multiple time spans, the max size will be used -->
-            <xs:enumeration value="UseMaxSize"></xs:enumeration>
-            <xs:enumeration value="CreateOnlyFilesWithConstantSizes"></xs:enumeration>
-            <xs:enumeration value="CreateOnlyFilesWithConstantOrZeroSizes"></xs:enumeration>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-    
-    </xs:all>
-  </xs:complexType>
+        <!-- BOOL bVerbose -->
+        <xs:element name="Verbose" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+
+        <!-- DWORD dwProgress -->
+        <xs:element name="Progress" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
+
+        <xs:element name="ResultFormat" minOccurs="0" maxOccurs="1">
+          <xs:simpleType>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="text"></xs:enumeration>
+              <xs:enumeration value="xml"></xs:enumeration>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:element>
+
+        <!-- ETWMask -->
+        <xs:element name="ETW" minOccurs="0" maxOccurs="1">
+          <xs:complexType>
+            <xs:all>
+              <!-- BOOL bProcess -->
+              <xs:element name="Process" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bThread -->
+              <xs:element name="Thread" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bImageLoad -->
+              <xs:element name="ImageLoad" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bDiskIO -->
+              <xs:element name="DiskIO" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bMemoryPageFaults -->
+              <xs:element name="MemoryPageFaults" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bMemoryHardFaults -->
+              <xs:element name="MemoryHardFaults" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bNetwork -->
+              <xs:element name="Network" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bRegistry -->
+              <xs:element name="Registry" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bUsePagedMemory -->
+              <xs:element name="UsePagedMemory" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bUsePerfTimer -->
+              <xs:element name="UsePerfTimer" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bUseSystemTimer -->
+              <xs:element name="UseSystemTimer" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+              <!-- BOOL bUseCyclesCounter -->
+              <xs:element name="UseCyclesCounter" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+            </xs:all>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- files should be created before the first time span -->
+        <xs:element name="PrecreateFiles" minOccurs="0" maxOccurs="1">
+          <xs:simpleType>
+            <xs:restriction base="xs:string">
+              <!-- if the same path exists in multiple time spans, the max size will be used -->
+              <xs:enumeration value="UseMaxSize"></xs:enumeration>
+              <xs:enumeration value="CreateOnlyFilesWithConstantSizes"></xs:enumeration>
+              <xs:enumeration value="CreateOnlyFilesWithConstantOrZeroSizes"></xs:enumeration>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:element>
+
+      </xs:all>
+    </xs:complexType>
+  </xs:element>
 </xs:schema>
