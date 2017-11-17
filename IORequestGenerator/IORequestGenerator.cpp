@@ -2192,6 +2192,17 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             printfv(profile.GetVerbose(), "tracing events\n");
         }
 
+        printfv(profile.GetVerbose(), "starting measurements...\n");
+
+        //
+        // notify the front-end that the test is about to start;
+        // do it before starting timing in order not to perturb measurements
+        //
+        if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestStarted) && (NULL != pSynch->pfnCallbackTestStarted))
+        {
+            pSynch->pfnCallbackTestStarted();
+        }
+
         //
         // read performance counters
         //
@@ -2203,18 +2214,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             return false;
         }
 
-        printfv(profile.GetVerbose(), "starting measurements...\n");
         //get cycle count (it will be used to calculate actual work time)
-
-        //
-        // notify the front-end that the test is about to start;
-        // do it before starting timing in order not to perturb measurements
-        //
-        if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestStarted) && (NULL != pSynch->pfnCallbackTestStarted))
-        {
-            pSynch->pfnCallbackTestStarted();
-        }
-
         ullStartTime = PerfTimer::GetTime();
 
 #pragma warning( push )
@@ -2246,6 +2246,14 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         //get cycle count and perf counters
         ullTimeDiff = PerfTimer::GetTime() - ullStartTime;
 
+        if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
+        {
+            PrintError("Error getting performance counters\n");
+            _StopETW(fUseETW, hTraceSession);
+            _TerminateWorkerThreads(vhThreads);
+            return false;
+        }
+
         //
         // notify the front-end that the test has just finished;
         // do it after stopping timing in order not to perturb measurements
@@ -2253,14 +2261,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestFinished) && (NULL != pSynch->pfnCallbackTestFinished))
         {
             pSynch->pfnCallbackTestFinished();
-        }
-
-        if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
-        {
-            PrintError("Error getting performance counters\n");
-            _StopETW(fUseETW, hTraceSession);
-            _TerminateWorkerThreads(vhThreads);
-            return false;
         }
 
         //
