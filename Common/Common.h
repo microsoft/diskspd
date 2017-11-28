@@ -528,7 +528,7 @@ public:
         if (StartTime.wYear) {
 
             nWritten = sprintf_s(szBuffer, _countof(szBuffer),
-                "%u/%02u/%02u %02u:%02u:%02u GMT",
+                "%u/%02u/%02u %02u:%02u:%02u UTC",
                 StartTime.wYear,
                 StartTime.wMonth,
                 StartTime.wDay,
