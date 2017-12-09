@@ -73,15 +73,15 @@ HRESULT ReportXmlError(
 	return errorCode;
 }
 
-bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
+bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, HMODULE hModule)
 {
     assert(pszPath != nullptr);
     assert(pProfile != nullptr);
 
     // import schema from the named resource
-    HRSRC hSchemaXmlResource = FindResource(NULL, L"DISKSPD.XSD", RT_HTML);
+    HRSRC hSchemaXmlResource = FindResource(hModule, L"DISKSPD.XSD", RT_HTML);
     assert(hSchemaXmlResource != NULL);
-    HGLOBAL hSchemaXml = LoadResource(NULL, hSchemaXmlResource);
+    HGLOBAL hSchemaXml = LoadResource(hModule, hSchemaXmlResource);
     assert(hSchemaXml != NULL);
     LPVOID pSchemaXml = LockResource(hSchemaXml);
     assert(pSchemaXml != NULL);
