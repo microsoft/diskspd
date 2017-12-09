@@ -449,9 +449,12 @@ bool Target::_FillRandomDataWriteBuffer(Random *pRand)
 bool Target::AllocateAndFillRandomDataWriteBuffer(Random *pRand)
 {
     assert(_pRandomDataWriteBuffer == nullptr);
-    bool fOk = true;
+    bool fOk = false;
     size_t cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
-    assert(cb > 0);
+    if (cb < 1)
+    {
+        return fOk;
+    }
 
     // TODO: make sure the size if <= max value for size_t
     if (GetUseLargePages())
