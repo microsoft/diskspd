@@ -385,9 +385,16 @@ string Target::GetXml() const
     sprintf_s(buffer, _countof(buffer), "<Weight>%u</Weight>\n", _ulWeight);
     sXml += buffer;
 
-    for (const auto& threadTarget : _vThreadTargets)
+    if (_vThreadTargets.size() > 0)
     {
-        sXml += threadTarget.GetXml();
+        sXml += "<ThreadTargets>\n";
+
+        for (const auto& threadTarget : _vThreadTargets)
+        {
+            sXml += threadTarget.GetXml();
+        }
+
+        sXml += "</ThreadTargets>\n";
     }
 
     sXml += "</Target>\n";
@@ -442,9 +449,12 @@ bool Target::_FillRandomDataWriteBuffer(Random *pRand)
 bool Target::AllocateAndFillRandomDataWriteBuffer(Random *pRand)
 {
     assert(_pRandomDataWriteBuffer == nullptr);
-    bool fOk = true;
+    bool fOk = false;
     size_t cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
-    assert(cb > 0);
+    if (cb < 1)
+    {
+        return fOk;
+    }
 
     // TODO: make sure the size if <= max value for size_t
     if (GetUseLargePages())
@@ -604,6 +614,7 @@ string Profile::GetXml() const
 
     if (_fEtwEnabled)
     {
+        sXml += "<ETW>\n";
         sXml += _fEtwProcess ? "<Process>true</Process>\n" : "<Process>false</Process>\n";
         sXml += _fEtwThread ? "<Thread>true</Thread>\n" : "<Thread>false</Thread>\n";
         sXml += _fEtwImageLoad ? "<ImageLoad>true</ImageLoad>\n" : "<ImageLoad>false</ImageLoad>\n";
@@ -616,6 +627,7 @@ string Profile::GetXml() const
         sXml += _fEtwUsePerfTimer ? "<UsePerfTimer>true</UsePerfTimer>\n" : "<UsePerfTimer>false</UsePerfTimer>\n";
         sXml += _fEtwUseSystemTimer ? "<UseSystemTimer>true</UseSystemTimer>\n" : "<UseSystemTimer>false</UseSystemTimer>\n";
         sXml += _fEtwUseCyclesCounter ? "<UseCyclesCounter>true</UseCyclesCounter>\n" : "<UseCyclesCounter>false</UseCyclesCounter>\n";
+        sXml += "</ETW>\n";
     }
 
     sXml += "<TimeSpans>\n";

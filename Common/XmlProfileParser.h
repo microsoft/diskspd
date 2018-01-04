@@ -34,7 +34,7 @@ SOFTWARE.
 class XmlProfileParser
 {
 public:
-    bool ParseFile(const char *pszPath, Profile *pProfile);
+    bool ParseFile(const char *pszPath, Profile *pProfile, HMODULE hModule);
 
 private:
     HRESULT _ParseEtw(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile);

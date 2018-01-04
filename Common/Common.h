@@ -49,8 +49,19 @@ using namespace std;
 //
 //      Monday, June 16, 2014 12:00:00 AM
 
-#define DISKSPD_RELEASE_TAG " (MS)"
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.19a" DISKSPD_RELEASE_TAG
+#define DISKSPD_RELEASE_TAG ""
+#define DISKSPD_REVISION    "a"
+
+#define DISKSPD_MAJOR       2
+#define DISKSPD_MINOR       0
+#define DISKSPD_BUILD       19
+#define DISKSPD_QFE         0
+
+#define DISKSPD_MAJORMINOR_VER_STR(x,y,z) #x "." #y "." #z
+#define DISKSPD_MAJORMINOR_VERSION_STRING(x,y,z) DISKSPD_MAJORMINOR_VER_STR(x,y,z)
+#define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
+
+#define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
 #define DISKSPD_DATE_VERSION_STRING "2017/4/28"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
@@ -85,7 +96,6 @@ struct ETWEventCounters
     UINT64 ullRegQueryMultipleValue;    // NtQueryMultipleValueKey
     UINT64 ullRegSetInformation;        // NtSetInformationKey
     UINT64 ullRegFlush;                 // NtFlushKey
-    UINT64 ullRegKcbDmp;                // KcbDump/create
     UINT64 ullThreadStart;
     UINT64 ullThreadEnd;
     UINT64 ullProcessStart;
@@ -518,7 +528,7 @@ public:
         if (StartTime.wYear) {
 
             nWritten = sprintf_s(szBuffer, _countof(szBuffer),
-                "%u/%02u/%02u %02u:%02u:%02u GMT",
+                "%u/%02u/%02u %02u:%02u:%02u UTC",
                 StartTime.wYear,
                 StartTime.wMonth,
                 StartTime.wDay,

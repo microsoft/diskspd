@@ -96,16 +96,16 @@ void ResultParser::_DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo)
         sessionInfo.ulFlushTimer,
         sessionInfo.lAgeLimit);
 
-    _Print("Allocated Buffers: %lu\n",
+    _Print("Allocated Buffers:\t%lu\n",
         sessionInfo.ulNumberOfBuffers);
 
-    _Print("LOST EVENTS:%15lu\n",
+    _Print("Lost Events:\t\t%lu\n",
         sessionInfo.ulEventsLost);
 
-    _Print("LOST LOG BUFFERS:%10lu\n",
+    _Print("Lost Log Buffers:\t%lu\n",
         sessionInfo.ulLogBuffersLost);
 
-    _Print("LOST REAL TIME BUFFERS:%4lu\n",
+    _Print("Lost Real Time Buffers:\t%lu\n",
         sessionInfo.ulRealTimeBuffersLost);
 }
 
@@ -186,9 +186,6 @@ void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters E
 
         _Print("\t\tNtFlushKey: %I64u\n",
             EtwEventCounters.ullRegFlush);
-
-        _Print("\t\tKcbDump/create: %I64u\n",
-            EtwEventCounters.ullRegKcbDmp);
 
         _Print("\t\tNtOpenKey: %I64u\n",
             EtwEventCounters.ullRegOpen);
@@ -449,7 +446,6 @@ void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInfo
     size_t ulBaseProc = 0;
     size_t ulActiveProcCount = 0;
     size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
-    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
 
     char szFloatBuffer[1024];
 
@@ -484,9 +480,12 @@ void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInfo
                 continue;
             }
 
-            idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / 10000000 / fTime;
-            krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / 10000000 / fTime;
-            userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / 10000000 / fTime;
+            long long fTime = results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart +
+                              results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart;
+
+            idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / fTime;
+            krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / fTime;
+            userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / fTime;
 
             thisTime = (krnlTime + userTime) - idleTime;
 
