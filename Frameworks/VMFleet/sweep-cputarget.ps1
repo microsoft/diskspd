@@ -47,7 +47,7 @@ del -Force $outfile -ErrorAction SilentlyContinue
 # make qos policy and reset
 Get-StorageQosPolicy -Name SweepQos -ErrorAction SilentlyContinue | Remove-StorageQosPolicy -Confirm:$false
 New-StorageQosPolicy -Name SweepQoS -MinimumIops $qos -MaximumIops $qos -PolicyType Dedicated
-set-storageqos -policyname SweepQoS
+.\Set-storageqos -policyname SweepQoS
 
 function is-within(
     $value,
@@ -105,11 +105,11 @@ foreach ($w in 0,10,30) {
             if ($h[$qos]) { write-host -ForegroundColor Red already measured $qos; break }
             if ($h.Keys.Count -ge $sweeplimit) { write-host -ForegroundColor Red $sweeplimit tries giving up; break }
    
-            Set-StorageQosPolicy -Name SweepQoS -MaximumIops $qos
+            .\Set-StorageQosPolicy -Name SweepQoS -MaximumIops $qos
             write-host -fore Cyan Starting loop with QoS target $qos
 
             $curaddspec = "$($addspec)w$($w)qos$qos"
-            start-sweep.ps1 -addspec $curaddspec -b 4 -o 32 -t 1 -w $w -p r -d 60 -warm 15 -cool 15 -pc $pc
+            .\start-sweep.ps1 -addspec $curaddspec -b 4 -o 32 -t 1 -w $w -p r -d 60 -warm 15 -cool 15 -pc $pc
 
             # HACKHACK bounce collect
             Get-ClusterSharedVolume |? { $_.SharedVolumeInfo.FriendlyVolumeName -match 'collect' } | Move-ClusterSharedVolume
@@ -209,4 +209,4 @@ foreach ($w in 0,10,30) {
     }
 }
 
-set-storageqos -policyname $null
+.\Set-storageqos -policyname $null
