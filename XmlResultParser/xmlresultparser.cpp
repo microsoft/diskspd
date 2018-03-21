@@ -200,11 +200,11 @@ void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters 
 
 void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemInformation& system)
 {
-    size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
+	const size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
     size_t ulBaseProc = 0;
     size_t ulActiveProcCount = 0;
-    size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
-    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
+	const size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
+	const double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
 
     _Print("<CpuUtilization>\n");
 
@@ -222,20 +222,15 @@ void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemI
         }
         
         for (unsigned int ulProcessor = 0; ulProcessor < pGroup->_maximumProcessorCount; ulProcessor++) {
-            double idleTime;
-            double userTime;
-            double krnlTime;
-            double thisTime;
-
-            if (!pGroup->IsProcessorActive((BYTE)ulProcessor)) {
+	        if (!pGroup->IsProcessorActive(static_cast<BYTE>(ulProcessor))) {
                 continue;
             }
 
-            idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / 10000000 / fTime;
-            krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / 10000000 / fTime;
-            userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / 10000000 / fTime;
+	        const double idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / 10000000 / fTime;
+	        const double krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / 10000000 / fTime;
+	        const double userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / 10000000 / fTime;
 
-            thisTime = (krnlTime + userTime) - idleTime;
+	        const double thisTime = (krnlTime + userTime) - idleTime;
 
             _Print("<CPU>\n");
             _Print("<Group>%d</Group>\n", ulGroup);
@@ -407,7 +402,7 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
     vPercentiles.push_back(make_pair(6, 99.999999));
     vPercentiles.push_back(make_pair(7, 99.9999999));
 
-    for (auto p : vPercentiles)
+    for (const auto p : vPercentiles)
     {
         _Print("<Bucket>\n");
         _Print("<Percentile>%.*f</Percentile>\n", p.first, p.second);
@@ -457,13 +452,13 @@ string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& 
         const TimeSpan& timeSpan = profile.GetTimeSpans()[iResults];
 
         _Print("<TimeSpan>\n");
-        double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
+	    const double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
         if (fTime >= 0.0000001)
         {
             // There either is a fixed number of threads for all files to share (GetThreadCount() > 0) or a number of threads per file.
             // In the latter case vThreadResults.size() == number of threads per file * file count
-            size_t ulThreadCnt = (timeSpan.GetThreadCount() > 0) ? timeSpan.GetThreadCount() : results.vThreadResults.size();
-            unsigned int ulProcCount = system.processorTopology._ulActiveProcCount;
+	        const size_t ulThreadCnt = (timeSpan.GetThreadCount() > 0) ? timeSpan.GetThreadCount() : results.vThreadResults.size();
+	        const unsigned int ulProcCount = system.processorTopology._ulActiveProcCount;
 
             _Print("<TestTimeSeconds>%.2f</TestTimeSeconds>\n", fTime);
             _Print("<ThreadCount>%u</ThreadCount>\n", ulThreadCnt);

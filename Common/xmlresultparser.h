@@ -33,7 +33,7 @@ SOFTWARE.
 class XmlResultParser: public IResultParser
 {
 public:
-    string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults);
+    string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults) override;
 
 private:
     void _PrintCpuUtilization(const Results& results, const SystemInformation& system);

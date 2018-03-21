@@ -74,7 +74,7 @@ void IoBucketizer::Add(unsigned __int64 ioCompletionTime, double ioDuration)
         throw std::runtime_error("IoBucketizer has not been initialized");
     }
 
-    size_t bucketNumber = static_cast<size_t>(ioCompletionTime / _bucketDuration);
+	const auto bucketNumber = static_cast<size_t>(ioCompletionTime / _bucketDuration);
     _totalBuckets = bucketNumber + 1;
 
     if (bucketNumber >= _validBuckets)
@@ -148,10 +148,10 @@ double IoBucketizer::GetIoBucketDurationStdDevUsec(size_t bucketNumber) const
 {
     if (bucketNumber < _validBuckets && _vBuckets[bucketNumber].ulCount != 0)
     {
-        double sum_of_squares = _vBuckets[bucketNumber].lfSumSqrDuration;
-        double square_of_sum = _vBuckets[bucketNumber].lfSumDuration * _vBuckets[bucketNumber].lfSumDuration;
-        double count = static_cast<double>(_vBuckets[bucketNumber].ulCount);
-        double square_stddev = (sum_of_squares - (square_of_sum / count)) / count;
+	    const double sum_of_squares = _vBuckets[bucketNumber].lfSumSqrDuration;
+	    const double square_of_sum = _vBuckets[bucketNumber].lfSumDuration * _vBuckets[bucketNumber].lfSumDuration;
+	    const auto count = static_cast<double>(_vBuckets[bucketNumber].ulCount);
+	    const double square_stddev = (sum_of_squares - (square_of_sum / count)) / count;
         
         return sqrt(square_stddev);
     }
@@ -160,8 +160,8 @@ double IoBucketizer::GetIoBucketDurationStdDevUsec(size_t bucketNumber) const
 }
 
 double IoBucketizer::_GetMeanIOPS() const 
-{ 
-    size_t numBuckets = GetNumberOfValidBuckets();
+{
+	const size_t numBuckets = GetNumberOfValidBuckets();
     double sum = 0;
 
     for (size_t i = 0; i < numBuckets; i++)
@@ -173,21 +173,21 @@ double IoBucketizer::_GetMeanIOPS() const
 }
 
 double IoBucketizer::GetStandardDeviationIOPS() const
-{ 
-    size_t numBuckets = GetNumberOfValidBuckets();
+{
+	const size_t numBuckets = GetNumberOfValidBuckets();
 
     if(numBuckets == 0) 
     {
         return 0.0;
     }
 
-    double mean = _GetMeanIOPS();
+	const double mean = _GetMeanIOPS();
     double ssd = 0;
 
     for (size_t i = 0; i < numBuckets; i++)
     {
-        double dev = static_cast<double>(_vBuckets[i].ulCount) - mean;
-        double sqdev = dev*dev;
+	    const double dev = static_cast<double>(_vBuckets[i].ulCount) - mean;
+	    const double sqdev = dev*dev;
         ssd += sqdev;
     }
 

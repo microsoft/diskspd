@@ -31,16 +31,15 @@ SOFTWARE.
 //
 #include "ResultParser.h"
 
-#include "common.h"
+#include "Common.h"
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 #include <Winternl.h>   //ntdll.dll
 
-#include <Wmistr.h>     //WNODE_HEADER
-#include <Evntrace.h>
+//#include <Evntrace.h>
 
-#include <assert.h>
+#include <cassert>
 
 // TODO: refactor to a single function shared with the XmlResultParser
 void ResultParser::_Print(const char *format, ...)
@@ -60,11 +59,11 @@ void ResultParser::_Print(const char *format, ...)
 
 void ResultParser::_DisplayFileSize(UINT64 fsize)
 {
-    if( fsize > (UINT64)10*1024*1024*1024 )    // > 10GB
+    if( fsize > static_cast<UINT64>(10)*1024*1024*1024 )    // > 10GB
     {
         _Print("%uGiB", fsize >> 30);
     }
-    else if( fsize > (UINT64)10*1024*1024 )    // > 10MB
+    else if( fsize > static_cast<UINT64>(10)*1024*1024 )    // > 10MB
     {
         _Print("%uMiB", fsize >> 20);
     }
@@ -271,7 +270,7 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     {
         _Print("\t\twrite buffer size: %I64u\n", target.GetRandomDataWriteBufferSize());
         string sWriteBufferSourcePath = target.GetRandomDataWriteBufferSourcePath();
-        if (sWriteBufferSourcePath != "")
+        if (!sWriteBufferSourcePath.empty())
         {
             _Print("\t\twrite buffer source: '%s'\n", sWriteBufferSourcePath.c_str());
         }
@@ -398,7 +397,7 @@ void ResultParser::_PrintTimeSpan(const TimeSpan& timeSpan)
     _Print("\trandom seed: %u\n", timeSpan.GetRandSeed());
 
     const auto& vAffinity = timeSpan.GetAffinityAssignments();
-    if ( vAffinity.size() > 0)
+    if (!vAffinity.empty())
     {
         _Print("\tadvanced affinity round robin (group/core): ");
         for (unsigned int x = 0; x < vAffinity.size(); ++x)
@@ -420,9 +419,9 @@ void ResultParser::_PrintTimeSpan(const TimeSpan& timeSpan)
     }
 
     vector<Target> vTargets(timeSpan.GetTargets());
-    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+    for (auto& vTarget : vTargets)
     {
-        _PrintTarget(*i, (timeSpan.GetThreadCount() == 0), (timeSpan.GetThreadCount() == 0 || timeSpan.GetRequestCount() == 0), timeSpan.GetCompletionRoutines());
+        _PrintTarget(vTarget, (timeSpan.GetThreadCount() == 0), (timeSpan.GetThreadCount() == 0 || timeSpan.GetRequestCount() == 0), timeSpan.GetCompletionRoutines());
     }
 }
 
@@ -438,22 +437,22 @@ void ResultParser::_PrintProfile(const Profile& profile)
 
     const vector<TimeSpan>& vTimeSpans = profile.GetTimeSpans();
     int c = 1;
-    for (auto i = vTimeSpans.begin(); i != vTimeSpans.end(); i++)
+    for (const auto& vTimeSpan : vTimeSpans)
     {
         _Print("\ttimespan: %3d\n", c++);
         _Print("\t-------------\n");
-        _PrintTimeSpan(*i);
+        _PrintTimeSpan(vTimeSpan);
         _Print("\n");
     }
 }
 
 void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInformation& system)
 {
-    size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
+	const size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
     size_t ulBaseProc = 0;
     size_t ulActiveProcCount = 0;
-    size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
-    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
+	const size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
+	const double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
 
     char szFloatBuffer[1024];
 
@@ -479,20 +478,15 @@ void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInfo
         }
         
         for (unsigned int ulProcessor = 0; ulProcessor < pGroup->_maximumProcessorCount; ulProcessor++) {
-            double idleTime;
-            double userTime;
-            double krnlTime;
-            double thisTime;
-
-            if (!pGroup->IsProcessorActive((BYTE)ulProcessor)) {
+	        if (!pGroup->IsProcessorActive(static_cast<BYTE>(ulProcessor))) {
                 continue;
             }
 
-            idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / 10000000 / fTime;
-            krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / 10000000 / fTime;
-            userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / 10000000 / fTime;
+	        const double idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / 10000000 / fTime;
+	        const double krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / 10000000 / fTime;
+	        const double userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / 10000000 / fTime;
 
-            thisTime = (krnlTime + userTime) - idleTime;
+	        const double thisTime = (krnlTime + userTime) - idleTime;
 
             if (ulNumGroups == 1) {
                 sprintf_s(szFloatBuffer, sizeof(szFloatBuffer), "%4u| %6.2lf%%| %6.2lf%%|  %6.2lf%%| %6.2lf%%\n",
@@ -559,8 +553,8 @@ void ResultParser::_PrintSectionBorderLine(const TimeSpan& timeSpan)
 
 void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan, const Results& results)
 {
-    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
-    double fBucketTime = timeSpan.GetIoBucketDurationInMilliseconds() / 1000.0;
+	const double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
+	const double fBucketTime = timeSpan.GetIoBucketDurationInMilliseconds() / 1000.0;
     UINT64 ullTotalBytesCount = 0;
     UINT64 ullTotalIOCount = 0;
     Histogram<float> totalLatencyHistogram;
@@ -573,11 +567,9 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
     for (unsigned int iThread = 0; iThread < results.vThreadResults.size(); ++iThread)
     {
         const ThreadResults& threadResults = results.vThreadResults[iThread];
-        for (unsigned int iFile = 0; iFile < threadResults.vTargetResults.size(); iFile++)
+        for (const auto& targetResults : threadResults.vTargetResults)
         {
-            const TargetResults& targetResults = threadResults.vTargetResults[iFile];
-
-            UINT64 ullBytesCount = 0;
+	        UINT64 ullBytesCount = 0;
             UINT64 ullIOCount = 0;
 
             Histogram<float> latencyHistogram;
@@ -623,18 +615,18 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
                    iThread,
                    ullBytesCount,
                    ullIOCount,
-                   (double)ullBytesCount / 1024 / 1024 / fTime,
-                   (double)ullIOCount / fTime);
+                   static_cast<double>(ullBytesCount) / 1024 / 1024 / fTime,
+                   static_cast<double>(ullIOCount) / fTime);
 
             if (timeSpan.GetMeasureLatency())
             {
-                double avgLat = latencyHistogram.GetAvg()/1000;
+	            const double avgLat = latencyHistogram.GetAvg()/1000;
                 _Print(" | %8.3f", avgLat);
             }
 
             if (timeSpan.GetCalculateIopsStdDev())
             {
-                double iopsStdDev = ioBucketizer.GetStandardDeviationIOPS() / fBucketTime;
+	            const double iopsStdDev = ioBucketizer.GetStandardDeviationIOPS() / fBucketTime;
                 _Print(" | %10.2f", iopsStdDev);
             }
 
@@ -642,7 +634,7 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
             {
                 if (latencyHistogram.GetSampleSize() > 0)
                 {
-                    double latStdDev = latencyHistogram.GetStandardDeviation() / 1000;
+	                const double latStdDev = latencyHistogram.GetStandardDeviation() / 1000;
                     _Print(" |  %8.3f", latStdDev);
                 }
                 else
@@ -673,8 +665,8 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
     _Print("total:   %15llu | %12llu | %10.2f | %10.2f",
            ullTotalBytesCount,
            ullTotalIOCount,
-           (double)ullTotalBytesCount / 1024 / 1024 / fTime,
-           (double)ullTotalIOCount / fTime);
+           static_cast<double>(ullTotalBytesCount) / 1024 / 1024 / fTime,
+           static_cast<double>(ullTotalIOCount) / fTime);
 
     if (timeSpan.GetMeasureLatency())
     {
@@ -683,7 +675,7 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
 
     if (timeSpan.GetCalculateIopsStdDev())
     {
-        double iopsStdDev = totalIoBucketizer.GetStandardDeviationIOPS() / fBucketTime;
+	    const double iopsStdDev = totalIoBucketizer.GetStandardDeviationIOPS() / fBucketTime;
         _Print(" | %10.2f", iopsStdDev);
     }
 
@@ -691,7 +683,7 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
     {
         if (totalLatencyHistogram.GetSampleSize() > 0)
         {
-            double latStdDev = totalLatencyHistogram.GetStandardDeviation() / 1000;
+	        const double latStdDev = totalLatencyHistogram.GetStandardDeviation() / 1000;
             _Print(" |  %8.3f", latStdDev);
         }
         else
@@ -714,7 +706,7 @@ void ResultParser::_PrintLatencyPercentiles(const Results& results)
     {
         for (const auto& target : thread.vTargetResults)
         {
-            std::string path = target.sPath;
+	        const std::string path = target.sPath;
 
             perTargetReadHistogram[path].Merge(target.readLatencyHistogram);
 
@@ -727,7 +719,7 @@ void ResultParser::_PrintLatencyPercentiles(const Results& results)
 
     //Skip if only one target
     if (perTargetTotalHistogram.size() > 1) {
-        for (auto i : perTargetTotalHistogram)
+        for (const auto& i : perTargetTotalHistogram)
         {
             std::string path = i.first;
             _Print("\n%s\n", path.c_str());
@@ -763,8 +755,8 @@ void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogr
     const Histogram<float>& writeLatencyHistogram,
     const Histogram<float>& totalLatencyHistogram)
 {
-    bool fHasReads = readLatencyHistogram.GetSampleSize() > 0;
-    bool fHasWrites = writeLatencyHistogram.GetSampleSize() > 0;
+	const bool fHasReads = readLatencyHistogram.GetSampleSize() > 0;
+	const bool fHasWrites = writeLatencyHistogram.GetSampleSize() > 0;
 
     _Print("  %%-ile |  Read (ms) | Write (ms) | Total (ms)\n");
     _Print("----------------------------------------------\n");
@@ -844,14 +836,12 @@ string ResultParser::ParseResults(Profile& profile, const SystemInformation& sys
         const Results& results = vResults[iResult];
         const TimeSpan& timeSpan = profile.GetTimeSpans()[iResult];
 
-        unsigned int ulProcCount = system.processorTopology._ulActiveProcCount;
-        double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
-
-        char szFloatBuffer[1024];
+	    const unsigned int ulProcCount = system.processorTopology._ulActiveProcCount;
+	    const double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
 
         // There either is a fixed number of threads for all files to share (GetThreadCount() > 0) or a number of threads per file.
         // In the latter case vThreadResults.size() == number of threads per file * file count
-        size_t ulThreadCnt = (timeSpan.GetThreadCount() > 0) ? timeSpan.GetThreadCount() : results.vThreadResults.size();
+	    const size_t ulThreadCnt = (timeSpan.GetThreadCount() > 0) ? timeSpan.GetThreadCount() : results.vThreadResults.size();
 
         if (fTime < 0.0000001)
         {
@@ -860,6 +850,8 @@ string ResultParser::ParseResults(Profile& profile, const SystemInformation& sys
         else
         {
             // TODO: parameters.bCreateFile;
+			
+        	char szFloatBuffer[1024];
 
             _Print("\n");
             sprintf_s(szFloatBuffer, sizeof(szFloatBuffer), "actual test time:\t%.2lfs\n", fTime);
@@ -910,45 +902,45 @@ string ResultParser::ParseResults(Profile& profile, const SystemInformation& sys
         UINT64 cTotalWriteIO = 0;
         UINT64 cTotalReadIO = 0;
         UINT64 cTotalTicks = 0;
-        for (auto pResults = vResults.begin(); pResults != vResults.end(); pResults++)
+        for (auto& vResult : vResults)
         {
-            double time = PerfTimer::PerfTimeToSeconds(pResults->ullTimeCount); 
+	        const double time = PerfTimer::PerfTimeToSeconds(vResult.ullTimeCount); 
             if (time >= 0.0000001)  // skip timespans that were interrupted
             {
-                cTotalTicks += pResults->ullTimeCount;
-                auto vThreadResults = pResults->vThreadResults;
-                for (auto pThreadResults = vThreadResults.begin(); pThreadResults != vThreadResults.end(); pThreadResults++)
+                cTotalTicks += vResult.ullTimeCount;
+                auto vThreadResults = vResult.vThreadResults;
+                for (auto& vThreadResult : vThreadResults)
                 {
-                    for (auto pTargetResults = pThreadResults->vTargetResults.begin(); pTargetResults != pThreadResults->vTargetResults.end(); pTargetResults++)
-                    {
-                        cbTotalRead += pTargetResults->ullReadBytesCount;
-                        cbTotalWritten += pTargetResults->ullWriteBytesCount;
-                        cTotalReadIO += pTargetResults->ullReadIOCount;
-                        cTotalWriteIO += pTargetResults->ullWriteIOCount;
+	                for (auto& vTargetResult : vThreadResult.vTargetResults)
+	                {
+                        cbTotalRead += vTargetResult.ullReadBytesCount;
+                        cbTotalWritten += vTargetResult.ullWriteBytesCount;
+                        cTotalReadIO += vTargetResult.ullReadIOCount;
+                        cTotalWriteIO += vTargetResult.ullWriteIOCount;
                     }
                 }
             }
         }
 
-        double totalTime = PerfTimer::PerfTimeToSeconds(cTotalTicks);
+	    const double totalTime = PerfTimer::PerfTimeToSeconds(cTotalTicks);
 
         _Print("write  | %15I64u | %12I64u | %10.2lf | %10.2lf\n",
                cbTotalWritten,
                cTotalWriteIO,
-               (double)cbTotalWritten / 1024 / 1024 / totalTime,
-               (double)cTotalWriteIO / totalTime);
+               static_cast<double>(cbTotalWritten) / 1024 / 1024 / totalTime,
+               static_cast<double>(cTotalWriteIO) / totalTime);
 
         _Print("read   | %15I64u | %12I64u | %10.2lf | %10.2lf\n",
                cbTotalRead,
                cTotalReadIO,
-               (double)cbTotalRead / 1024 / 1024 / totalTime,
-               (double)cTotalReadIO / totalTime);
+               static_cast<double>(cbTotalRead) / 1024 / 1024 / totalTime,
+               static_cast<double>(cTotalReadIO) / totalTime);
         _Print("-------------------------------------------------------------------------------\n");
         _Print("total  | %15I64u | %12I64u | %10.2lf | %10.2lf\n\n",
                cbTotalRead + cbTotalWritten,
                cTotalReadIO + cTotalWriteIO,
-               (double)(cbTotalRead + cbTotalWritten) / 1024 / 1024 / totalTime,
-               (double)(cTotalReadIO + cTotalWriteIO) / totalTime);
+               static_cast<double>(cbTotalRead + cbTotalWritten) / 1024 / 1024 / totalTime,
+               static_cast<double>(cTotalReadIO + cTotalWriteIO) / totalTime);
 
         _Print("total test time:\t%.2lfs\n", totalTime);
     }

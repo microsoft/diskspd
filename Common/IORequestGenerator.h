@@ -58,27 +58,27 @@ private:
 
     struct CreateFileParameters
     {
-        string sPath;
-        UINT64 ullFileSize;
-        bool fZeroWriteBuffers;
+		string sPath;
+        UINT64 ullFileSize = 0;
+        bool fZeroWriteBuffers=false;
     };
 
     bool _GenerateRequestsForTimeSpan(const Profile& profile, const TimeSpan& timeSpan, Results& results, struct Synchronization *pSynch);
-    void _AbortWorkerThreads(HANDLE hStartEvent, vector<HANDLE>& vhThreads) const;
-    void _CloseOpenFiles(vector<HANDLE>& vhFiles) const;
-    DWORD _CreateDirectoryPath(const char *path) const;
+	static void _AbortWorkerThreads(HANDLE hStartEvent, vector<HANDLE>& vhThreads);
+	static void _CloseOpenFiles(vector<HANDLE>& vhFiles);
+    DWORD _CreateDirectoryPath(const char *pszPath) const;
     bool _CreateFile(UINT64 ullFileSize, const char *pszFilename, bool fZeroBuffers, bool fVerbose) const;
-    void _DisplayFileSizeVerbose(bool fVerbose, UINT64 fsize) const;
-    bool _GetActiveGroupsAndProcs() const;
-    struct ETWSessionInfo _GetResultETWSession(const EVENT_TRACE_PROPERTIES *pTraceProperties) const;
+	static void _DisplayFileSizeVerbose(bool fVerbose, UINT64 fsize);
+    bool _GetActiveGroupsAndProcs() const; /* not implemented */
+	static struct ETWSessionInfo _GetResultETWSession(const EVENT_TRACE_PROPERTIES *pTraceProperties);
     bool _GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount) const;
     void _InitializeGlobalParameters();
     bool _LoadDLLs();
-    bool _StopETW(bool fUseETW, TRACEHANDLE hTraceSession) const;
-    void _TerminateWorkerThreads(vector<HANDLE>& vhThreads) const;
-    bool _ValidateProfile(const Profile& profile) const;
-    vector<struct CreateFileParameters> _GetFilesToPrecreate(const Profile& profile) const;
-    void _MarkFilesAsCreated(Profile& profile, const vector<struct CreateFileParameters>& vFiles) const;
+	static bool _StopETW(bool fUseETW, TRACEHANDLE hTraceSession);
+	static void _TerminateWorkerThreads(vector<HANDLE>& vhThreads);
+    bool _ValidateProfile(const Profile& profile) const; /* Not implemented*/
+	static vector<struct CreateFileParameters> _GetFilesToPrecreate(const Profile& profile);
+    void _MarkFilesAsCreated(Profile& profile, const vector<struct CreateFileParameters>& vFiles) const; /* Not implemented */
     bool _PrecreateFiles(Profile& profile) const;
 
     HINSTANCE volatile _hNTDLL;     //handle to ntdll.dll

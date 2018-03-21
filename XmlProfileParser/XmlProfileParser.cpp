@@ -31,7 +31,7 @@ SOFTWARE.
 #include <Objbase.h>
 #include <msxml6.h>
 #include <atlbase.h>
-#include <assert.h>
+#include <cassert>
 
 HRESULT ReportXmlError(
 	const char *pszName,
@@ -43,9 +43,8 @@ HRESULT ReportXmlError(
 	long errorCode = E_FAIL;
 	CComBSTR bReason;
 	BSTR bstr;
-	HRESULT hr;
 
-	hr = pXMLError->get_line(&line);
+	HRESULT hr = pXMLError->get_line(&line);
 	if (FAILED(hr))
 	{
 		line = 0;
@@ -68,7 +67,7 @@ HRESULT ReportXmlError(
 
 	fprintf(stderr,
 		"ERROR: failed to load %s, line %li, line position %li, errorCode %08lx\nERROR: reason: %S\n",
-		pszName, line, linePos, errorCode, (PWCHAR)bReason);
+		pszName, line, linePos, errorCode, static_cast<PWCHAR>(bReason));
 
 	return errorCode;
 }
@@ -79,17 +78,17 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
     assert(pProfile != nullptr);
 
     // import schema from the named resource
-    HRSRC hSchemaXmlResource = FindResource(NULL, L"DISKSPD.XSD", RT_HTML);
-    assert(hSchemaXmlResource != NULL);
-    HGLOBAL hSchemaXml = LoadResource(NULL, hSchemaXmlResource);
-    assert(hSchemaXml != NULL);
-    LPVOID pSchemaXml = LockResource(hSchemaXml);
-    assert(pSchemaXml != NULL);
+	HRSRC hSchemaXmlResource = FindResource(nullptr, L"DISKSPD.XSD", RT_HTML);
+    assert(hSchemaXmlResource != nullptr);
+	const HGLOBAL hSchemaXml = LoadResource(nullptr, hSchemaXmlResource);
+    assert(hSchemaXml != nullptr);
+	const auto pSchemaXml = LockResource(hSchemaXml);
+    assert(pSchemaXml != nullptr);
     
     // convert from utf-8 produced by the xsd authoring tool to utf-16
-    int cchSchemaXml = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)pSchemaXml, -1, NULL, 0);
+	const int cchSchemaXml = MultiByteToWideChar(CP_UTF8, 0, static_cast<LPCSTR>(pSchemaXml), -1, nullptr, 0);
 	vector<WCHAR> vWideSchemaXml(cchSchemaXml);
-    int dwcchWritten = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)pSchemaXml, -1, vWideSchemaXml.data(), cchSchemaXml);
+	const int dwcchWritten = MultiByteToWideChar(CP_UTF8, 0, static_cast<LPCSTR>(pSchemaXml), -1, vWideSchemaXml.data(), cchSchemaXml);
     UNREFERENCED_PARAMETER(dwcchWritten);
     assert(dwcchWritten == cchSchemaXml);
     // ... and finally, packed in a bstr for the loadXml interface
@@ -171,7 +170,7 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
         if (SUCCEEDED(hr))
         {
             VARIANT_BOOL fvIsOk;
-            CComVariant vPath(pszPath);
+	        const CComVariant vPath(pszPath);
             hr = spXmlDoc->load(vPath, &fvIsOk);
             if (SUCCEEDED(hr) && fvIsOk != VARIANT_TRUE)
             {
@@ -390,7 +389,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile
 HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile)
 {
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
-    CComVariant query("//Profile/TimeSpans/TimeSpan");
+	const CComVariant query("//Profile/TimeSpans/TimeSpan");
     HRESULT hr = pXmlDoc->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
@@ -558,7 +557,7 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeS
 
 HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
 {
-    CComVariant query("Targets/Target");
+	const CComVariant query("Targets/Target");
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
     HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
@@ -586,7 +585,7 @@ HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSp
 HRESULT XmlProfileParser::_ParseRandomDataSource(IXMLDOMNode *pXmlNode, Target *pTarget)
 {
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
-    CComVariant query("RandomDataSource");
+	const CComVariant query("RandomDataSource");
     HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
@@ -620,7 +619,7 @@ HRESULT XmlProfileParser::_ParseRandomDataSource(IXMLDOMNode *pXmlNode, Target *
 HRESULT XmlProfileParser::_ParseWriteBufferContent(IXMLDOMNode *pXmlNode, Target *pTarget)
 {
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
-    CComVariant query("WriteBufferContent");
+	const CComVariant query("WriteBufferContent");
     HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
@@ -938,7 +937,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
 
 HRESULT XmlProfileParser::_ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget)
 {
-    CComVariant query("ThreadTarget");
+	const CComVariant query("ThreadTarget");
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
     HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
@@ -995,7 +994,7 @@ HRESULT XmlProfileParser::_ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget
 HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
 {
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
-    CComVariant query("Affinity/AffinityAssignment");
+	const CComVariant query("Affinity/AffinityAssignment");
     HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
     {
@@ -1013,7 +1012,7 @@ HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSp
                     hr = spNode->get_text(&bstrText);
                     if (SUCCEEDED(hr))
                     {
-                        pTimeSpan->AddAffinityAssignment((WORD)0, (BYTE)_wtoi((wchar_t *)bstrText));
+                        pTimeSpan->AddAffinityAssignment(static_cast<WORD>(0), static_cast<BYTE>(_wtoi(static_cast<wchar_t *>(bstrText))));
                         SysFreeString(bstrText);
                     }
                 }
@@ -1028,7 +1027,7 @@ HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSp
 HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
 {
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
-    CComVariant query("Affinity/AffinityGroupAssignment");
+	const CComVariant query("Affinity/AffinityGroupAssignment");
 
     HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
     if (SUCCEEDED(hr))
@@ -1047,7 +1046,7 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, T
                     hr = _GetUINT32Attr(spNode, "Group", &dwGroup);
                     if (SUCCEEDED(hr))
                     {
-                        _GetUINT32Attr(spNode, "Processor", &dwProc);
+                        _GetUINT32Attr(spNode, "Processor", &dwProc); /* result unused */
                     }
                     if (SUCCEEDED(hr))
                     {
@@ -1063,7 +1062,7 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, T
                         }
 
                         if (SUCCEEDED(hr)) {
-                            pTimeSpan->AddAffinityAssignment((WORD)dwGroup, (BYTE)dwProc);
+                            pTimeSpan->AddAffinityAssignment(static_cast<WORD>(dwGroup), static_cast<BYTE>(dwProc));
                         }
                         
                     }
@@ -1074,10 +1073,10 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, T
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT32 *pulValue) const
+HRESULT XmlProfileParser::_GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT32 *pulValue)
 {
     CComPtr<IXMLDOMNode> spNode = nullptr;
-    CComVariant query(pszQuery);
+	const CComVariant query(pszQuery);
     HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
@@ -1085,29 +1084,29 @@ HRESULT XmlProfileParser::_GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery
         hr = spNode->get_text(&bstrText);
         if (SUCCEEDED(hr))
         {
-            *pulValue = _wtoi((wchar_t *)bstrText);  // TODO: make sure it works on large unsigned ints
+            *pulValue = _wtoi(static_cast<wchar_t *>(bstrText));  // TODO: make sure it works on large unsigned ints
             SysFreeString(bstrText);
         }
     }
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszAttr, UINT32 *pulValue) const
+HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszAttr, UINT32 *pulValue)
 {
     CComPtr<IXMLDOMNamedNodeMap> spNamedNodeMap = nullptr;
-    CComBSTR attr(pszAttr);
-    HRESULT hr = pXmlNode->get_attributes(&spNamedNodeMap);
+	const CComBSTR attr(pszAttr);
+	const HRESULT hr = pXmlNode->get_attributes(&spNamedNodeMap);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         CComPtr<IXMLDOMNode> spNode = nullptr;
-        HRESULT hr = spNamedNodeMap->getNamedItem(attr, &spNode);
-        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        HRESULT hr2 = spNamedNodeMap->getNamedItem(attr, &spNode);
+        if (SUCCEEDED(hr2) && (hr2 != S_FALSE))
         {
             BSTR bstrText;
-            hr = spNode->get_text(&bstrText);
-            if (SUCCEEDED(hr))
+            hr2 = spNode->get_text(&bstrText);
+            if (SUCCEEDED(hr2))
             {
-                *pulValue = _wtoi((wchar_t *)bstrText);  // TODO: make sure it works on large unsigned ints
+                *pulValue = _wtoi(static_cast<wchar_t *>(bstrText));  // TODO: make sure it works on large unsigned ints
                 SysFreeString(bstrText);
             }
         }
@@ -1115,10 +1114,10 @@ HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszA
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetString(IXMLDOMNode *pXmlNode, const char *pszQuery, string *psValue) const
+HRESULT XmlProfileParser::_GetString(IXMLDOMNode *pXmlNode, const char *pszQuery, string *psValue)
 {
     CComPtr<IXMLDOMNode> spNode = nullptr;
-    CComVariant query(pszQuery);
+	const CComVariant query(pszQuery);
     HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
@@ -1128,7 +1127,9 @@ HRESULT XmlProfileParser::_GetString(IXMLDOMNode *pXmlNode, const char *pszQuery
         {
             // TODO: use wstring?
             char path[MAX_PATH] = {};
-            WideCharToMultiByte(CP_UTF8, 0 /*dwFlags*/, (wchar_t *)bstrText, static_cast<int>(wcslen((wchar_t *)bstrText)), path, sizeof(path)-1, 0 /*lpDefaultChar*/, 0 /*lpUsedDefaultChar*/);
+            WideCharToMultiByte(CP_UTF8, 0 /*dwFlags*/, static_cast<wchar_t *>(bstrText),
+                                static_cast<int>(wcslen(static_cast<wchar_t *>(bstrText))), path, sizeof(path) - 1,
+                                nullptr /*lpDefaultChar*/, nullptr /*lpUsedDefaultChar*/);
             *psValue = string(path);
         }
         SysFreeString(bstrText);
@@ -1136,10 +1137,10 @@ HRESULT XmlProfileParser::_GetString(IXMLDOMNode *pXmlNode, const char *pszQuery
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetUINT64(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT64 *pullValue) const
+HRESULT XmlProfileParser::_GetUINT64(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT64 *pullValue)
 {
     CComPtr<IXMLDOMNode> spNode = nullptr;
-    CComVariant query(pszQuery);
+	const CComVariant query(pszQuery);
     HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
@@ -1147,17 +1148,17 @@ HRESULT XmlProfileParser::_GetUINT64(IXMLDOMNode *pXmlNode, const char *pszQuery
         hr = spNode->get_text(&bstrText);
         if (SUCCEEDED(hr))
         {
-            *pullValue = _wtoi64((wchar_t *)bstrText);  // TODO: make sure it works on large unsigned ints
+            *pullValue = _wtoi64(static_cast<wchar_t *>(bstrText));  // TODO: make sure it works on large unsigned ints
         }
         SysFreeString(bstrText);
     }
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetDWORD(IXMLDOMNode *pXmlNode, const char *pszQuery, DWORD *pdwValue) const
+HRESULT XmlProfileParser::_GetDWORD(IXMLDOMNode *pXmlNode, const char *pszQuery, DWORD *pdwValue)
 {
     UINT32 value = 0;
-    HRESULT hr = _GetUINT32(pXmlNode, pszQuery, &value);
+	const HRESULT hr = _GetUINT32(pXmlNode, pszQuery, &value);
     if (SUCCEEDED(hr))
     {
         *pdwValue = value;
@@ -1165,19 +1166,18 @@ HRESULT XmlProfileParser::_GetDWORD(IXMLDOMNode *pXmlNode, const char *pszQuery,
     return hr;
 }
 
-HRESULT XmlProfileParser::_GetBool(IXMLDOMNode *pXmlNode, const char *pszQuery, bool *pfValue) const
+HRESULT XmlProfileParser::_GetBool(IXMLDOMNode *pXmlNode, const char *pszQuery, bool *pfValue)
 {
-    HRESULT hr = S_OK;
-    CComPtr<IXMLDOMNode> spNode = nullptr;
-    CComVariant query(pszQuery);
-    hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
+	CComPtr<IXMLDOMNode> spNode = nullptr;
+	const CComVariant query(pszQuery);
+    HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         BSTR bstrText;
         hr = spNode->get_text(&bstrText);
         if (SUCCEEDED(hr))
         {
-            *pfValue = (_wcsicmp(L"true", (wchar_t *)bstrText) == 0);
+            *pfValue = (_wcsicmp(L"true", static_cast<wchar_t *>(bstrText)) == 0);
             SysFreeString(bstrText);
         }
     }

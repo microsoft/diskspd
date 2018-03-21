@@ -94,23 +94,20 @@ UINT64 PerfTimer::SecondsToPerfTime(const double seconds)
 
 Random::Random(UINT64 ulSeed)
 {
-    UINT32 i;
-    
-    _ulState[0] = 0xf1ea5eed;
+	_ulState[0] = 0xf1ea5eed;
     _ulState[1] = ulSeed;
     _ulState[2] = ulSeed;
     _ulState[3] = ulSeed;
     
-    for (i = 0; i < 20; i++) {
+    for (UINT32 i = 0; i < 20; i++) {
         Rand64();
     }
 }
 
 void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
 {
-    UINT64 *pBuffer64;
-    UINT32 Remaining = (UINT32)(((ULONG_PTR)pBuffer) & 7);
-    UINT64 r1, r2, r3, r4, r5;
+	UINT32 Remaining = static_cast<UINT32>(reinterpret_cast<ULONG_PTR>(pBuffer) & 7);
+    UINT64 r1, r2, r3, r4;
 
     //
     // Align to 8 bytes
@@ -120,7 +117,7 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
         r1 = Rand64();
 
         while (Remaining != 0 && ulLength != 0) {
-            *pBuffer = (BYTE)(r1 & 0xFF);
+            *pBuffer = static_cast<BYTE>(r1 & 0xFF);
             r1 >>= 8;
             pBuffer++;
             ulLength--;
@@ -128,7 +125,7 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
         }
     }
 
-    pBuffer64 = (UINT64*)pBuffer;
+    UINT64 *pBuffer64 = reinterpret_cast<UINT64*>(pBuffer);
     Remaining = ulLength / 8;
     ulLength -= Remaining * 8;
     pBuffer += Remaining * 8;
@@ -152,7 +149,7 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
             r2 = Rand64();
             r3 = Rand64();
             r4 = Rand64();
-            r5 = Rand64();
+	        const UINT64 r5 = Rand64();
 
             pBuffer64[0]  = r1;
             pBuffer64[1]  = r2;
@@ -217,7 +214,7 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
         r1 = Rand64();
 
         while (ulLength != 0) {
-            *pBuffer = (BYTE)(r1 & 0xFF);
+            *pBuffer = static_cast<BYTE>(r1 & 0xFF);
             r1 >>= 8;
             pBuffer++;
             ulLength--;
@@ -313,7 +310,7 @@ string Target::GetXml() const
         sXml += "<RandomDataSource>\n";
         sprintf_s(buffer, _countof(buffer), "<SizeInBytes>%I64u</SizeInBytes>\n", _cbRandomDataWriteBuffer);
         sXml += buffer;
-        if (_sRandomDataWriteBufferSourcePath != "")
+        if (!_sRandomDataWriteBufferSourcePath.empty())
         {
             sXml += "<FilePath>" + _sRandomDataWriteBufferSourcePath + "</FilePath>\n";
         }
@@ -405,27 +402,27 @@ string Target::GetXml() const
     return sXml;
 }
 
-bool Target::_FillRandomDataWriteBuffer(Random *pRand)
+bool Target::_FillRandomDataWriteBuffer(Random *pRand) const
 {
     assert(_pRandomDataWriteBuffer != nullptr);
     bool fOk = true;
-    size_t cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
-    if (GetRandomDataWriteBufferSourcePath() == "")
+	const auto cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
+    if (GetRandomDataWriteBufferSourcePath().empty())
     {
-        pRand->RandBuffer(_pRandomDataWriteBuffer, (UINT32)cb, false);
+        pRand->RandBuffer(_pRandomDataWriteBuffer, static_cast<UINT32>(cb), false);
     }
     else
     {
         // fill buffer from file
-        HANDLE hFile = CreateFile(GetRandomDataWriteBufferSourcePath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+	    HANDLE hFile = CreateFile(GetRandomDataWriteBufferSourcePath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
         if (hFile != INVALID_HANDLE_VALUE)
         {
-            UINT64 cbLeftToRead = GetRandomDataWriteBufferSize();
+	        const UINT64 cbLeftToRead = GetRandomDataWriteBufferSize();
             BYTE *pBuffer = _pRandomDataWriteBuffer;
             bool fReadSuccess = true;
             while (fReadSuccess && cbLeftToRead > 0)
             {
-                DWORD cbToRead = static_cast<DWORD>(min(64 * 1024, cbLeftToRead));
+	            const auto cbToRead = static_cast<DWORD>(min(64 * 1024, cbLeftToRead));
                 DWORD cbRead;
                 fReadSuccess = ((ReadFile(hFile, pBuffer, cbToRead, &cbRead, nullptr) == TRUE) && (cbRead > 0));
                 pBuffer += cbRead;
@@ -453,19 +450,20 @@ bool Target::AllocateAndFillRandomDataWriteBuffer(Random *pRand)
 {
     assert(_pRandomDataWriteBuffer == nullptr);
     bool fOk = true;
-    size_t cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
+	const auto cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
     assert(cb > 0);
 
     // TODO: make sure the size if <= max value for size_t
     if (GetUseLargePages())
     {
-        size_t cbMinLargePage = GetLargePageMinimum();
-        size_t cbRoundedSize = (cb + cbMinLargePage - 1) & ~(cbMinLargePage - 1);
-        _pRandomDataWriteBuffer = (BYTE *)VirtualAlloc(nullptr, cbRoundedSize, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES, PAGE_EXECUTE_READWRITE);
+	    const size_t cbMinLargePage = GetLargePageMinimum();
+	    const size_t cbRoundedSize = (cb + cbMinLargePage - 1) & ~(cbMinLargePage - 1);
+        _pRandomDataWriteBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cbRoundedSize, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES,
+                                                                   PAGE_EXECUTE_READWRITE));
     }
     else
     {
-        _pRandomDataWriteBuffer = (BYTE *)VirtualAlloc(nullptr, cb, MEM_COMMIT, PAGE_READWRITE);
+        _pRandomDataWriteBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cb, MEM_COMMIT, PAGE_READWRITE));
     }
 
     fOk = (_pRandomDataWriteBuffer != nullptr);
@@ -485,15 +483,15 @@ void Target::FreeRandomDataWriteBuffer()
     }
 }
 
-BYTE* Target::GetRandomDataWriteBuffer(Random *pRand)
+BYTE* Target::GetRandomDataWriteBuffer(Random *pRand) const
 {
-    size_t cbBuffer = static_cast<size_t>(GetRandomDataWriteBufferSize());
-    size_t cbBlock = GetBlockSizeInBytes();
+	const auto cbBuffer = static_cast<size_t>(GetRandomDataWriteBufferSize());
+	const size_t cbBlock = GetBlockSizeInBytes();
 
     // leave enough bytes in the buffer for one block
     size_t randomOffset = pRand->Rand32() % (cbBuffer - (cbBlock - 1));
 
-    bool fUnbufferedIO = (_cacheMode == TargetCacheMode::DisableOSCache);
+	const bool fUnbufferedIO = (_cacheMode == TargetCacheMode::DisableOSCache);
     if (fUnbufferedIO)
     {
         // for unbuffered IO, offset in the buffer needs to be 512-byte aligned
@@ -542,7 +540,7 @@ string TimeSpan::GetXml() const
     sprintf_s(buffer, _countof(buffer), "<RandSeed>%u</RandSeed>\n", _ulRandSeed);
     sXml += buffer;
 
-    if (_vAffinity.size() > 0)
+    if (!_vAffinity.empty())
     {
         sXml += "<Affinity>\n";
         for (const auto& a : _vAffinity)
@@ -565,13 +563,13 @@ string TimeSpan::GetXml() const
 
 void TimeSpan::MarkFilesAsPrecreated(const vector<string>& vFiles)
 {
-    for (auto sFile : vFiles)
+    for (const auto& sFile : vFiles)
     {
-        for (auto pTarget = _vTargets.begin(); pTarget != _vTargets.end(); pTarget++)
+        for (auto& _vTarget : _vTargets)
         {
-            if (sFile == pTarget->GetPath())
+            if (sFile == _vTarget.GetPath())
             {
-                pTarget->SetPrecreated(true);
+	            _vTarget.SetPrecreated(true);
             }
         }
     }
@@ -640,9 +638,9 @@ string Profile::GetXml() const
 
 void Profile::MarkFilesAsPrecreated(const vector<string>& vFiles)
 {
-    for (auto pTimeSpan = _vTimeSpans.begin(); pTimeSpan != _vTimeSpans.end(); pTimeSpan++)
+    for (auto& _vTimeSpan : _vTimeSpans)
     {
-        pTimeSpan->MarkFilesAsPrecreated(vFiles);
+	    _vTimeSpan.MarkFilesAsPrecreated(vFiles);
     }
 }
 
@@ -650,7 +648,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 {
     bool fOk = true;
 
-    if (GetTimeSpans().size() == 0)
+    if (GetTimeSpans().empty())
     {
         fprintf(stderr, "ERROR: no timespans specified\n");
         fOk = false;
@@ -667,7 +665,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     {
                         fprintf(stderr, "ERROR: affinity assignment to group %u; system only has %u groups\n",
                             Affinity.wGroup,
-                            (unsigned int) pSystem->processorTopology._vProcessorGroupInformation.size());
+                            static_cast<unsigned int>(pSystem->processorTopology._vProcessorGroupInformation.size()));
 
                         fOk = false;
 
@@ -684,17 +682,20 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 
                     if (fOk && !pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].IsProcessorActive(Affinity.bProc))
                     {
-                        fprintf(stderr, "ERROR: affinity assignment to group %u core %u not possible; core is not active (current mask 0x%Ix)\n",
+                        fprintf(
+	                        stderr,
+	                        "ERROR: affinity assignment to group %u core %u not possible; core is not active (current mask 0x%llx)\n",
                             Affinity.wGroup,
                             Affinity.bProc,
-                            pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup]._activeProcessorMask);
+                            pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].
+	                        _activeProcessorMask);
 
                         fOk = false;
                     }
                 }
             }
 
-            if (timeSpan.GetDisableAffinity() && timeSpan.GetAffinityAssignments().size() > 0)
+            if (timeSpan.GetDisableAffinity() && !timeSpan.GetAffinityAssignments().empty())
             {
                 fprintf(stderr, "ERROR: -n and -a parameters cannot be used together\n");
                 fOk = false;
@@ -758,7 +759,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                         }
                     }
                 }
-                else if (target.GetThreadTargets().size() != 0)
+                else if (!target.GetThreadTargets().empty())
                 {
                     fprintf(stderr, "ERROR: ThreadTargets can only be specified when the timespan ThreadCount and RequestCount are specified\n");
                     fOk = false;
@@ -872,9 +873,8 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
     bool fOk = true;
     BYTE *pDataBuffer = nullptr;
     DWORD requestCount = target.GetRequestCount();
-    size_t cbDataBuffer;
 
-    // Use global request count
+	// Use global request count
     if (pTimeSpan->GetThreadCount() != 0 &&
         pTimeSpan->GetRequestCount() != 0) {
 
@@ -882,16 +882,17 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
     }
 
     // Create separate read & write buffers so the write content doesn't get overriden by reads
-    cbDataBuffer = (size_t) target.GetBlockSizeInBytes() * requestCount * 2;
+	const auto cbDataBuffer = static_cast<size_t>(target.GetBlockSizeInBytes()) * requestCount * 2;
     if (target.GetUseLargePages())
     {
-        size_t cbMinLargePage = GetLargePageMinimum();
-        size_t cbRoundedSize = (cbDataBuffer + cbMinLargePage - 1) & ~(cbMinLargePage - 1);
-        pDataBuffer = (BYTE *)VirtualAlloc(nullptr, cbRoundedSize, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES, PAGE_EXECUTE_READWRITE);
+	    const size_t cbMinLargePage = GetLargePageMinimum();
+	    const size_t cbRoundedSize = (cbDataBuffer + cbMinLargePage - 1) & ~(cbMinLargePage - 1);
+        pDataBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cbRoundedSize, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES,
+                                                       PAGE_EXECUTE_READWRITE));
     }
     else
     {
-        pDataBuffer = (BYTE *)VirtualAlloc(nullptr, cbDataBuffer, MEM_COMMIT, PAGE_READWRITE);
+        pDataBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cbDataBuffer, MEM_COMMIT, PAGE_READWRITE));
     }
 
     fOk = (pDataBuffer != nullptr);
@@ -907,7 +908,7 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
         {
             for (size_t i = 0; i < cbDataBuffer; i++)
             {
-                pDataBuffer[i] = (BYTE)(i % 256); /* NB: the writable size may be 'cbRoundedSize' bytes, but '2' bytes might be written */
+                pDataBuffer[i] = static_cast<BYTE>(i % 256); /* NB: the writable size may be 'cbRoundedSize' bytes, but '2' bytes might be written */
             }
         }
     }
@@ -931,7 +932,7 @@ BYTE* ThreadParameters::GetWriteBuffer(size_t iTarget, size_t iRequest)
     BYTE *pBuffer = nullptr;
     
     Target& target(vTargets[iTarget]);
-    size_t cb = static_cast<size_t>(target.GetRandomDataWriteBufferSize());
+	const auto cb = static_cast<size_t>(target.GetRandomDataWriteBufferSize());
     if (cb == 0)
     {
         pBuffer = vpDataBuffers[iTarget] + vulReadBufferSize[iTarget] + (iRequest * vTargets[iTarget].GetBlockSizeInBytes());

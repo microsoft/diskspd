@@ -34,29 +34,29 @@ SOFTWARE.
 class XmlProfileParser
 {
 public:
-    bool ParseFile(const char *pszPath, Profile *pProfile);
+	static bool ParseFile(const char *pszPath, Profile *pProfile);
 
 private:
-    HRESULT _ParseEtw(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile);
-    HRESULT _ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile);
-    HRESULT _ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
-    HRESULT _ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
-    HRESULT _ParseRandomDataSource(IXMLDOMNode *pXmlNode, Target *pTarget);
-    HRESULT _ParseWriteBufferContent(IXMLDOMNode *pXmlNode, Target *pTarget);
-    HRESULT _ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget);
-    HRESULT _ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget);
-    HRESULT _ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget *pThreadTarget);
-    HRESULT _ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
-    HRESULT _ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
+	static HRESULT _ParseEtw(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile);
+	static HRESULT _ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile);
+	static HRESULT _ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
+	static HRESULT _ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
+	static HRESULT _ParseRandomDataSource(IXMLDOMNode *pXmlNode, Target *pTarget);
+	static HRESULT _ParseWriteBufferContent(IXMLDOMNode *pXmlNode, Target *pTarget);
+	static HRESULT _ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget);
+	static HRESULT _ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget);
+	static HRESULT _ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget *pThreadTarget);
+	static HRESULT _ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
+	static HRESULT _ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
 
-    HRESULT _GetString(IXMLDOMNode *pXmlNode, const char *pszQuery, string *psValue) const;
-    HRESULT _GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT32 *pulValue) const;
-    HRESULT _GetUINT64(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT64 *pullValue) const;
-    HRESULT _GetDWORD(IXMLDOMNode *pXmlNode, const char *pszQuery, DWORD *pdwValue) const;
-    HRESULT _GetBool(IXMLDOMNode *pXmlNode, const char *pszQuery, bool *pfValue) const;
+	static HRESULT _GetString(IXMLDOMNode *pXmlNode, const char *pszQuery, string *psValue);
+	static HRESULT _GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT32 *pulValue);
+	static HRESULT _GetUINT64(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT64 *pullValue);
+	static HRESULT _GetDWORD(IXMLDOMNode *pXmlNode, const char *pszQuery, DWORD *pdwValue);
+	static HRESULT _GetBool(IXMLDOMNode *pXmlNode, const char *pszQuery, bool *pfValue);
 
-    HRESULT _GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszAttr, UINT32 *pulValue) const;
-    
-    HRESULT _GetVerbose(IXMLDOMDocument2 *pXmlDoc, bool *pfVerbose);
-    HRESULT _GetProgress(IXMLDOMDocument2 *pXmlDoc, DWORD *pdwProgress);
+	static HRESULT _GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszAttr, UINT32 *pulValue);
+
+	static HRESULT _GetVerbose(IXMLDOMDocument2 *pXmlDoc, bool *pfVerbose);
+	static HRESULT _GetProgress(IXMLDOMDocument2 *pXmlDoc, DWORD *pdwProgress);
 };

@@ -78,7 +78,7 @@ class Histogram
 
     void Add(T v)
     { 
-        _data[ v ]++;
+        ++_data[ v ]; /* _data[ v ] just discards result */
         _samples++;
     }
 
@@ -167,11 +167,11 @@ class Histogram
     double GetMean() const 
     { 
         double sum(0);
-        unsigned samples = GetSampleSize();
+	    const unsigned samples = GetSampleSize();
 
         for (auto i : _data)
         {
-            double bucket_val =
+	        const double bucket_val =
                 static_cast<double>(i.first) * i.second / samples;
 
             if (sum + bucket_val < 0)
@@ -186,13 +186,13 @@ class Histogram
     }
 
     double GetStandardDeviation() const
-    { 
-        double mean(GetMean());
+    {
+	    const double mean(GetMean());
         double ssd(0);
 
         for (auto i : _data)
         {
-            double dev = static_cast<double>(i.first) - mean;
+	        const double dev = static_cast<double>(i.first) - mean;
             double sqdev = dev*dev;
             ssd += i.second * sqdev;
         }

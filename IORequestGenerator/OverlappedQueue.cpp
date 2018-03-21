@@ -28,9 +28,9 @@ SOFTWARE.
 */
 
 #include "OverlappedQueue.h"
-#include <assert.h>
+#include <cassert>
 
-OverlappedQueue::OverlappedQueue(void) :
+OverlappedQueue::OverlappedQueue() :
     _pHead(nullptr),
     _pTail(nullptr),
     _cItems(0)
@@ -48,23 +48,23 @@ void OverlappedQueue::Add(OVERLAPPED *pOverlapped)
     else
     {
         assert(_pTail != nullptr);
-        _pTail->Internal = (ULONG_PTR)pOverlapped;
+        _pTail->Internal = reinterpret_cast<ULONG_PTR>(pOverlapped);
     }
     _pTail = pOverlapped;
     _cItems++;
 }
 
-bool OverlappedQueue::IsEmpty(void) const
+bool OverlappedQueue::IsEmpty() const
 {
     return (_pHead == nullptr);
 }
 
-OVERLAPPED *OverlappedQueue::Remove(void)
+OVERLAPPED *OverlappedQueue::Remove()
 {
     assert(!IsEmpty());
 
     OVERLAPPED *pOverlapped = _pHead;
-    _pHead = (OVERLAPPED *)pOverlapped->Internal;
+    _pHead = reinterpret_cast<OVERLAPPED *>(pOverlapped->Internal);
     if (_pHead == nullptr)
     {
         _pTail = nullptr;

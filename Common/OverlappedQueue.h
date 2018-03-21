@@ -36,11 +36,11 @@ SOFTWARE.
 class OverlappedQueue
 {
 public:
-    OverlappedQueue(void);
+    OverlappedQueue();
 
     void Add(OVERLAPPED *pOverlapped);
-    bool IsEmpty(void) const;
-    OVERLAPPED * Remove(void);
+    bool IsEmpty() const;
+    OVERLAPPED * Remove();
     size_t GetCount() const;
 
 private:
