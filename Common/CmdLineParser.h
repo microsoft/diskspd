@@ -49,7 +49,7 @@ private:
 
     void _DisplayUsageInfo(const char *pszFilename) const;
     bool _GetSizeInBytes(const char *pszSize, UINT64& ullSize) const;
-    bool _GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath);
+    bool _GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath) const;
 
     // variables that used to be global
     DWORD _dwBlockSize;         // block size; other parameters may be stated in blocks

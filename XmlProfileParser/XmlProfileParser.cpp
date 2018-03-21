@@ -67,7 +67,7 @@ HRESULT ReportXmlError(
 	}
 
 	fprintf(stderr,
-		"ERROR: failed to load %s, line %lu, line position %lu, errorCode %08x\nERROR: reason: %S\n",
+		"ERROR: failed to load %s, line %li, line position %li, errorCode %08lx\nERROR: reason: %S\n",
 		pszName, line, linePos, errorCode, (PWCHAR)bReason);
 
 	return errorCode;

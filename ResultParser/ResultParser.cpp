@@ -235,6 +235,8 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
         case TargetCacheMode::DisableOSCache:
             _Print("\t\tsoftware cache disabled\n");
             break;
+		case TargetCacheMode::Undefined:
+			_Print("\t\tcache mode underfined!\n");
     }
 
     if (target.GetWriteThroughMode() == WriteThroughMode::On)
@@ -250,6 +252,8 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
         case TargetCacheMode::DisableOSCache:
             _Print("\t\thardware write cache disabled, writethrough on\n");
             break;
+		case TargetCacheMode::Undefined:
+			_Print("\t\thardware write cache mode undefined!\n");
         }
     }
     else

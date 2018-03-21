@@ -107,7 +107,7 @@ bool CmdLineParser::_GetSizeInBytes(const char *pszSize, UINT64& ullSize) const
     return fOk;
 }
 
-bool CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath)
+bool CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath) const
 {
     bool fOk = true;
     size_t iComma = sArg.find(',');
@@ -396,8 +396,8 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
             {
                 if (nNum > MAXWORD)
                 {
-                    fprintf(stderr, "ERROR: group %u is out of range\n", nNum);
-                    fOk = false;
+                  fprintf(stderr, "ERROR: group %lu is out of range\n", nNum);
+                  fOk = false;
                 }
                 else
                 {
@@ -416,7 +416,7 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
             {
                 if (nNum > MAXBYTE)
                 {
-                    fprintf(stderr, "ERROR: core %u is out of range\n", nNum);
+                    fprintf(stderr, "ERROR: core %lu is out of range\n", nNum);
                     fOk = false;
                 }
                 else
@@ -450,7 +450,7 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
 
     if (fOk && nNum > MAXBYTE)
     {
-        fprintf(stderr, "ERROR: core %u is out of range\n", nNum);
+        fprintf(stderr, "ERROR: core %lu is out of range\n", nNum);
         fOk = false;
     }
 
@@ -488,12 +488,12 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
     // create targets
     vector<Target> vTargets;
-    int iFirstFile = -1;
+    //int iFirstFile = -1;
     for (int i = 1; i < argc; i++)
     {
         if (argv[i][0] != '-' && argv[i][0] != '/')
         {
-            iFirstFile = i;
+            //iFirstFile = i;
             Target target;
             target.SetPath(argv[i]);
             vTargets.push_back(target);

@@ -451,7 +451,7 @@ bool IORequestGenerator::_GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMA
     WORD wActiveGroupCtr;
     BYTE bActiveProc;
     HANDLE hThread = GetCurrentThread();
-    GROUP_AFFINITY GroupAffinity;
+	GROUP_AFFINITY GroupAffinity{};
     PROCESSOR_NUMBER procNumber;
     bool fOk = true;
 
@@ -849,7 +849,7 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
     if (0 != dwErrorCode)
     {
         PrintError("Thread %u failed executing an I/O operation (error code: %u)\n", p->ulThreadNo, dwErrorCode);
-        goto cleanup;
+        return;
     }
 
     IORequest *pIORequest = IORequest::OverlappedToIORequest(pOverlapped);
@@ -867,11 +867,11 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
         if (!rslt)
         {
             PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, iTarget, (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
-            goto cleanup;
+            return;
         }
     }
 
-cleanup:
+//cleanup:
     return;
 }
 
@@ -899,7 +899,7 @@ static bool doWorkUsingCompletionRoutines(ThreadParameters *p)
         {
             PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, iTarget, (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
             fOk = false;
-            goto cleanup;
+            return fOk;
         }
     }
 
@@ -915,10 +915,10 @@ static bool doWorkUsingCompletionRoutines(ThreadParameters *p)
         {
             PrintError("Error in thread %u during WaitForSingleObjectEx (in completion routines)\n", p->ulThreadNo);
             fOk = false;
-            goto cleanup;
+            return fOk;
         }
     }
-cleanup:
+//cleanup:
     return fOk;
 }
 
@@ -975,6 +975,11 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     ThreadParameters *p = reinterpret_cast<ThreadParameters *>(cookie);
     HANDLE hCompletionPort = nullptr;
 
+	UINT32 cIORequests = 0;
+	bool fUseThrougputMeter = false;
+	size_t cTargets = 0;
+	size_t iTarget = 0;
+
     //
     // A single file can be specified in multiple targets, so only open one
     // handle for each unique file.
@@ -1024,10 +1029,9 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         }
     }
 
-    UINT32 cIORequests = p->GetTotalRequestCount();
+    cIORequests = p->GetTotalRequestCount();
 
     // TODO: open files
-    size_t iTarget = 0;
     for (auto pTarget = p->vTargets.begin(); pTarget != p->vTargets.end(); pTarget++)
     {
         bool fPhysical = false;
@@ -1321,8 +1325,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     //
     // fill the throughput meter structures
     //
-    size_t cTargets = p->vTargets.size();
-    bool fUseThrougputMeter = false;
+    cTargets = p->vTargets.size();
     for (size_t i = 0; i < cTargets; i++)
     {
         ThroughputMeter throughputMeter;
@@ -1934,6 +1937,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         if (NULL == hEndEvent)
         {
             PrintError("Error creating the end event\n");
+			_AbortWorkerThreads(hStartEvent, vhThreads);
             return false;
         }
     }
@@ -2183,7 +2187,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
                 return false;
             }
 
-            if (NULL == CreateThread(NULL, 64 * 1024, etwThreadFunc, NULL, 0, NULL))
+            if (NULL == CreateThread(NULL, 64 * 1024, etwThreadFunc, NULL, 0, NULL)) /* result of CreateThread not stored*/
             {
                 PrintError("Warning: unable to create thread for ETW session\n");
                 _TerminateWorkerThreads(vhThreads);

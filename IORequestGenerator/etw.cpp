@@ -122,15 +122,15 @@ DEFINE_GUID ( /* 3d6fa8d1-fe05-11d0-9dda-00c04fd7ba7c */
 BOOL TraceEvents()
 {
     TRACEHANDLE handles[1];
-    EVENT_TRACE_LOGFILE logfile;
+	EVENT_TRACE_LOGFILE logfile{const_cast<LPSTR>(KERNEL_LOGGER_NAME), NULL, EVENT_TRACE_REAL_TIME_MODE, true};
 
-    memset(&logfile, 0, sizeof(EVENT_TRACE_LOGFILE));
+    //memset(&logfile, 0, sizeof(EVENT_TRACE_LOGFILE));
 
-    logfile.LoggerName = KERNEL_LOGGER_NAME;
-    logfile.LogFileName = NULL;
-    logfile.LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
+    //logfile.LoggerName = KERNEL_LOGGER_NAME;
+    //logfile.LogFileName = NULL;
+    //logfile.LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
 
-    logfile.IsKernelTrace = true;
+    //logfile.IsKernelTrace = true;
 
     handles[0] = OpenTrace(&logfile);
     if( (TRACEHANDLE)INVALID_HANDLE_VALUE == handles[0] )

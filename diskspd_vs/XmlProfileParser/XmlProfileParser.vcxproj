@@ -119,12 +119,14 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <StringPooling>true</StringPooling>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -134,12 +136,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Common\XmlProfileParser.h" />
-    <ClInclude Include="diskspd.h">
-      <DependentUpon>..\..\XmlProfileParser\diskspd.xsd</DependentUpon>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Xsd Include="..\..\XmlProfileParser\diskspd.xsd" />
+    <None Include="..\..\XmlProfileParser\diskspd.xsd" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\XmlProfileParser\XmlProfileParser.cpp" />

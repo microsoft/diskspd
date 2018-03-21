@@ -258,7 +258,7 @@ string Target::GetXml() const
     string sXml("<Target>\n");
     sXml += "<Path>" + _sPath + "</Path>\n";
 
-    sprintf_s(buffer, _countof(buffer), "<BlockSize>%u</BlockSize>\n", _dwBlockSize);
+    sprintf_s(buffer, _countof(buffer), "<BlockSize>%lu</BlockSize>\n", _dwBlockSize);
     sXml += buffer;
 
     sprintf_s(buffer, _countof(buffer), "<BaseFileOffset>%I64u</BaseFileOffset>\n", _ullBaseFileOffset);
@@ -278,6 +278,11 @@ string Target::GetXml() const
     case TargetCacheMode::DisableOSCache:
         sXml += "<DisableOSCache>true</DisableOSCache>\n";
         break;
+	case TargetCacheMode::Cached:
+		break;
+	case TargetCacheMode::Undefined:
+		/* ? */
+		break;
     }
 
     // WriteThroughMode::Off is implied default
@@ -286,6 +291,11 @@ string Target::GetXml() const
     case WriteThroughMode::On:
         sXml += "<WriteThrough>true</WriteThrough>\n";
         break;
+	case WriteThroughMode::Off:
+		break;
+	case WriteThroughMode::Undefined:
+		/* ? */
+		break;
     }
     
     sXml += "<WriteBufferContent>\n";
@@ -315,13 +325,13 @@ string Target::GetXml() const
 
     if (_fUseBurstSize)
     {
-        sprintf_s(buffer, _countof(buffer), "<BurstSize>%u</BurstSize>\n", _dwBurstSize);
+        sprintf_s(buffer, _countof(buffer), "<BurstSize>%lu</BurstSize>\n", _dwBurstSize);
         sXml += buffer;
     }
 
     if (_fThinkTime)
     {
-        sprintf_s(buffer, _countof(buffer), "<ThinkTime>%u</ThinkTime>\n", _dwThinkTime);
+        sprintf_s(buffer, _countof(buffer), "<ThinkTime>%lu</ThinkTime>\n", _dwThinkTime);
         sXml += buffer;
     }
 
@@ -353,16 +363,16 @@ string Target::GetXml() const
     sprintf_s(buffer, _countof(buffer), "<MaxFileSize>%I64u</MaxFileSize>\n", _ullMaxFileSize);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<RequestCount>%u</RequestCount>\n", _dwRequestCount);
+    sprintf_s(buffer, _countof(buffer), "<RequestCount>%lu</RequestCount>\n", _dwRequestCount);
     sXml += buffer;
 
     sprintf_s(buffer, _countof(buffer), "<WriteRatio>%u</WriteRatio>\n", _ulWriteRatio);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<Throughput>%u</Throughput>\n", _dwThroughputBytesPerMillisecond);
+    sprintf_s(buffer, _countof(buffer), "<Throughput>%lu</Throughput>\n", _dwThroughputBytesPerMillisecond);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<ThreadsPerFile>%u</ThreadsPerFile>\n", _dwThreadsPerFile);
+    sprintf_s(buffer, _countof(buffer), "<ThreadsPerFile>%lu</ThreadsPerFile>\n", _dwThreadsPerFile);
     sXml += buffer;
 
     if (_ioPriorityHint == IoPriorityHintVeryLow)
@@ -520,10 +530,10 @@ string TimeSpan::GetXml() const
     sprintf_s(buffer, _countof(buffer), "<Cooldown>%u</Cooldown>\n", _ulCoolDown);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<ThreadCount>%u</ThreadCount>\n", _dwThreadCount);
+    sprintf_s(buffer, _countof(buffer), "<ThreadCount>%lu</ThreadCount>\n", _dwThreadCount);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<RequestCount>%u</RequestCount>\n", _dwRequestCount);
+    sprintf_s(buffer, _countof(buffer), "<RequestCount>%lu</RequestCount>\n", _dwRequestCount);
     sXml += buffer;
 
     sprintf_s(buffer, _countof(buffer), "<IoBucketDuration>%u</IoBucketDuration>\n", _ulIoBucketDurationInMilliseconds);
@@ -553,7 +563,7 @@ string TimeSpan::GetXml() const
     return sXml;
 }
 
-void TimeSpan::MarkFilesAsPrecreated(const vector<string> vFiles)
+void TimeSpan::MarkFilesAsPrecreated(const vector<string>& vFiles)
 {
     for (auto sFile : vFiles)
     {
@@ -572,7 +582,7 @@ string Profile::GetXml() const
     string sXml("<Profile>\n");
     char buffer[4096];
 
-    sprintf_s(buffer, _countof(buffer), "<Progress>%u</Progress>\n", _dwProgress);
+    sprintf_s(buffer, _countof(buffer), "<Progress>%lu</Progress>\n", _dwProgress);
     sXml += buffer;
 
     if (_resultsFormat == ResultsFormat::Text)
@@ -628,7 +638,7 @@ string Profile::GetXml() const
     return sXml;
 }
 
-void Profile::MarkFilesAsPrecreated(const vector<string> vFiles)
+void Profile::MarkFilesAsPrecreated(const vector<string>& vFiles)
 {
     for (auto pTimeSpan = _vTimeSpans.begin(); pTimeSpan != _vTimeSpans.end(); pTimeSpan++)
     {
@@ -657,7 +667,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     {
                         fprintf(stderr, "ERROR: affinity assignment to group %u; system only has %u groups\n",
                             Affinity.wGroup,
-                            (int) pSystem->processorTopology._vProcessorGroupInformation.size());
+                            (unsigned int) pSystem->processorTopology._vProcessorGroupInformation.size());
 
                         fOk = false;
 
@@ -835,7 +845,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                 {
                     if (target.GetRandomDataWriteBufferSize() < target.GetBlockSizeInBytes())
                     {
-                        fprintf(stderr, "ERROR: custom write buffer (-Z) is smaller than the block size. Write buffer size: %I64u block size: %u\n",
+                        fprintf(stderr, "ERROR: custom write buffer (-Z) is smaller than the block size. Write buffer size: %I64u block size: %lu\n",
                             target.GetRandomDataWriteBufferSize(),
                             target.GetBlockSizeInBytes());
                         fOk = false;
@@ -897,7 +907,7 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
         {
             for (size_t i = 0; i < cbDataBuffer; i++)
             {
-                pDataBuffer[i] = (BYTE)(i % 256);
+                pDataBuffer[i] = (BYTE)(i % 256); /* NB: the writable size may be 'cbRoundedSize' bytes, but '2' bytes might be written */
             }
         }
     }

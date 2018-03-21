@@ -74,7 +74,7 @@ BOOL WINAPI ctrlCRoutine(DWORD dwCtrlType)
         printf("\n*** Interrupted by Ctrl-C. Stopping I/O Request Generator. ***\n");
         if( !SetEvent(g_hAbortEvent) )
         {
-            fprintf(stderr, "Warning: Setting abort event failed (error code: %u)\n", GetLastError());
+            fprintf(stderr, "Warning: Setting abort event failed (error code: %lu)\n", GetLastError());
         }
         SetConsoleCtrlHandler(ctrlCRoutine, FALSE);
 
@@ -92,7 +92,7 @@ void TestStarted()
 {
     if( (NULL != g_hEventStarted) && !SetEvent(g_hEventStarted) )
     {
-        fprintf(stderr, "Warning: Setting test start notification event failed (error code: %u)\n", GetLastError());
+        fprintf(stderr, "Warning: Setting test start notification event failed (error code: %lu)\n", GetLastError());
     }
 }
 
@@ -101,7 +101,7 @@ void TestFinished()
 {
     if( (NULL != g_hEventFinished) && !SetEvent(g_hEventFinished) )
     {
-        fprintf(stderr, "Warning: Setting test finish notification event failed (error code: %u)\n", GetLastError());
+        fprintf(stderr, "Warning: Setting test finish notification event failed (error code: %lu)\n", GetLastError());
     }
 }
 

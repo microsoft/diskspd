@@ -166,7 +166,7 @@ private:
 class Random
 {
 public:
-    Random(UINT64 ulSeed = 0);
+    explicit Random(UINT64 ulSeed = 0);
 
     inline UINT64 Rand64()
     {
@@ -343,9 +343,9 @@ public:
         BYTE ActiveProcessorCount,
         WORD Group,
         KAFFINITY ActiveProcessorMask) :
-        _maximumProcessorCount(MaximumProcessorCount),
+		_groupNumber(Group),
+		_maximumProcessorCount(MaximumProcessorCount),
         _activeProcessorCount(ActiveProcessorCount),
-        _groupNumber(Group),
         _activeProcessorMask(ActiveProcessorMask)
     {
     }
@@ -422,7 +422,7 @@ public:
         delete [] pInformation;
     }
 
-    bool IsGroupValid(WORD Group)
+    bool IsGroupValid(WORD Group) const
     {
         if (Group < _vProcessorGroupInformation.size())
         {
@@ -492,12 +492,12 @@ public:
     }
 
     // for unit test, squelch variable timestamp
-    void SystemInformation::ResetTime()
+    void ResetTime()
     {
         StartTime = { 0 };
     }
 
-    string SystemInformation::GetXml() const
+    string GetXml() const
     {
         char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
         int nWritten;
@@ -646,15 +646,15 @@ public:
         _fTemporaryFileHint(false),
         _fUseLargePages(false),
         _ioPriorityHint(IoPriorityHintNormal),
-        _ulWeight(1),
         _dwThroughputBytesPerMillisecond(0),
+		_ulWeight(1),
         _cbRandomDataWriteBuffer(0),
         _sRandomDataWriteBufferSourcePath(),
         _pRandomDataWriteBuffer(nullptr)
     {
     }
 
-    void SetPath(string sPath) { _sPath = sPath; }
+    void SetPath(const string& sPath) { _sPath = sPath; }
     string GetPath() const { return _sPath; }
 
     void SetBlockSizeInBytes(DWORD dwBlockSize) { _dwBlockSize = dwBlockSize; }
@@ -676,7 +676,7 @@ public:
 
     void SetBaseFileOffsetInBytes(UINT64 ullBaseFileOffset) { _ullBaseFileOffset = ullBaseFileOffset; }
     UINT64 GetBaseFileOffsetInBytes() const { return _ullBaseFileOffset; }
-    UINT64 GetThreadBaseFileOffsetInBytes(UINT32 ulThreadNo) { return _ullBaseFileOffset + ulThreadNo * _ullThreadStride; }
+    UINT64 GetThreadBaseFileOffsetInBytes(UINT32 ulThreadNo) const { return _ullBaseFileOffset + ulThreadNo * _ullThreadStride; }
 
     void SetSequentialScanHint(bool fBool) { _fSequentialScanHint = fBool; }
     bool GetSequentialScanHint() const { return _fSequentialScanHint; }
@@ -705,7 +705,7 @@ public:
     void SetRandomDataWriteBufferSize(UINT64 cbWriteBuffer) { _cbRandomDataWriteBuffer = cbWriteBuffer; }
     UINT64 GetRandomDataWriteBufferSize(void) const { return _cbRandomDataWriteBuffer; }
 
-    void SetRandomDataWriteBufferSourcePath(string sPath) { _sRandomDataWriteBufferSourcePath = sPath; }
+    void SetRandomDataWriteBufferSourcePath(const string& sPath) { _sRandomDataWriteBufferSourcePath = sPath; }
     string GetRandomDataWriteBufferSourcePath() const { return _sRandomDataWriteBufferSourcePath; }
 
     void SetUseBurstSize(bool fBool) { _fUseBurstSize = fBool; }
@@ -772,7 +772,7 @@ public:
     void FreeRandomDataWriteBuffer();
     BYTE* GetRandomDataWriteBuffer(Random *pRand);
 
-    DWORD GetCreateFlags(bool fAsync)
+    DWORD GetCreateFlags(bool fAsync) const
     {
         DWORD dwFlags = FILE_ATTRIBUTE_NORMAL;
 
@@ -948,7 +948,7 @@ public:
     UINT32 GetIoBucketDurationInMilliseconds() const { return _ulIoBucketDurationInMilliseconds; }
     
     string GetXml() const;
-    void MarkFilesAsPrecreated(const vector<string> vFiles);
+    void MarkFilesAsPrecreated(const vector<string>& vFiles);
 
 private:
     vector<Target> _vTargets;
@@ -1025,7 +1025,7 @@ public:
     void SetProgress(DWORD dwProgress) { _dwProgress = dwProgress; }
     DWORD GetProgress() const { return _dwProgress; }
 
-    void SetCmdLine(string sCmdLine) { _sCmdLine = sCmdLine; }
+    void SetCmdLine(const string& sCmdLine) { _sCmdLine = sCmdLine; }
     string GetCmdLine() const { return _sCmdLine; };
 
     void SetResultsFormat(ResultsFormat format) { _resultsFormat = format; }
@@ -1065,7 +1065,7 @@ public:
 
     string GetXml() const;
     bool Validate(bool fSingleSpec, SystemInformation *pSystem = nullptr) const;
-    void MarkFilesAsPrecreated(const vector<string> vFiles);
+    void MarkFilesAsPrecreated(const vector<string>& vFiles);
 
 private:
     Profile(const Profile& T);
@@ -1098,14 +1098,14 @@ private:
 class IORequest
 {
 public:
-    IORequest(Random *pRand) :
-        _ioType(IOOperation::ReadIO),
-        _pRand(pRand),
-        _pCurrentTarget(nullptr),
-        _ullStartTime(0),
-        _ulRequestIndex(0xFFFFFFFF),
-        _ullTotalWeight(0),
-        _fEqualWeights(true)
+    explicit IORequest(Random *pRand) :
+		_ullTotalWeight(0),
+        _fEqualWeights(true),
+		_pRand(pRand),
+		_pCurrentTarget(nullptr),
+		_ioType(IOOperation::ReadIO),
+		_ullStartTime(0),
+		_ulRequestIndex(0xFFFFFFFF)
     {
         memset(&_overlapped, 0, sizeof(OVERLAPPED));
         _overlapped.Offset = 0xFFFFFFFF;
