@@ -30,9 +30,9 @@ SOFTWARE.
 #include "CmdLineParser.h"
 #include "Common.h"
 #include "XmlProfileParser.h"
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cassert>
+#include <cstdio>
+#include <cstdlib>
 
 CmdLineParser::CmdLineParser() :
     _dwBlockSize(64 * 1024),
@@ -42,9 +42,7 @@ CmdLineParser::CmdLineParser() :
 {
 }
 
-CmdLineParser::~CmdLineParser()
-{
-}
+CmdLineParser::~CmdLineParser() = default;
 
 // Get size in bytes from a string (it can end with K, M, G for KB, MB, GB and b for block)
 bool CmdLineParser::_GetSizeInBytes(const char *pszSize, UINT64& ullSize) const
@@ -107,11 +105,11 @@ bool CmdLineParser::_GetSizeInBytes(const char *pszSize, UINT64& ullSize) const
     return fOk;
 }
 
-bool CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath)
+bool CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath) const
 {
-    bool fOk = true;
-    size_t iComma = sArg.find(',');
-    if (iComma == sArg.npos)
+    bool fOk;
+	const size_t iComma = sArg.find(',');
+    if (iComma == std::string::npos)
     {
         fOk = _GetSizeInBytes(sArg.c_str(), cb);
         sPath = "";
@@ -124,7 +122,7 @@ bool CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb
     return fOk;
 }
 
-void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
+void CmdLineParser::_DisplayUsageInfo(const char *pszFilename)
 {
     // ISSUE-REVIEW: this formats badly in the default 80 column command prompt
     printf("\n");
@@ -179,6 +177,8 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("  -o<count>             number of outstanding I/O requests per target per thread\n");
     printf("                          (1=synchronous I/O, unless more than 1 thread is specified with -F)\n");
     printf("                          [default=2]\n");
+    printf("  -O<count>             number of outstanding I/O requests per thread - for use with -F\n");
+    printf("                          (1=synchronous I/O)\n");
     printf("  -p                    start parallel sequential I/O operations with the same offset\n");
     printf("                          (ignored if -r is specified, makes sense only with -o2 or greater)\n");
     printf("  -P<count>             enable printing a progress dot after each <count> [default=65536]\n");
@@ -215,6 +215,9 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("\n");
     printf("Write buffers:\n");
     printf("  -Z                        zero buffers used for write tests\n");
+    printf("  -Zr                       per IO random buffers used for write tests - this incurrs additional run-time\n");
+    printf("                              overhead to create random content and shouln't be compared to results run\n");
+    printf("                              without -Zr\n");
     printf("  -Z<size>[K|M|G|b]         use a <size> buffer filled with random data as a source for write operations.\n");
     printf("  -Z<size>[K|M|G|b],<file>  use a <size> buffer filled with data from <file> as a source for write operations.\n");
     printf("\n");
@@ -391,8 +394,8 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
             {
                 if (nNum > MAXWORD)
                 {
-                    fprintf(stderr, "ERROR: group %u is out of range\n", nNum);
-                    fOk = false;
+                  fprintf(stderr, "ERROR: group %lu is out of range\n", nNum);
+                  fOk = false;
                 }
                 else
                 {
@@ -411,12 +414,12 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
             {
                 if (nNum > MAXBYTE)
                 {
-                    fprintf(stderr, "ERROR: core %u is out of range\n", nNum);
+                    fprintf(stderr, "ERROR: core %lu is out of range\n", nNum);
                     fOk = false;
                 }
                 else
                 {
-                    pTimeSpan->AddAffinityAssignment((WORD)nGroup, (BYTE)nNum);
+                    pTimeSpan->AddAffinityAssignment(static_cast<WORD>(nGroup), static_cast<BYTE>(nNum));
                     nNum = 0;
                     fNum = false;
                 }
@@ -445,7 +448,7 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
 
     if (fOk && nNum > MAXBYTE)
     {
-        fprintf(stderr, "ERROR: core %u is out of range\n", nNum);
+        fprintf(stderr, "ERROR: core %lu is out of range\n", nNum);
         fOk = false;
     }
 
@@ -469,7 +472,7 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
     if (fOk)
     {
         // fprintf(stderr, "FINAL parsed group %d core %d\n", nGroup, nNum);
-        pTimeSpan->AddAffinityAssignment((WORD)nGroup, (BYTE)nNum);
+        pTimeSpan->AddAffinityAssignment(static_cast<WORD>(nGroup), static_cast<BYTE>(nNum));
     }
 
     return fOk;
@@ -483,12 +486,12 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
     // create targets
     vector<Target> vTargets;
-    int iFirstFile = -1;
+    //int iFirstFile = -1;
     for (int i = 1; i < argc; i++)
     {
         if (argv[i][0] != '-' && argv[i][0] != '/')
         {
-            iFirstFile = i;
+            //iFirstFile = i;
             Target target;
             target.SetPath(argv[i]);
             vTargets.push_back(target);
@@ -504,10 +507,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             UINT64 ullBlockSize;
             if (_GetSizeInBytes(&argv[x][2], ullBlockSize))
             {
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                for (auto& vTarget : vTargets)
                 {
                     // TODO: UINT64->DWORD
-                    i->SetBlockSizeInBytes((DWORD)ullBlockSize);
+	                vTarget.SetBlockSizeInBytes(static_cast<DWORD>(ullBlockSize));
                 }
             }
             else
@@ -515,7 +518,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 fprintf(stderr, "Invalid block size passed to -b\n");
                 return false;
             }
-            _dwBlockSize = (DWORD)ullBlockSize;
+            _dwBlockSize = static_cast<DWORD>(ullBlockSize);
             break;
         }
     }
@@ -566,15 +569,15 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             // nop - block size has been taken care of before the loop
             break;
 
-        case 'B':    //base file offset (offset from the beginning of the file), cannot be used with 'random'
+        case 'B':    //base file offset (offset from the beginning of the file)
             if (*(arg + 1) != '\0')
             {
                 UINT64 cb;
                 if (_GetSizeInBytes(arg + 1, cb))
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetBaseFileOffsetInBytes(cb);
+	                    vTarget.SetBaseFileOffsetInBytes(cb);
                     }
                 }
                 else
@@ -595,10 +598,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 UINT64 cb;
                 if (_GetSizeInBytes(arg + 1, cb))
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetFileSize(cb);
-                        i->SetCreateFile(true);
+	                    vTarget.SetFileSize(cb);
+	                    vTarget.SetCreateFile(true);
                     }
                 }
                 else
@@ -615,7 +618,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'C':    //cool down time
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c >= 0)
                 {
                     timeSpan.SetCooldown(c);
@@ -629,7 +632,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'd':    //duration
             {
-                int x = atoi(arg + 1);
+	            const int x = atoi(arg + 1);
                 if (x > 0)
                 {
                     timeSpan.SetDuration(x);
@@ -645,7 +648,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             {
                 timeSpan.SetCalculateIopsStdDev(true);
 
-                int x = atoi(arg + 1);
+	            const int x = atoi(arg + 1);
                 if (x > 0)
                 {
                     timeSpan.SetIoBucketDurationInMilliseconds(x);
@@ -666,9 +669,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 UINT64 cb;
                 if (_GetSizeInBytes(arg + 1, cb))
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetMaxFileSize(cb);
+	                    vTarget.SetMaxFileSize(cb);
                     }
                 }
                 else
@@ -692,21 +695,21 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                         switch (*arg)
                         {
                         case 'r':
-                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                            for (auto& vTarget : vTargets)
                             {
-                                i->SetRandomAccessHint(true);
+	                            vTarget.SetRandomAccessHint(true);
                             }
                             break;
                         case 's':
-                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                            for (auto& vTarget : vTargets)
                             {
-                                i->SetSequentialScanHint(true);
+	                            vTarget.SetSequentialScanHint(true);
                             }
                             break;
                         case 't':
-                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                            for (auto& vTarget : vTargets)
                             {
-                                i->SetTemporaryFileHint(true);
+	                            vTarget.SetTemporaryFileHint(true);
                             }
                             break;
                         default:
@@ -720,7 +723,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'F':    //total number of threads
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c > 0)
                 {
                     timeSpan.SetThreadCount(c);
@@ -734,12 +737,12 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'g':    //throughput in bytes per millisecond
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetThroughput(c);
+	                    vTarget.SetThroughput(c);
                     }
                 }
                 else
@@ -765,13 +768,13 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'i':    //number of IOs to issue before think time
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetBurstSize(c);
-                        i->SetUseBurstSize(true);
+	                    vTarget.SetBurstSize(c);
+	                    vTarget.SetUseBurstSize(true);
                     }
                 }
                 else
@@ -783,13 +786,13 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'j':    //time to wait between bursts of IOs
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetThinkTime(c);
-                        i->SetEnableThinkTime(true);
+	                    vTarget.SetThinkTime(c);
+	                    vTarget.SetEnableThinkTime(true);
                     }
                 }
                 else
@@ -801,13 +804,13 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'I':   //io priority
             {
-                int x = atoi(arg + 1);
+	            const int x = atoi(arg + 1);
                 if (x > 0 && x < 4)
                 {
                     PRIORITY_HINT hint[] = { IoPriorityHintVeryLow, IoPriorityHintLow, IoPriorityHintNormal };
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetIOPriorityHint(hint[x - 1]);
+	                    vTarget.SetIOPriorityHint(hint[x - 1]);
                     }
                 }
                 else
@@ -818,9 +821,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             break;
 
         case 'l':    //large pages
-            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+            for (auto& vTarget : vTargets)
             {
-                i->SetUseLargePages(true);
+	            vTarget.SetUseLargePages(true);
             }
             break;
         
@@ -834,13 +837,27 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'o':    //request count (1==synchronous)
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetRequestCount(c);
+	                    vTarget.SetRequestCount(c);
                     }
+                }
+                else
+                {
+                    fError = true;
+                }
+            }
+            break;
+
+        case 'O':   //total number of IOs/thread - for use with -F
+            {
+	            const int c = atoi(arg + 1);
+                if (c > 0)
+                {
+                    timeSpan.SetRequestCount(c);
                 }
                 else
                 {
@@ -851,9 +868,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'p':    //start async IO operations with the same offset
             //makes sense only for -o2 and greater
-            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+            for (auto& vTarget : vTargets)
             {
-                i->SetUseParallelAsyncIO(true);
+	            vTarget.SetUseParallelAsyncIO(true);
             }
             break;
 
@@ -881,10 +898,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 }
                 if (!fError)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetUseRandomAccessPattern(true);
-                        i->SetBlockAlignmentInBytes(cb);
+	                    vTarget.SetUseRandomAccessPattern(true);
+	                    vTarget.SetBlockAlignmentInBytes(cb);
                     }
                 }
             }
@@ -920,9 +937,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     // ISSUE-REVIEW: this does nothing if -r is specified
                     // ISSUE-REVIEW: this does nothing if -p is specified
                     // ISSUE-REVIEW: this does nothing if we are single-threaded 
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetUseInterlockedSequential(true);
+	                    vTarget.SetUseInterlockedSequential(true);
                     }
 
                     idx++;
@@ -933,9 +950,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     UINT64 cb;
                     if (_GetSizeInBytes(arg + idx, cb))
                     {
-                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        for (auto& vTarget : vTargets)
                         {
-                            i->SetBlockAlignmentInBytes(cb);
+	                        vTarget.SetBlockAlignmentInBytes(cb);
                         }
                     }
                     else
@@ -1039,12 +1056,12 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 't':    //number of threads per file
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetThreadsPerFile(c);
+	                    vTarget.SetThreadsPerFile(c);
                     }
                 }
                 else
@@ -1059,9 +1076,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 UINT64 cb;
                 if (_GetSizeInBytes(arg + 1, cb) && (cb > 0))
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetThreadStrideInBytes(cb);
+	                    vTarget.SetThreadStrideInBytes(cb);
                     }
                 }
                 else
@@ -1078,7 +1095,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'w':    //write test [default=read]
             {
-                int c = -1;
+                int c;
                 if (*(arg + 1) == '\0')
                 {
                     c = _ulWriteRatio;
@@ -1094,9 +1111,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 }
                 if (c != -1)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetWriteRatio(c);
+	                    vTarget.SetWriteRatio(c);
                     }
                 }
             }
@@ -1104,7 +1121,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'W':    //warm up time
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c >= 0)
                 {
                     timeSpan.SetWarmup(c);
@@ -1125,8 +1142,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             {
 
             case 's':
-                _hEventStarted = CreateEvent(NULL, TRUE, FALSE, arg + 2);
-                if (NULL == _hEventStarted)
+                _hEventStarted = CreateEvent(nullptr, TRUE, FALSE, arg + 2);
+                if (nullptr == _hEventStarted)
                 {
                     fprintf(stderr, "Error creating/opening start notification event: '%s'\n", arg + 2);
                     exit(1);    // TODO: this class shouldn't terminate the process
@@ -1134,8 +1151,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 break;
 
             case 'f':
-                _hEventFinished = CreateEvent(NULL, TRUE, FALSE, arg + 2);
-                if (NULL == _hEventFinished)
+                _hEventFinished = CreateEvent(nullptr, TRUE, FALSE, arg + 2);
+                if (nullptr == _hEventFinished)
                 {
                     fprintf(stderr, "Error creating/opening finish notification event: '%s'\n", arg + 2);
                     exit(1);    // TODO: this class shouldn't terminate the process
@@ -1143,8 +1160,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 break;
 
             case 'r':
-                synch->hStartEvent = CreateEvent(NULL, TRUE, FALSE, arg + 2);
-                if (NULL == synch->hStartEvent)
+                synch->hStartEvent = CreateEvent(nullptr, TRUE, FALSE, arg + 2);
+                if (nullptr == synch->hStartEvent)
                 {
                     fprintf(stderr, "Error creating/opening wait-for-start event: '%s'\n", arg + 2);
                     exit(1);    // TODO: this class shouldn't terminate the process
@@ -1152,8 +1169,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 break;
 
             case 'p':
-                synch->hStopEvent = CreateEvent(NULL, TRUE, FALSE, arg + 2);
-                if (NULL == synch->hStopEvent)
+                synch->hStopEvent = CreateEvent(nullptr, TRUE, FALSE, arg + 2);
+                if (nullptr == synch->hStopEvent)
                 {
                     fprintf(stderr, "Error creating/opening force-stop event: '%s'\n", arg + 2);
                     exit(1);    // TODO: this class shouldn't terminate the process
@@ -1162,8 +1179,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
             case 'e':
                 {
-                    HANDLE hEvent = OpenEvent(EVENT_MODIFY_STATE, FALSE, arg + 2);
-                    if (NULL == hEvent)
+	                HANDLE hEvent = OpenEvent(EVENT_MODIFY_STATE, FALSE, arg + 2);
+                    if (nullptr == hEvent)
                     {
                         fprintf(stderr, "Error opening event '%s'\n", arg + 2);
                         exit(1);    // TODO: this class shouldn't terminate the process
@@ -1186,11 +1203,11 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         case 'z':    //random seed
             if (*(arg + 1) == '\0')
             {
-                timeSpan.SetRandSeed((ULONG)GetTickCount64());
+                timeSpan.SetRandSeed(static_cast<ULONG>(GetTickCount64()));
             }
             else
             {
-                int c = atoi(arg + 1);
+	            const int c = atoi(arg + 1);
                 if (c >= 0)
                 {
                     timeSpan.SetRandSeed(c);
@@ -1205,10 +1222,14 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         case 'Z':    //zero write buffers
             if (*(arg + 1) == '\0')
             {
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                for (auto& vTarget : vTargets)
                 {
-                    i->SetZeroWriteBuffers(true);
+	                vTarget.SetZeroWriteBuffers(true);
                 }
+            }
+            else if (*(arg + 1) == 'r' && *(arg + 2) == '\0')
+            {
+                timeSpan.SetRandomWriteData(true);
             }
             else
             {
@@ -1216,10 +1237,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 string sPath;
                 if (_GetRandomDataWriteBufferData(string(arg + 1), cb, sPath) && (cb > 0))
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto& vTarget : vTargets)
                     {
-                        i->SetRandomDataWriteBufferSize(cb);
-                        i->SetRandomDataWriteBufferSourcePath(sPath);
+	                    vTarget.SetRandomDataWriteBufferSize(cb);
+	                    vTarget.SetRandomDataWriteBufferSourcePath(sPath);
                     }
                 }
                 else
@@ -1254,29 +1275,29 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         exit(1);                        // TODO: this class shouldn't terminate the process
     }
 
-    if (vTargets.size() < 1)
+    if (vTargets.empty())
     {
         fprintf(stderr, "ERROR: need to provide at least one filename\n");
         return false;
     }
 
     // apply resultant cache/writethrough modes to the targets
-    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+    for (auto& vTarget : vTargets)
     {
         if (t != TargetCacheMode::Undefined)
         {
-            i->SetCacheMode(t);
+	        vTarget.SetCacheMode(t);
         }
         if (w != WriteThroughMode::Undefined)
         {
-            i->SetWriteThroughMode(w);
+	        vTarget.SetWriteThroughMode(w);
         }
     }
 
     // ... and apply targets to the timespan
-    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+    for (auto& vTarget : vTargets)
     {
-        timeSpan.AddTarget(*i);
+        timeSpan.AddTarget(vTarget);
     }
     pProfile->AddTimeSpan(timeSpan);
 
@@ -1285,15 +1306,14 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
 bool CmdLineParser::_ReadParametersFromXmlFile(const char *pszPath, Profile *pProfile)
 {
-    XmlProfileParser parser;
-    return parser.ParseFile(pszPath, pProfile);
+    return XmlProfileParser::ParseFile(pszPath, pProfile);
 }
 
 bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch, SystemInformation *pSystem)
 {
     assert(nullptr != argv);
     assert(nullptr != pProfile);
-    assert(NULL != synch);
+    assert(nullptr != synch);
 
     if (argc < 2)
     {
@@ -1314,7 +1334,7 @@ bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pP
     pProfile->SetCmdLine(sCmdLine);
 
     //check if parameters should be read from an xml file
-    bool fOk = true;
+    bool fOk;
     bool fCmdLine;
 
     if (argc == 2 && (argv[1][0] == '-' || argv[1][0] == '/') && argv[1][1] == 'X' && argv[1][2] != '\0')

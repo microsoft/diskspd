@@ -37,15 +37,15 @@ SOFTWARE.
 class ThroughputMeter
 {
 public:
-    ThroughputMeter(void);
+    ThroughputMeter();
 
-    bool IsRunning(void) const;
+    bool IsRunning() const;
     void Start(DWORD cBytesPerMillisecond, DWORD dwBlockSize, DWORD dwThinkTime, DWORD dwBurstSize);
-    DWORD GetSleepTime(void) const;
+    DWORD GetSleepTime() const;
     void Adjust(size_t cb);
 
 private:
-    DWORD _GetThrottleTime(void) const;
+    DWORD _GetThrottleTime() const;
 
     bool _fRunning;                 // true = throughput monitoring is on
     bool _fThrottle;                // true = throttling is on

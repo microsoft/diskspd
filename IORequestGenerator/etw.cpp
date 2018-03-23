@@ -28,9 +28,7 @@ SOFTWARE.
 */
 
 #include "etw.h"
-#include "common.h"
-#include <stdio.h>
-#include <stdlib.h>
+//#include "Common.h"
 
 #include <Wmistr.h>     //WNODE_HEADER
 
@@ -122,29 +120,26 @@ DEFINE_GUID ( /* 3d6fa8d1-fe05-11d0-9dda-00c04fd7ba7c */
 BOOL TraceEvents()
 {
     TRACEHANDLE handles[1];
-    EVENT_TRACE_LOGFILE logfile;
+	EVENT_TRACE_LOGFILE logfile{const_cast<LPSTR>(KERNEL_LOGGER_NAME), NULL, EVENT_TRACE_REAL_TIME_MODE, true};
 
-    memset(&logfile, 0, sizeof(EVENT_TRACE_LOGFILE));
+    //memset(&logfile, 0, sizeof(EVENT_TRACE_LOGFILE));
 
-    logfile.LoggerName = KERNEL_LOGGER_NAME;
-    logfile.LogFileName = NULL;
-    logfile.LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
+    //logfile.LoggerName = KERNEL_LOGGER_NAME;
+    //logfile.LogFileName = nullptr;
+    //logfile.LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
 
-    logfile.IsKernelTrace = true;
+    //logfile.IsKernelTrace = true;
 
     handles[0] = OpenTrace(&logfile);
-    if( (TRACEHANDLE)INVALID_HANDLE_VALUE == handles[0] )
+    if( reinterpret_cast<TRACEHANDLE>(INVALID_HANDLE_VALUE) == handles[0] )
     {
         PrintError("ETW ERROR: OpenTrace failed (error code: %d)\n", GetLastError());
         return false;
     }
-    else
-    {
-        ProcessTrace(handles, 1, 0, 0);
-        CloseTrace(handles[0]);
-    }
+	ProcessTrace(handles, 1, nullptr, nullptr);
+	CloseTrace(handles[0]);
 
-    return true;
+	return true;
 }
 
 /*****************************************************************************/
@@ -152,25 +147,21 @@ BOOL TraceEvents()
 //
 PEVENT_TRACE_PROPERTIES allocateEventTraceProperties()
 {
-    PEVENT_TRACE_PROPERTIES pProperties = NULL;
-    size_t size = 0;
-
-
-    size = sizeof(EVENT_TRACE_PROPERTIES)+sizeof(KERNEL_LOGGER_NAME);
-    pProperties = (PEVENT_TRACE_PROPERTIES)malloc(size);
-    if( NULL == pProperties )
+	const size_t size = sizeof(EVENT_TRACE_PROPERTIES)+sizeof(KERNEL_LOGGER_NAME);
+	auto pProperties = static_cast<PEVENT_TRACE_PROPERTIES>(malloc(size));
+    if( nullptr == pProperties )
     {
         PrintError("FATAL ERROR: unable to allocate memory (error code: %d)\n", GetLastError());
-        return NULL;
+        return nullptr;
     }
 
     memset(pProperties, 0, size);
 
     pProperties->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
-    pProperties->Wnode.BufferSize = (ULONG)size;
+    pProperties->Wnode.BufferSize = static_cast<ULONG>(size);
     pProperties->Wnode.Flags = WNODE_FLAG_TRACED_GUID;
 
-    strcpy_s((char *)pProperties+pProperties->LoggerNameOffset,
+    strcpy_s(reinterpret_cast<char *>(pProperties)+pProperties->LoggerNameOffset,
         size-pProperties->LoggerNameOffset, KERNEL_LOGGER_NAME);
 
     return pProperties;
@@ -372,9 +363,7 @@ void WINAPI eventRegistry(PEVENT_TRACE pEvent)
 //
 TRACEHANDLE StartETWSession(const Profile& profile)
 {
-    PEVENT_TRACE_PROPERTIES pProperties;
-
-    pProperties = allocateEventTraceProperties();
+	PEVENT_TRACE_PROPERTIES pProperties = allocateEventTraceProperties();
     if (nullptr == pProperties)
     {
         return 0;
@@ -459,7 +448,7 @@ TRACEHANDLE StartETWSession(const Profile& profile)
     pProperties->Wnode.Guid = SystemTraceControlGuid;
 
     TRACEHANDLE hTraceSession;
-    ULONG ret = StartTrace(&hTraceSession, KERNEL_LOGGER_NAME, pProperties);
+	const ULONG ret = StartTrace(&hTraceSession, KERNEL_LOGGER_NAME, pProperties);
     free(pProperties);
     if (ERROR_SUCCESS != ret)
     {
@@ -475,21 +464,17 @@ TRACEHANDLE StartETWSession(const Profile& profile)
 //
 PEVENT_TRACE_PROPERTIES StopETWSession(TRACEHANDLE hTraceSession)
 {
-    PEVENT_TRACE_PROPERTIES pProperties;
-
-    pProperties = allocateEventTraceProperties();
-    if( NULL == pProperties )
+	PEVENT_TRACE_PROPERTIES pProperties = allocateEventTraceProperties();
+    if( nullptr == pProperties )
     {
-        return NULL;
+        return nullptr;
     }
 
-    ULONG ret;
-
-    ret = ControlTrace(hTraceSession, NULL, pProperties, EVENT_TRACE_CONTROL_STOP);
+	const ULONG ret = ControlTrace(hTraceSession, nullptr, pProperties, EVENT_TRACE_CONTROL_STOP);
     if( ERROR_SUCCESS != ret )
     {
         PrintError("Error stopping trace session\n");
-        return NULL;
+        return nullptr;
     }
 
     //wait

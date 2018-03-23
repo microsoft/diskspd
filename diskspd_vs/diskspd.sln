@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 2013
-VisualStudioVersion = 12.0.30723.0
+# Visual Studio 15
+VisualStudioVersion = 15.0.27428.2011
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CmdLineParser", "CmdLineParser\CmdLineParser.vcxproj", "{0EF5CE78-8E92-4A1B-A255-0F544AADA291}"
 EndProject
@@ -24,6 +24,11 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Common", "Common\Common.vcxproj", "{B253AB42-F482-417A-82CE-EDAFCD26F366}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "XmlResultParser", "XmlResultParser\XmlResultParser.vcxproj", "{60A28E9C-C245-4D99-9C1C-EC911031743F}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{480CD062-AF37-41E9-A660-6968CD2AE545}"
+	ProjectSection(SolutionItems) = preProject
+		.clang-tidy = .clang-tidy
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -92,5 +97,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C90B928D-6CD3-402A-9704-A0CBEF91C734}
 	EndGlobalSection
 EndGlobal

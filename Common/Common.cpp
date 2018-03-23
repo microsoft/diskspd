@@ -92,6 +92,136 @@ UINT64 PerfTimer::SecondsToPerfTime(const double seconds)
     return static_cast<UINT64>(TIMER_FREQ * seconds);
 }
 
+Random::Random(UINT64 ulSeed)
+{
+	_ulState[0] = 0xf1ea5eed;
+    _ulState[1] = ulSeed;
+    _ulState[2] = ulSeed;
+    _ulState[3] = ulSeed;
+    
+    for (UINT32 i = 0; i < 20; i++) {
+        Rand64();
+    }
+}
+
+void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
+{
+	auto Remaining = static_cast<UINT32>(reinterpret_cast<ULONG_PTR>(pBuffer) & 7);
+    UINT64 r1, r2, r3, r4;
+
+    //
+    // Align to 8 bytes
+    //
+
+    if (Remaining != 0) {
+        r1 = Rand64();
+
+        while (Remaining != 0 && ulLength != 0) {
+            *pBuffer = static_cast<BYTE>(r1 & 0xFF);
+            r1 >>= 8;
+            pBuffer++;
+            ulLength--;
+            Remaining--;
+        }
+    }
+
+	auto*pBuffer64 = reinterpret_cast<UINT64*>(pBuffer);
+    Remaining = ulLength / 8;
+    ulLength -= Remaining * 8;
+    pBuffer += Remaining * 8;
+
+    if (fPseudoRandomOkay) {
+        
+        //
+        // Generate 5 random numbers and then mix them to produce
+        // 16 random (but correlated) numbers.  We want to do 16 
+        // numbers at a time for optimal cache line alignment.
+        // Only do this if the caller is okay with numbers that
+        // aren't independent.  A detailed analysis of the data
+        // could probably detect that the first 5 numbers determine
+        // the next 11.  For most purposes this won't matter (for
+        // instance it's unlikely compression algorithms will be
+        // able to detect this and utilize it).
+        //
+        
+        while (Remaining > 16) {
+            r1 = Rand64();
+            r2 = Rand64();
+            r3 = Rand64();
+            r4 = Rand64();
+	        const UINT64 r5 = Rand64();
+
+            pBuffer64[0]  = r1;
+            pBuffer64[1]  = r2;
+            pBuffer64[2]  = r3;
+            pBuffer64[3]  = r4;
+            pBuffer64[4]  = r5;
+
+            //
+            // Throw in some rotates so that the below numbers
+            // aren't the xor sum of previous numbers.
+            //
+
+            r1 = _rotl64(r1, 7);
+            pBuffer64[5]  = r1 ^ r2;
+            pBuffer64[6]  = r1 ^ r3;
+            pBuffer64[7]  = r1 ^ r4;
+            pBuffer64[8]  = r1 ^ r5;
+
+            r2 = _rotl64(r2, 13);
+            pBuffer64[9]  = r2 ^ r3;
+            pBuffer64[10] = r2 ^ r4;
+            pBuffer64[11] = r2 ^ r5;
+
+            r3 = _rotl64(r3, 19);
+            pBuffer64[12] = r3 ^ r4;
+            pBuffer64[13] = r3 ^ r5;
+
+            pBuffer64[14] = r1 ^ r2 ^ r3;
+            pBuffer64[15] = r1 ^ _rotl64(r4 ^ r5, 39);
+
+            pBuffer64 += 16;
+            Remaining -= 16;
+        }
+    }
+
+    //
+    // Fill in the tail of the buffer
+    //
+    
+    while (Remaining >= 4) {
+        r1 = Rand64();
+        r2 = Rand64();
+        r3 = Rand64();
+        r4 = Rand64();
+
+        pBuffer64[0]  = r1;
+        pBuffer64[1]  = r2;
+        pBuffer64[2]  = r3;
+        pBuffer64[3]  = r4;
+
+        pBuffer64 += 4;
+        Remaining -= 4;
+    }
+
+    while (Remaining != 0) {
+        *pBuffer64 = Rand64();
+        pBuffer64++;
+        Remaining--;
+    }
+
+    if (ulLength != 0) {
+        r1 = Rand64();
+
+        while (ulLength != 0) {
+            *pBuffer = static_cast<BYTE>(r1 & 0xFF);
+            r1 >>= 8;
+            pBuffer++;
+            ulLength--;
+        }
+    }
+}
+
 string Util::DoubleToStringHelper(const double d)
 {
     char szFloatBuffer[100];
@@ -100,13 +230,32 @@ string Util::DoubleToStringHelper(const double d)
     return string(szFloatBuffer);
 }
 
+string ThreadTarget::GetXml() const
+{
+    char buffer[4096];
+    string sXml("<ThreadTarget>\n");
+
+    sprintf_s(buffer, _countof(buffer), "<Thread>%u</Thread>\n", _ulThread);
+    sXml += buffer;
+
+    if (_ulWeight != 0)
+    {
+        sprintf_s(buffer, _countof(buffer), "<Weight>%u</Weight>\n", _ulWeight);
+        sXml += buffer;
+    }
+
+    sXml += "</ThreadTarget>\n";
+
+    return sXml;
+}
+
 string Target::GetXml() const
 {
     char buffer[4096];
     string sXml("<Target>\n");
     sXml += "<Path>" + _sPath + "</Path>\n";
 
-    sprintf_s(buffer, _countof(buffer), "<BlockSize>%u</BlockSize>\n", _dwBlockSize);
+    sprintf_s(buffer, _countof(buffer), "<BlockSize>%lu</BlockSize>\n", _dwBlockSize);
     sXml += buffer;
 
     sprintf_s(buffer, _countof(buffer), "<BaseFileOffset>%I64u</BaseFileOffset>\n", _ullBaseFileOffset);
@@ -126,6 +275,11 @@ string Target::GetXml() const
     case TargetCacheMode::DisableOSCache:
         sXml += "<DisableOSCache>true</DisableOSCache>\n";
         break;
+	case TargetCacheMode::Cached:
+		break;
+	case TargetCacheMode::Undefined:
+		/* ? */
+		break;
     }
 
     // WriteThroughMode::Off is implied default
@@ -134,6 +288,11 @@ string Target::GetXml() const
     case WriteThroughMode::On:
         sXml += "<WriteThrough>true</WriteThrough>\n";
         break;
+	case WriteThroughMode::Off:
+		break;
+	case WriteThroughMode::Undefined:
+		/* ? */
+		break;
     }
     
     sXml += "<WriteBufferContent>\n";
@@ -151,7 +310,7 @@ string Target::GetXml() const
         sXml += "<RandomDataSource>\n";
         sprintf_s(buffer, _countof(buffer), "<SizeInBytes>%I64u</SizeInBytes>\n", _cbRandomDataWriteBuffer);
         sXml += buffer;
-        if (_sRandomDataWriteBufferSourcePath != "")
+        if (!_sRandomDataWriteBufferSourcePath.empty())
         {
             sXml += "<FilePath>" + _sRandomDataWriteBufferSourcePath + "</FilePath>\n";
         }
@@ -163,13 +322,13 @@ string Target::GetXml() const
 
     if (_fUseBurstSize)
     {
-        sprintf_s(buffer, _countof(buffer), "<BurstSize>%u</BurstSize>\n", _dwBurstSize);
+        sprintf_s(buffer, _countof(buffer), "<BurstSize>%lu</BurstSize>\n", _dwBurstSize);
         sXml += buffer;
     }
 
     if (_fThinkTime)
     {
-        sprintf_s(buffer, _countof(buffer), "<ThinkTime>%u</ThinkTime>\n", _dwThinkTime);
+        sprintf_s(buffer, _countof(buffer), "<ThinkTime>%lu</ThinkTime>\n", _dwThinkTime);
         sXml += buffer;
     }
 
@@ -201,16 +360,16 @@ string Target::GetXml() const
     sprintf_s(buffer, _countof(buffer), "<MaxFileSize>%I64u</MaxFileSize>\n", _ullMaxFileSize);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<RequestCount>%u</RequestCount>\n", _dwRequestCount);
+    sprintf_s(buffer, _countof(buffer), "<RequestCount>%lu</RequestCount>\n", _dwRequestCount);
     sXml += buffer;
 
     sprintf_s(buffer, _countof(buffer), "<WriteRatio>%u</WriteRatio>\n", _ulWriteRatio);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<Throughput>%u</Throughput>\n", _dwThroughputBytesPerMillisecond);
+    sprintf_s(buffer, _countof(buffer), "<Throughput>%lu</Throughput>\n", _dwThroughputBytesPerMillisecond);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<ThreadsPerFile>%u</ThreadsPerFile>\n", _dwThreadsPerFile);
+    sprintf_s(buffer, _countof(buffer), "<ThreadsPerFile>%lu</ThreadsPerFile>\n", _dwThreadsPerFile);
     sXml += buffer;
 
     if (_ioPriorityHint == IoPriorityHintVeryLow)
@@ -230,36 +389,40 @@ string Target::GetXml() const
         sXml += "<IOPriority>* UNSUPPORTED *</IOPriority>\n";
     }
 
+    sprintf_s(buffer, _countof(buffer), "<Weight>%u</Weight>\n", _ulWeight);
+    sXml += buffer;
+
+    for (const auto& threadTarget : _vThreadTargets)
+    {
+        sXml += threadTarget.GetXml();
+    }
+
     sXml += "</Target>\n";
 
     return sXml;
 }
 
-bool Target::_FillRandomDataWriteBuffer()
+bool Target::_FillRandomDataWriteBuffer(Random *pRand) const
 {
     assert(_pRandomDataWriteBuffer != nullptr);
     bool fOk = true;
-    size_t cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
-    if (GetRandomDataWriteBufferSourcePath() == "")
+	const auto cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
+    if (GetRandomDataWriteBufferSourcePath().empty())
     {
-        // fill buffer with random data
-        for (size_t i = 0; i < cb; i++)
-        {
-            _pRandomDataWriteBuffer[i] = (rand() % 256);
-        }
+        pRand->RandBuffer(_pRandomDataWriteBuffer, static_cast<UINT32>(cb), false);
     }
     else
     {
         // fill buffer from file
-        HANDLE hFile = CreateFile(GetRandomDataWriteBufferSourcePath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+	    HANDLE hFile = CreateFile(GetRandomDataWriteBufferSourcePath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
         if (hFile != INVALID_HANDLE_VALUE)
         {
-            UINT64 cbLeftToRead = GetRandomDataWriteBufferSize();
+	        const UINT64 cbLeftToRead = GetRandomDataWriteBufferSize();
             BYTE *pBuffer = _pRandomDataWriteBuffer;
             bool fReadSuccess = true;
             while (fReadSuccess && cbLeftToRead > 0)
             {
-                DWORD cbToRead = static_cast<DWORD>(min(64 * 1024, cbLeftToRead));
+	            const auto cbToRead = static_cast<DWORD>(min(64 * 1024, cbLeftToRead));
                 DWORD cbRead;
                 fReadSuccess = ((ReadFile(hFile, pBuffer, cbToRead, &cbRead, nullptr) == TRUE) && (cbRead > 0));
                 pBuffer += cbRead;
@@ -283,29 +446,29 @@ bool Target::_FillRandomDataWriteBuffer()
     return fOk;
 }
 
-bool Target::AllocateAndFillRandomDataWriteBuffer()
+bool Target::AllocateAndFillRandomDataWriteBuffer(Random *pRand)
 {
     assert(_pRandomDataWriteBuffer == nullptr);
-    bool fOk = true;
-    size_t cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
+	const auto cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
     assert(cb > 0);
 
     // TODO: make sure the size if <= max value for size_t
     if (GetUseLargePages())
     {
-        size_t cbMinLargePage = GetLargePageMinimum();
-        size_t cbRoundedSize = (cb + cbMinLargePage - 1) & ~(cbMinLargePage - 1);
-        _pRandomDataWriteBuffer = (BYTE *)VirtualAlloc(nullptr, cbRoundedSize, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES, PAGE_EXECUTE_READWRITE);
+	    const size_t cbMinLargePage = GetLargePageMinimum();
+	    const size_t cbRoundedSize = (cb + cbMinLargePage - 1) & ~(cbMinLargePage - 1);
+        _pRandomDataWriteBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cbRoundedSize, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES,
+                                                                   PAGE_EXECUTE_READWRITE));
     }
     else
     {
-        _pRandomDataWriteBuffer = (BYTE *)VirtualAlloc(nullptr, cb, MEM_COMMIT, PAGE_READWRITE);
+        _pRandomDataWriteBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cb, MEM_COMMIT, PAGE_READWRITE));
     }
 
-    fOk = (_pRandomDataWriteBuffer != nullptr);
+	auto fOk = (_pRandomDataWriteBuffer != nullptr);
     if (fOk)
     {
-        fOk = _FillRandomDataWriteBuffer();
+        fOk = _FillRandomDataWriteBuffer(pRand);
     }
     return fOk;
 }
@@ -319,26 +482,26 @@ void Target::FreeRandomDataWriteBuffer()
     }
 }
 
-BYTE* Target::GetRandomDataWriteBuffer()
+BYTE* Target::GetRandomDataWriteBuffer(Random *pRand) const
 {
-    size_t cbBuffer = static_cast<size_t>(GetRandomDataWriteBufferSize());
-    size_t cbBlock = GetBlockSizeInBytes();
+	const auto cbBuffer = static_cast<size_t>(GetRandomDataWriteBufferSize());
+	const size_t cbBlock = GetBlockSizeInBytes();
 
     // leave enough bytes in the buffer for one block
-    size_t randomOffset = rand() % (cbBuffer - (cbBlock - 1));
+    size_t randomOffset = pRand->Rand32() % (cbBuffer - (cbBlock - 1));
 
-    bool fUnbufferedIO = (_cacheMode == TargetCacheMode::DisableOSCache);
+	const bool fUnbufferedIO = (_cacheMode == TargetCacheMode::DisableOSCache);
     if (fUnbufferedIO)
     {
-        // for unbuffered IO, offset in the buffer needs to be DWORD-aligned
-        const size_t cbAlignment = 4;
+        // for unbuffered IO, offset in the buffer needs to be 512-byte aligned
+        const size_t cbAlignment = 512;
         randomOffset -= (randomOffset % cbAlignment);
     }
 
-    BYTE *pBuffer = reinterpret_cast<BYTE*>(reinterpret_cast<ULONG_PTR>(_pRandomDataWriteBuffer)+randomOffset);
+	auto pBuffer = reinterpret_cast<BYTE*>(reinterpret_cast<ULONG_PTR>(_pRandomDataWriteBuffer)+randomOffset);
 
     // unbuffered IO needs aligned addresses
-    assert(!fUnbufferedIO || (reinterpret_cast<ULONG_PTR>(pBuffer) % 4 == 0));
+    assert(!fUnbufferedIO || (reinterpret_cast<ULONG_PTR>(pBuffer) % 512 == 0));
     assert(pBuffer >= _pRandomDataWriteBuffer);
     assert(pBuffer <= _pRandomDataWriteBuffer + GetRandomDataWriteBufferSize() - GetBlockSizeInBytes());
 
@@ -364,7 +527,10 @@ string TimeSpan::GetXml() const
     sprintf_s(buffer, _countof(buffer), "<Cooldown>%u</Cooldown>\n", _ulCoolDown);
     sXml += buffer;
 
-    sprintf_s(buffer, _countof(buffer), "<ThreadCount>%u</ThreadCount>\n", _dwThreadCount);
+    sprintf_s(buffer, _countof(buffer), "<ThreadCount>%lu</ThreadCount>\n", _dwThreadCount);
+    sXml += buffer;
+
+    sprintf_s(buffer, _countof(buffer), "<RequestCount>%lu</RequestCount>\n", _dwRequestCount);
     sXml += buffer;
 
     sprintf_s(buffer, _countof(buffer), "<IoBucketDuration>%u</IoBucketDuration>\n", _ulIoBucketDurationInMilliseconds);
@@ -373,7 +539,7 @@ string TimeSpan::GetXml() const
     sprintf_s(buffer, _countof(buffer), "<RandSeed>%u</RandSeed>\n", _ulRandSeed);
     sXml += buffer;
 
-    if (_vAffinity.size() > 0)
+    if (!_vAffinity.empty())
     {
         sXml += "<Affinity>\n";
         for (const auto& a : _vAffinity)
@@ -394,15 +560,15 @@ string TimeSpan::GetXml() const
     return sXml;
 }
 
-void TimeSpan::MarkFilesAsPrecreated(const vector<string> vFiles)
+void TimeSpan::MarkFilesAsPrecreated(const vector<string>& vFiles)
 {
-    for (auto sFile : vFiles)
+    for (const auto& sFile : vFiles)
     {
-        for (auto pTarget = _vTargets.begin(); pTarget != _vTargets.end(); pTarget++)
+        for (auto& _vTarget : _vTargets)
         {
-            if (sFile == pTarget->GetPath())
+            if (sFile == _vTarget.GetPath())
             {
-                pTarget->SetPrecreated(true);
+	            _vTarget.SetPrecreated(true);
             }
         }
     }
@@ -413,7 +579,7 @@ string Profile::GetXml() const
     string sXml("<Profile>\n");
     char buffer[4096];
 
-    sprintf_s(buffer, _countof(buffer), "<Progress>%u</Progress>\n", _dwProgress);
+    sprintf_s(buffer, _countof(buffer), "<Progress>%lu</Progress>\n", _dwProgress);
     sXml += buffer;
 
     if (_resultsFormat == ResultsFormat::Text)
@@ -469,11 +635,11 @@ string Profile::GetXml() const
     return sXml;
 }
 
-void Profile::MarkFilesAsPrecreated(const vector<string> vFiles)
+void Profile::MarkFilesAsPrecreated(const vector<string>& vFiles)
 {
-    for (auto pTimeSpan = _vTimeSpans.begin(); pTimeSpan != _vTimeSpans.end(); pTimeSpan++)
+    for (auto& _vTimeSpan : _vTimeSpans)
     {
-        pTimeSpan->MarkFilesAsPrecreated(vFiles);
+	    _vTimeSpan.MarkFilesAsPrecreated(vFiles);
     }
 }
 
@@ -481,20 +647,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 {
     bool fOk = true;
 
-    // Note that if no SystemInformation is provided, we do not verify the profile
-    // v. the system content. This is used to limit code churn in the UT.
-
-    if (pSystem != nullptr &&
-        (pSystem->processorTopology._vProcessorGroupInformation.size() > 1 || pSystem->processorTopology._ulProcCount > 64))
-    {
-        fprintf(stderr, "WARNING: Complete CPU utilization cannot currently be gathered within DISKSPD for this system.\n"
-            "         Use alternate mechanisms to gather this data such as perfmon/logman.\n"
-            "         Active KGroups %u > 1 and/or processor count %u > 64.\n",
-            (int) pSystem->processorTopology._vProcessorGroupInformation.size(),
-            pSystem->processorTopology._ulProcCount);
-    }
-
-    if (GetTimeSpans().size() == 0)
+    if (GetTimeSpans().empty())
     {
         fprintf(stderr, "ERROR: no timespans specified\n");
         fOk = false;
@@ -511,7 +664,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     {
                         fprintf(stderr, "ERROR: affinity assignment to group %u; system only has %u groups\n",
                             Affinity.wGroup,
-                            (int) pSystem->processorTopology._vProcessorGroupInformation.size());
+                            static_cast<unsigned int>(pSystem->processorTopology._vProcessorGroupInformation.size()));
 
                         fOk = false;
 
@@ -528,17 +681,20 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 
                     if (fOk && !pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].IsProcessorActive(Affinity.bProc))
                     {
-                        fprintf(stderr, "ERROR: affinity assignment to group %u core %u not possible; core is not active (current mask 0x%Ix)\n",
+                        fprintf(
+	                        stderr,
+	                        "ERROR: affinity assignment to group %u core %u not possible; core is not active (current mask 0x%llx)\n",
                             Affinity.wGroup,
                             Affinity.bProc,
-                            pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup]._activeProcessorMask);
+                            pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].
+	                        _activeProcessorMask);
 
                         fOk = false;
                     }
                 }
             }
 
-            if (timeSpan.GetDisableAffinity() && timeSpan.GetAffinityAssignments().size() > 0)
+            if (timeSpan.GetDisableAffinity() && !timeSpan.GetAffinityAssignments().empty())
             {
                 fprintf(stderr, "ERROR: -n and -a parameters cannot be used together\n");
                 fOk = false;
@@ -564,6 +720,47 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                 if ((target.GetThinkTime() == 0 && target.GetBurstSize() > 0) || (target.GetThinkTime() > 0 && target.GetBurstSize() == 0))
                 {
                     fprintf(stderr, "ERROR: need to specify -j<think time> with -i<burst size>\n");
+                    fOk = false;
+                }
+
+                if (timeSpan.GetThreadCount() > 0 && timeSpan.GetRequestCount() > 0)
+                {
+                    if (target.GetThroughputInBytesPerMillisecond() > 0)
+                    {
+                        fprintf(stderr, "ERROR: -g throughput control cannot be used with -O outstanding requests per thread\n");
+                        fOk = false;
+                    }
+
+                    if (target.GetThinkTime() > 0)
+                    {
+                        fprintf(stderr, "ERROR: -j think time cannot be used with -O outstanding requests per thread\n");
+                        fOk = false;
+                    }
+
+                    if (target.GetUseParallelAsyncIO())
+                    {
+                        fprintf(stderr, "ERROR: -p parallel IO cannot be used with -O outstanding requests per thread\n");
+                        fOk = false;
+                    }
+
+                    if (target.GetWeight() == 0)
+                    {
+                        fprintf(stderr, "ERROR: a non-zero target Weight must be specified\n");
+                        fOk = false;
+                    }
+
+                    for (const auto& threadTarget : target.GetThreadTargets())
+                    {
+                        if (threadTarget.GetThread() >= timeSpan.GetThreadCount())
+                        {
+                            fprintf(stderr, "ERROR: illegal thread specified for ThreadTarget\n");
+                            fOk = false;
+                        }
+                    }
+                }
+                else if (!target.GetThreadTargets().empty())
+                {
+                    fprintf(stderr, "ERROR: ThreadTargets can only be specified when the timespan ThreadCount and RequestCount are specified\n");
                     fOk = false;
                 }
 
@@ -648,7 +845,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                 {
                     if (target.GetRandomDataWriteBufferSize() < target.GetBlockSizeInBytes())
                     {
-                        fprintf(stderr, "ERROR: custom write buffer (-Z) is smaller than the block size. Write buffer size: %I64u block size: %u\n",
+                        fprintf(stderr, "ERROR: custom write buffer (-Z) is smaller than the block size. Write buffer size: %I64u block size: %lu\n",
                             target.GetRandomDataWriteBufferSize(),
                             target.GetBlockSizeInBytes());
                         fOk = false;
@@ -672,21 +869,31 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 
 bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
 {
-    bool fOk = true;
-    BYTE *pDataBuffer = nullptr;
-    size_t cbDataBuffer = target.GetBlockSizeInBytes() * target.GetRequestCount();
+    DWORD requestCount = target.GetRequestCount();
+
+	// Use global request count
+    if (pTimeSpan->GetThreadCount() != 0 &&
+        pTimeSpan->GetRequestCount() != 0) {
+
+        requestCount = pTimeSpan->GetRequestCount();
+    }
+
+    // Create separate read & write buffers so the write content doesn't get overriden by reads
+	const auto cbDataBuffer = static_cast<size_t>(target.GetBlockSizeInBytes()) * requestCount * 2;
+	BYTE *pDataBuffer;
     if (target.GetUseLargePages())
     {
-        size_t cbMinLargePage = GetLargePageMinimum();
-        size_t cbRoundedSize = (cbDataBuffer + cbMinLargePage - 1) & ~(cbMinLargePage - 1);
-        pDataBuffer = (BYTE *)VirtualAlloc(nullptr, cbRoundedSize, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES, PAGE_EXECUTE_READWRITE);
+	    const size_t cbMinLargePage = GetLargePageMinimum();
+	    const size_t cbRoundedSize = (cbDataBuffer + cbMinLargePage - 1) & ~(cbMinLargePage - 1);
+        pDataBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cbRoundedSize, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES,
+                                                       PAGE_EXECUTE_READWRITE));
     }
     else
     {
-        pDataBuffer = (BYTE *)VirtualAlloc(nullptr, cbDataBuffer, MEM_COMMIT, PAGE_READWRITE);
+        pDataBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cbDataBuffer, MEM_COMMIT, PAGE_READWRITE));
     }
 
-    fOk = (pDataBuffer != nullptr);
+	const bool fOk = (pDataBuffer != nullptr);
 
     //fill buffer (useful only for write tests)
     if (fOk && target.GetWriteRatio() > 0)
@@ -699,7 +906,8 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
         {
             for (size_t i = 0; i < cbDataBuffer; i++)
             {
-                pDataBuffer[i] = (BYTE)(i % 256);
+                pDataBuffer[i] = static_cast<BYTE>(i % 256);
+	            /* NB: the writable size may be 'cbRoundedSize' bytes, but '2' bytes might be written */
             }
         }
     }
@@ -707,6 +915,7 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
     if (fOk)
     {
         vpDataBuffers.push_back(pDataBuffer);
+        vulReadBufferSize.push_back(cbDataBuffer / 2);
     }
 
     return fOk;
@@ -719,17 +928,32 @@ BYTE* ThreadParameters::GetReadBuffer(size_t iTarget, size_t iRequest)
 
 BYTE* ThreadParameters::GetWriteBuffer(size_t iTarget, size_t iRequest)
 {
-    BYTE *pBuffer = nullptr;
+    BYTE *pBuffer;
     
     Target& target(vTargets[iTarget]);
-    size_t cb = static_cast<size_t>(target.GetRandomDataWriteBufferSize());
+	const auto cb = static_cast<size_t>(target.GetRandomDataWriteBufferSize());
     if (cb == 0)
     {
-        pBuffer = vpDataBuffers[iTarget] + (iRequest * vTargets[iTarget].GetBlockSizeInBytes());
+        pBuffer = vpDataBuffers[iTarget] + vulReadBufferSize[iTarget] + (iRequest * vTargets[iTarget].GetBlockSizeInBytes());
+
+        //
+        // This is a very efficient algorithm for generating random content at
+        // run-time.  When tested in a single-threaded, CPU limited environment
+        // with 4K random writes, doing memset to fill the buffer got 112K IOPS,
+        // this algorithm got 111K IOPS.  Using a static buffer got 118K IOPS.
+        // This was tested with a 64-bit diskspd.exe.  With a 32-bit version it
+        // may be more efficient to do 32-bit operations.
+        //
+
+        if (pTimeSpan->GetRandomWriteData() &&
+            !target.GetZeroWriteBuffers())
+        {
+            pRand->RandBuffer(pBuffer, vTargets[iTarget].GetBlockSizeInBytes(), true);
+        }
     }
     else
     {
-        pBuffer = target.GetRandomDataWriteBuffer();
+        pBuffer = target.GetRandomDataWriteBuffer(pRand);
     }
     return pBuffer;
 }
@@ -741,6 +965,12 @@ DWORD ThreadParameters::GetTotalRequestCount() const
     for (const auto& t : vTargets)
     {
         cRequests += t.GetRequestCount();
+    }
+
+    if (pTimeSpan->GetRequestCount() != 0 &&
+        pTimeSpan->GetThreadCount() != 0)
+    {
+        cRequests = pTimeSpan->GetRequestCount();
     }
 
     return cRequests;

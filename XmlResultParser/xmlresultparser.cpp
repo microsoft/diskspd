@@ -89,15 +89,15 @@ void XmlResultParser::_PrintTargetIops(const IoBucketizer& readBucketizer, const
 
     if (readBucketizer.GetNumberOfValidBuckets() > 0)
     {
-        _Print("<ReadIopsStdDev>%.3f</ReadIopsStdDev>\n", readBucketizer.GetStandardDeviation() / (bucketTimeInMs / 1000.0));
+        _Print("<ReadIopsStdDev>%.3f</ReadIopsStdDev>\n", readBucketizer.GetStandardDeviationIOPS() / (bucketTimeInMs / 1000.0));
     }
     if (writeBucketizer.GetNumberOfValidBuckets() > 0)
     {
-        _Print("<WriteIopsStdDev>%.3f</WriteIopsStdDev>\n", writeBucketizer.GetStandardDeviation() / (bucketTimeInMs / 1000.0));
+        _Print("<WriteIopsStdDev>%.3f</WriteIopsStdDev>\n", writeBucketizer.GetStandardDeviationIOPS() / (bucketTimeInMs / 1000.0));
     }
     if (totalIoBucketizer.GetNumberOfValidBuckets() > 0)
     {
-        _Print("<IopsStdDev>%.3f</IopsStdDev>\n", totalIoBucketizer.GetStandardDeviation() / (bucketTimeInMs / 1000.0));
+        _Print("<IopsStdDev>%.3f</IopsStdDev>\n", totalIoBucketizer.GetStandardDeviationIOPS() / (bucketTimeInMs / 1000.0));
     }
     _PrintIops(readBucketizer, writeBucketizer, bucketTimeInMs);
     _Print("</Iops>\n");
@@ -198,10 +198,13 @@ void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters 
     _Print("</ETW>\n");
 }
 
-void XmlResultParser::_PrintCpuUtilization(const Results& results)
+void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemInformation& system)
 {
-    size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
-    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
+	const size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
+    size_t ulBaseProc = 0;
+    size_t ulActiveProcCount = 0;
+	const size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
+	const double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
 
     _Print("<CpuUtilization>\n");
 
@@ -210,37 +213,54 @@ void XmlResultParser::_PrintCpuUtilization(const Results& results)
     double totalUserTime = 0;
     double totalKrnlTime = 0;
 
-    for (unsigned int x = 0; x<ulProcCount; ++x)
-    {
-        double idleTime;
-        double userTime;
-        double krnlTime;
-        double thisTime;
+    for (unsigned int ulGroup = 0; ulGroup < ulNumGroups; ulGroup++) {
+        const ProcessorGroupInformation *pGroup = &system.processorTopology._vProcessorGroupInformation[ulGroup];
 
-        idleTime = 100.0 * results.vSystemProcessorPerfInfo[x].IdleTime.QuadPart / 10000000 / fTime;
-        krnlTime = 100.0 * results.vSystemProcessorPerfInfo[x].KernelTime.QuadPart / 10000000 / fTime;
-        userTime = 100.0 * results.vSystemProcessorPerfInfo[x].UserTime.QuadPart / 10000000 / fTime;
+        // System has multiple groups but we only have counters for the first one
+        if (ulBaseProc >= ulProcCount) {
+            break;
+        }
+        
+        for (unsigned int ulProcessor = 0; ulProcessor < pGroup->_maximumProcessorCount; ulProcessor++) {
+	        if (!pGroup->IsProcessorActive(static_cast<BYTE>(ulProcessor))) {
+                continue;
+            }
 
-        thisTime = (krnlTime + userTime) - idleTime;
+	        const double idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / 10000000 / fTime;
+	        const double krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / 10000000 / fTime;
+	        const double userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / 10000000 / fTime;
 
-        _Print("<CPU>\n");
-        _Print("<Id>%d</Id>\n", x);
-        _Print("<UsagePercent>%.2f</UsagePercent>\n", thisTime);
-        _Print("<UserPercent>%.2f</UserPercent>\n", userTime);
-        _Print("<KernelPercent>%.2f</KernelPercent>\n", krnlTime - idleTime);
-        _Print("<IdlePercent>%.2f</IdlePercent>\n", idleTime);
-        _Print("</CPU>\n");
+	        const double thisTime = (krnlTime + userTime) - idleTime;
 
-        busyTime += thisTime;
-        totalIdleTime += idleTime;
-        totalUserTime += userTime;
-        totalKrnlTime += krnlTime;
+            _Print("<CPU>\n");
+            _Print("<Group>%d</Group>\n", ulGroup);
+            _Print("<Id>%d</Id>\n", ulProcessor);
+            _Print("<UsagePercent>%.2f</UsagePercent>\n", thisTime);
+            _Print("<UserPercent>%.2f</UserPercent>\n", userTime);
+            _Print("<KernelPercent>%.2f</KernelPercent>\n", krnlTime - idleTime);
+            _Print("<IdlePercent>%.2f</IdlePercent>\n", idleTime);
+            _Print("</CPU>\n");
+
+            busyTime += thisTime;
+            totalIdleTime += idleTime;
+            totalUserTime += userTime;
+            totalKrnlTime += krnlTime;
+
+            ulActiveProcCount++;
+        }
+
+        ulBaseProc += pGroup->_maximumProcessorCount;
     }
+
+    if (ulActiveProcCount == 0) {
+        ulActiveProcCount = 1;
+    }
+
     _Print("<Average>\n");
-    _Print("<UsagePercent>%.2f</UsagePercent>\n", busyTime / ulProcCount);
-    _Print("<UserPercent>%.2f</UserPercent>\n", totalUserTime / ulProcCount);
-    _Print("<KernelPercent>%.2f</KernelPercent>\n", (totalKrnlTime - totalIdleTime) / ulProcCount);
-    _Print("<IdlePercent>%.2f</IdlePercent>\n", totalIdleTime / ulProcCount);
+    _Print("<UsagePercent>%.2f</UsagePercent>\n", busyTime / ulActiveProcCount);
+    _Print("<UserPercent>%.2f</UserPercent>\n", totalUserTime / ulActiveProcCount);
+    _Print("<KernelPercent>%.2f</KernelPercent>\n", (totalKrnlTime - totalIdleTime) / ulActiveProcCount);
+    _Print("<IdlePercent>%.2f</IdlePercent>\n", totalIdleTime / ulActiveProcCount);
     _Print("</Average>\n");
 
     _Print("</CpuUtilization>\n");
@@ -255,21 +275,43 @@ void XmlResultParser::_PrintIops(const IoBucketizer& readBucketizer, const IoBuc
         done = true;
 
         double r = 0.0;
+        double r_min = 0.0;
+        double r_max = 0.0;
+        double r_avg = 0.0;
+        double r_stddev = 0.0;
+
         double w = 0.0;
+        double w_min = 0.0;
+        double w_max = 0.0;
+        double w_avg = 0.0;
+        double w_stddev = 0.0;
 
         if (readBucketizer.GetNumberOfValidBuckets() > i)
         {
-            r = readBucketizer.GetIoBucket(i) / (bucketTimeInMs / 1000.0);
+            r = readBucketizer.GetIoBucketCount(i) / (bucketTimeInMs / 1000.0);
+            r_min = readBucketizer.GetIoBucketMinDurationUsec(i) / 1000.0;
+            r_max = readBucketizer.GetIoBucketMaxDurationUsec(i) / 1000.0;
+            r_avg = readBucketizer.GetIoBucketAvgDurationUsec(i) / 1000.0;
+            r_stddev = readBucketizer.GetIoBucketDurationStdDevUsec(i) / 1000.0;
             done = false;
         }
         if (writeBucketizer.GetNumberOfValidBuckets() > i)
         {
-            w = writeBucketizer.GetIoBucket(i) / (bucketTimeInMs / 1000.0);
+            w = writeBucketizer.GetIoBucketCount(i) / (bucketTimeInMs / 1000.0);
+            w_min = writeBucketizer.GetIoBucketMinDurationUsec(i) / 1000.0;
+            w_max = writeBucketizer.GetIoBucketMaxDurationUsec(i) / 1000.0;
+            w_avg = writeBucketizer.GetIoBucketAvgDurationUsec(i) / 1000.0;
+            w_stddev = writeBucketizer.GetIoBucketDurationStdDevUsec(i) / 1000.0;
             done = false;
         }
         if (!done)
         {
-            _Print("<Bucket SampleMillisecond=\"%lu\" Read=\"%.0f\" Write=\"%.0f\" Total=\"%.0f\"/>\n", bucketTimeInMs*(i + 1), r, w, r + w);
+            _Print("<Bucket SampleMillisecond=\"%lu\" Read=\"%.0f\" Write=\"%.0f\" Total=\"%.0f\" "
+                   "ReadMinLatencyMilliseconds=\"%.3f\" ReadMaxLatencyMilliseconds=\"%.3f\" ReadAvgLatencyMilliseconds=\"%.3f\" ReadLatencyStdDev=\"%.3f\" "
+                   "WriteMinLatencyMilliseconds=\"%.3f\" WriteMaxLatencyMilliseconds=\"%.3f\" WriteAvgLatencyMilliseconds=\"%.3f\" WriteLatencyStdDev=\"%.3f\"/>\n", 
+                   bucketTimeInMs*(i + 1), r, w, r + w,
+                   r_min, r_max, r_avg, r_stddev,
+                   w_min, w_max, w_avg, w_stddev);
         }
     }
 }
@@ -360,7 +402,7 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
     vPercentiles.push_back(make_pair(6, 99.999999));
     vPercentiles.push_back(make_pair(7, 99.9999999));
 
-    for (auto p : vPercentiles)
+    for (const auto p : vPercentiles)
     {
         _Print("<Bucket>\n");
         _Print("<Percentile>%.*f</Percentile>\n", p.first, p.second);
@@ -410,19 +452,20 @@ string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& 
         const TimeSpan& timeSpan = profile.GetTimeSpans()[iResults];
 
         _Print("<TimeSpan>\n");
-        double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
+	    const double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
         if (fTime >= 0.0000001)
         {
             // There either is a fixed number of threads for all files to share (GetThreadCount() > 0) or a number of threads per file.
             // In the latter case vThreadResults.size() == number of threads per file * file count
-            size_t ulThreadCnt = (timeSpan.GetThreadCount() > 0) ? timeSpan.GetThreadCount() : results.vThreadResults.size();
-            size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
+	        const size_t ulThreadCnt = (timeSpan.GetThreadCount() > 0) ? timeSpan.GetThreadCount() : results.vThreadResults.size();
+	        const unsigned int ulProcCount = system.processorTopology._ulActiveProcCount;
 
             _Print("<TestTimeSeconds>%.2f</TestTimeSeconds>\n", fTime);
             _Print("<ThreadCount>%u</ThreadCount>\n", ulThreadCnt);
+            _Print("<RequestCount>%u</RequestCount>\n", timeSpan.GetRequestCount());
             _Print("<ProcCount>%u</ProcCount>\n", ulProcCount);
 
-            _PrintCpuUtilization(results);
+            _PrintCpuUtilization(results, system);
 
             if (timeSpan.GetMeasureLatency())
             {

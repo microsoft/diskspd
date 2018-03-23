@@ -35,4 +35,4 @@ SOFTWARE.
 #pragma once
 
 #include <tchar.h>
-#include <stdio.h>
+#include <cstdio>

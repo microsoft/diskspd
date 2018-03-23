@@ -31,24 +31,23 @@ SOFTWARE.
 //
 
 #include "CmdRequestCreator.h"
-#include <windows.h>
-#include <stdlib.h>
-#include <assert.h>
-#include "common.h"
+//#include <windows.h>
+#include <cassert>
+#include "Common.h"
 #include "errors.h"
 #include "CmdLineParser.h"
 #include "XmlProfileParser.h"
 #include "IORequestGenerator.h"
 #include "ResultParser.h"
-#include "XmlResultParser.h"
+#include "xmlresultparser.h"
 
 /*****************************************************************************/
 // global variables
-static HANDLE g_hAbortEvent = NULL;     // handle to the 'abort' event
+static HANDLE g_hAbortEvent = nullptr;     // handle to the 'abort' event
                                         // it allows stopping I/O Request Generator in the middle of its work
                                         // the results of its work will be passed to the Results Parser
-static HANDLE g_hEventStarted = NULL;   // event signalled to notify that the actual (measured) test is to be started
-static HANDLE g_hEventFinished = NULL;  // event signalled to notify that the actual test has finished
+static HANDLE g_hEventStarted = nullptr;   // event signalled to notify that the actual (measured) test is to be started
+static HANDLE g_hEventFinished = nullptr;  // event signalled to notify that the actual test has finished
 
 /*****************************************************************************/
 // wrapper for printf. printf cannot be used directly, because IORequestGenerator.dll
@@ -74,34 +73,31 @@ BOOL WINAPI ctrlCRoutine(DWORD dwCtrlType)
         printf("\n*** Interrupted by Ctrl-C. Stopping I/O Request Generator. ***\n");
         if( !SetEvent(g_hAbortEvent) )
         {
-            fprintf(stderr, "Warning: Setting abort event failed (error code: %u)\n", GetLastError());
+            fprintf(stderr, "Warning: Setting abort event failed (error code: %lu)\n", GetLastError());
         }
         SetConsoleCtrlHandler(ctrlCRoutine, FALSE);
 
         //indicate that the signal has been handled
         return TRUE;
     }
-    else
-    {
-        return FALSE;
-    }
+	return FALSE;
 }
 
 /*****************************************************************************/
 void TestStarted()
 {
-    if( (NULL != g_hEventStarted) && !SetEvent(g_hEventStarted) )
+    if( (nullptr != g_hEventStarted) && !SetEvent(g_hEventStarted) )
     {
-        fprintf(stderr, "Warning: Setting test start notification event failed (error code: %u)\n", GetLastError());
+        fprintf(stderr, "Warning: Setting test start notification event failed (error code: %lu)\n", GetLastError());
     }
 }
 
 /*****************************************************************************/
 void TestFinished()
 {
-    if( (NULL != g_hEventFinished) && !SetEvent(g_hEventFinished) )
+    if( (nullptr != g_hEventFinished) && !SetEvent(g_hEventFinished) )
     {
-        fprintf(stderr, "Warning: Setting test finish notification event failed (error code: %u)\n", GetLastError());
+        fprintf(stderr, "Warning: Setting test finish notification event failed (error code: %lu)\n", GetLastError());
     }
 }
 
@@ -111,10 +107,10 @@ int __cdecl main(int argc, const char* argv[])
     //
     // parse cmd line parameters
     //
-    struct Synchronization synch;        //sychronization structure
+    struct Synchronization synch{};        //sychronization structure
     synch.ulStructSize = sizeof(synch);
-    synch.hStopEvent = NULL;
-    synch.hStartEvent = NULL;
+    synch.hStopEvent = nullptr;
+    synch.hStartEvent = nullptr;
 
     CmdLineParser cmdLineParser;
     Profile profile;
@@ -130,10 +126,10 @@ int __cdecl main(int argc, const char* argv[])
     // create abort event if stop event is not explicitly provided by the user (otherwise use the stop event)
     //
 
-    if (NULL == synch.hStopEvent)
+    if (nullptr == synch.hStopEvent)
     {
-        synch.hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-        if( NULL == synch.hStopEvent )
+        synch.hStopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+        if( nullptr == synch.hStopEvent )
         {
             fprintf(stderr, "Unable to create an abort event for CTRL+C\n");
             //FUTURE EXTENSION: change error code
@@ -157,7 +153,7 @@ int __cdecl main(int argc, const char* argv[])
     //
     ResultParser resultParser;
     XmlResultParser xmlResultParser;
-    IResultParser *pResultParser = nullptr;
+    IResultParser *pResultParser;
     if (profile.GetResultsFormat() == ResultsFormat::Xml)
     {
         pResultParser = &xmlResultParser;
@@ -168,17 +164,17 @@ int __cdecl main(int argc, const char* argv[])
     }
 
     IORequestGenerator ioGenerator;
-    if (!ioGenerator.GenerateRequests(profile, *pResultParser, (PRINTF)PrintOut, (PRINTF)PrintError, (PRINTF)PrintOut, &synch))
+    if (!ioGenerator.GenerateRequests(profile, *pResultParser, static_cast<PRINTF>(PrintOut), static_cast<PRINTF>(PrintError), static_cast<PRINTF>(PrintOut), &synch))
     {
         fprintf(stderr, "Error generating I/O requests\n");
         return 1;
     }
 
-    if( NULL != synch.hStartEvent )
+    if( nullptr != synch.hStartEvent )
     {
         CloseHandle(synch.hStartEvent);
     }
-    if( NULL != synch.hStopEvent )
+    if( nullptr != synch.hStopEvent )
     {
         CloseHandle(synch.hStopEvent);
     }
@@ -186,7 +182,7 @@ int __cdecl main(int argc, const char* argv[])
     {
         CloseHandle(g_hEventStarted);
     }
-    if( NULL != g_hEventFinished )
+    if( nullptr != g_hEventFinished )
     {
         CloseHandle(g_hEventFinished);
     }

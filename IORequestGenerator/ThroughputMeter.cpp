@@ -29,12 +29,13 @@ SOFTWARE.
 
 #include "ThroughputMeter.h"
 
-ThroughputMeter::ThroughputMeter(void) :
-    _fRunning(false)
+ThroughputMeter::ThroughputMeter() :
+	_fRunning(false), _fThrottle(false), _fThink(false), _cbCompleted(0), _cbBlockSize(0), _cBytesPerMillisecond(0),
+	_ullStartTimestamp(0), _ullDelayUntil(0), _thinkTime(0), _burstSize(0), _cIO(0)
 {
 }
 
-bool ThroughputMeter::IsRunning(void) const
+bool ThroughputMeter::IsRunning() const
 {
     return _fRunning;
 }
@@ -71,36 +72,27 @@ void ThroughputMeter::Start(DWORD cBytesPerMillisecond, DWORD dwBlockSize, DWORD
     }
 }
 
-DWORD ThroughputMeter::GetSleepTime(void) const
+DWORD ThroughputMeter::GetSleepTime() const
 {
     if (_fThink)
     {
-        ULONGLONG ullTimestamp = GetTickCount64();
+	    const ULONGLONG ullTimestamp = GetTickCount64();
         if (ullTimestamp < _ullDelayUntil)
         {
-            return (DWORD)(_ullDelayUntil - ullTimestamp);
+            return static_cast<DWORD>(_ullDelayUntil - ullTimestamp);
         }
-        else
-        {
-            return (_fThrottle) ? _GetThrottleTime() : 0;
-        }
+	    return (_fThrottle) ? _GetThrottleTime() : 0;
     }
-    else
-    {
-        if (_fThrottle) // think time has not been specified only check for throttling
-        {
-            return _GetThrottleTime();
-        }
-        else
-        {
-            return 0;
-        }
-    }
+	if (_fThrottle) // think time has not been specified only check for throttling
+	{
+		return _GetThrottleTime();
+	}
+	return 0;
 }
 
-DWORD ThroughputMeter::_GetThrottleTime(void) const
+DWORD ThroughputMeter::_GetThrottleTime() const
 {
-    ULONGLONG cbExpected = (GetTickCount64() - _ullStartTimestamp) * _cBytesPerMillisecond;
+	const ULONGLONG cbExpected = (GetTickCount64() - _ullStartTimestamp) * _cBytesPerMillisecond;
     return cbExpected >= (_cbCompleted + _cbBlockSize) ? 0 : 1;
 }
 

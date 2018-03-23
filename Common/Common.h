@@ -30,12 +30,12 @@ SOFTWARE.
 #pragma once
 
 #include <windows.h>
-#include <ctime>
 #include <vector>
 #include <Winternl.h>   //ntdll.dll
-#include <assert.h>
+#include <cassert>
 #include "Histogram.h"
 #include "IoBucketizer.h"
+#include "ThroughputMeter.h"
 
 using namespace std;
 
@@ -48,11 +48,11 @@ using namespace std;
 //
 //      Monday, June 16, 2014 12:00:00 AM
 
-#define DISKSPD_RELEASE_TAG ""
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.18a" DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2016/5/31"
+#define DISKSPD_RELEASE_TAG " (MS)"
+#define DISKSPD_NUMERIC_VERSION_STRING "2.0.19a" DISKSPD_RELEASE_TAG
+#define DISKSPD_DATE_VERSION_STRING "2017/4/28"
 
-typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
+using PRINTF = void(WINAPI *)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
 struct ETWEventCounters
 {
@@ -138,16 +138,16 @@ public:
 
     static UINT64 GetTime();
 
-    static double PerfTimeToMicroseconds(const double);
-    static double PerfTimeToMilliseconds(const double);
-    static double PerfTimeToSeconds(const double);
-    static double PerfTimeToMicroseconds(const UINT64);
-    static double PerfTimeToMilliseconds(const UINT64);
-    static double PerfTimeToSeconds(const UINT64);
+    static double PerfTimeToMicroseconds(double);
+    static double PerfTimeToMilliseconds(double);
+    static double PerfTimeToSeconds(double);
+    static double PerfTimeToMicroseconds(UINT64);
+    static double PerfTimeToMilliseconds(UINT64);
+    static double PerfTimeToSeconds(UINT64);
 
-    static UINT64 MicrosecondsToPerfTime(const double);
-    static UINT64 MillisecondsToPerfTime(const double);
-    static UINT64 SecondsToPerfTime(const double);
+    static UINT64 MicrosecondsToPerfTime(double);
+    static UINT64 MillisecondsToPerfTime(double);
+    static UINT64 SecondsToPerfTime(double);
 
 private:
 
@@ -155,6 +155,38 @@ private:
     static UINT64 _GetPerfTimerFreq();
 
     friend class UnitTests::PerfTimerUnitTests;
+};
+
+//
+// This code implements Bob Jenkins public domain simple random number generator
+// See http://burtleburtle.net/bob/rand/smallprng.html for details
+//
+
+class Random
+{
+public:
+    explicit Random(UINT64 ulSeed = 0);
+
+	UINT64 Rand64()
+    {
+	    const UINT64 e = _ulState[0] - _rotl64(_ulState[1], 7);
+        _ulState[0] = _ulState[1] ^ _rotl64(_ulState[2], 13);
+        _ulState[1] = _ulState[2] + _rotl64(_ulState[3], 37);
+        _ulState[2] = _ulState[3] + e;
+        _ulState[3] = e + _ulState[0];
+        
+        return _ulState[3];
+    }
+
+	UINT32 Rand32()
+    {
+        return static_cast<UINT32>(Rand64());
+    }
+
+    void RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay);
+
+private:
+    UINT64 _ulState[4]{};
 };
 
 struct PercentileDescriptor
@@ -166,7 +198,7 @@ struct PercentileDescriptor
 class Util
 {
 public:
-    static string DoubleToStringHelper(const double);
+    static string DoubleToStringHelper(double);
     template<typename T> static T QuotientCeiling(T dividend, T divisor)
     {
         return (dividend + divisor - 1) / divisor;
@@ -197,47 +229,46 @@ public:
 
     void Add(DWORD dwBytesTransferred,
              IOOperation type,
-             PUINT64 pullIoStartTime,
-             PUINT64 pullSpanStartTime,
+             UINT64 ullIoStartTime,
+             UINT64 ullSpanStartTime,
              bool fMeasureLatency,
              bool fCalculateIopsStdDev
              )
     {
-        float fDurationMsec = 0;
+        double lfDurationUsec = 0;
         UINT64 ullEndTime = 0;
+        
         // assume it is worthwhile to stay off of the time query path unless needed (micro-overhead)
         if (fMeasureLatency || fCalculateIopsStdDev)
         {
             ullEndTime = PerfTimer::GetTime();
+            const UINT64 ullDuration = ullEndTime - ullIoStartTime;
+            lfDurationUsec = PerfTimer::PerfTimeToMicroseconds(ullDuration);
         }
 
         if (fMeasureLatency)
         {
-            UINT64 ullDuration = ullEndTime - *pullIoStartTime;
-            fDurationMsec = static_cast<float>(PerfTimer::PerfTimeToMicroseconds(ullDuration));
-
             if (type == IOOperation::ReadIO)
             {
-                readLatencyHistogram.Add(fDurationMsec);
+                readLatencyHistogram.Add(static_cast<float>(lfDurationUsec));
             }
             else
             {
-                writeLatencyHistogram.Add(fDurationMsec);
+                writeLatencyHistogram.Add(static_cast<float>(lfDurationUsec));
             }
         }
 
-        UINT64 ullRelativeCompletionTime = 0;
         if (fCalculateIopsStdDev)
         {
-            ullRelativeCompletionTime = ullEndTime - *pullSpanStartTime;
+            const UINT64 ullRelativeCompletionTime = ullEndTime - ullSpanStartTime;
 
             if (type == IOOperation::ReadIO)
             {
-                readBucketizer.Add(ullRelativeCompletionTime);
+                readBucketizer.Add(ullRelativeCompletionTime, lfDurationUsec);
             }
             else
             {
-                writeBucketizer.Add(ullRelativeCompletionTime);
+                writeBucketizer.Add(ullRelativeCompletionTime, lfDurationUsec);
             }
         }
 
@@ -290,8 +321,8 @@ public:
     vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vSystemProcessorPerfInfo;
 };
 
-typedef void (*CALLBACK_TEST_STARTED)();    //callback function to notify that the measured test is about to start
-typedef void (*CALLBACK_TEST_FINISHED)();   //callback function to notify that the measured test has just finished
+using CALLBACK_TEST_STARTED = void(*)();    //callback function to notify that the measured test is about to start
+using CALLBACK_TEST_FINISHED = void(*)();   //callback function to notify that the measured test has just finished
 
 class ProcessorGroupInformation
 {
@@ -307,36 +338,21 @@ public:
         BYTE ActiveProcessorCount,
         WORD Group,
         KAFFINITY ActiveProcessorMask) :
-        _maximumProcessorCount(MaximumProcessorCount),
+		_groupNumber(Group),
+		_maximumProcessorCount(MaximumProcessorCount),
         _activeProcessorCount(ActiveProcessorCount),
-        _groupNumber(Group),
         _activeProcessorMask(ActiveProcessorMask)
     {
     }
 
-    bool IsProcessorActive(BYTE Processor)
+    bool IsProcessorActive(BYTE Processor) const
     {
-        if (IsProcessorValid(Processor) &&
-            (((KAFFINITY)1 << Processor) & _activeProcessorMask) != 0)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+	    return IsProcessorValid(Processor) && ((static_cast<KAFFINITY>(1) << Processor) & _activeProcessorMask) != 0;
     }
 
-    bool IsProcessorValid(BYTE Processor)
+    bool IsProcessorValid(BYTE Processor) const
     {
-        if (Processor < _maximumProcessorCount)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+	    return Processor < _maximumProcessorCount;
     }
 };
 
@@ -345,19 +361,18 @@ class ProcessorTopology
 public:
     vector<ProcessorGroupInformation> _vProcessorGroupInformation;
     DWORD _ulProcCount;
+    DWORD _ulActiveProcCount;
 
     ProcessorTopology()
     {
-        BOOL fResult;
-        PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX pInformation;
-        DWORD ReturnedLength = 1024;
-        pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[ReturnedLength];
+	    DWORD ReturnedLength = 1024;
+	    auto pInformation = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[ReturnedLength]);
 
-        fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
+        BOOL fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
         if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
         {
             delete [] pInformation;
-            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[ReturnedLength];
+            pInformation = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[ReturnedLength]);
             fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
         }
 
@@ -366,6 +381,7 @@ public:
             // Group information comes back as a single (large) element, not an array.
             assert(ReturnedLength == pInformation->Size);
             _ulProcCount = 0;
+            _ulActiveProcCount = 0;
 
             // Fill in group topology vector so we can answer questions about active/max procs
             for (WORD i = 0; i < pInformation->Group.ActiveGroupCount; i++)
@@ -377,22 +393,16 @@ public:
                     pInformation->Group.GroupInfo[i].ActiveProcessorMask
                     );
                 _ulProcCount += _vProcessorGroupInformation[i]._maximumProcessorCount;
+                _ulActiveProcCount += _vProcessorGroupInformation[i]._activeProcessorCount;
             }
         }
 
         delete [] pInformation;
     }
 
-    bool IsGroupValid(WORD Group)
+    bool IsGroupValid(WORD Group) const
     {
-        if (Group < _vProcessorGroupInformation.size())
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+	    return Group < _vProcessorGroupInformation.size();
     }
 
     // Return the next active processor in the system, exclusive (Next = true)
@@ -434,15 +444,14 @@ public:
     string sComputerName;
     ProcessorTopology processorTopology;
 
-    SystemInformation()
+    SystemInformation() : StartTime({})
     {
         // System Name
         char buffer[64];
         DWORD cb = _countof(buffer);
-        BOOL fResult;
 
 #pragma prefast(suppress:38020, "Yes, we're aware this is an ANSI API in a UNICODE project")
-        fResult = GetComputerNameExA(ComputerNamePhysicalDnsHostname, buffer, &cb);
+	    const BOOL fResult = GetComputerNameExA(ComputerNamePhysicalDnsHostname, buffer, &cb);
         if (fResult)
         {
             sComputerName = buffer;
@@ -453,12 +462,12 @@ public:
     }
 
     // for unit test, squelch variable timestamp
-    void SystemInformation::ResetTime()
+    void ResetTime()
     {
         StartTime = { 0 };
     }
 
-    string SystemInformation::GetXml() const
+    string GetXml() const
     {
         char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
         int nWritten;
@@ -552,6 +561,29 @@ enum class WriteThroughMode {
     On,
 };
 
+class ThreadTarget
+{
+public:
+
+    ThreadTarget() :
+        _ulThread(0xFFFFFFFF),
+        _ulWeight(0)
+    {
+    }
+
+    void SetThread(UINT32 ulThread) { _ulThread = ulThread; }
+    UINT32 GetThread() const { return _ulThread; }
+
+    void SetWeight(UINT32 ulWeight) { _ulWeight = ulWeight; }
+    UINT32 GetWeight() const { return _ulWeight; }
+
+    string GetXml() const;
+
+private:
+    UINT32 _ulThread;
+    UINT32 _ulWeight;
+};
+
 class Target
 {
 public:
@@ -579,19 +611,20 @@ public:
         _dwBurstSize(0),
         _dwThinkTime(0),
         _fThinkTime(false),
+        _dwThroughputBytesPerMillisecond(0),
         _fSequentialScanHint(false),
         _fRandomAccessHint(false),
         _fTemporaryFileHint(false),
         _fUseLargePages(false),
-        _ioPriorityHint(IoPriorityHintNormal),
-        _dwThroughputBytesPerMillisecond(0),
         _cbRandomDataWriteBuffer(0),
-        _sRandomDataWriteBufferSourcePath(),
-        _pRandomDataWriteBuffer(nullptr)
+		_sRandomDataWriteBufferSourcePath(string()),
+        _pRandomDataWriteBuffer(nullptr),
+        _ioPriorityHint(IoPriorityHintNormal),
+        _ulWeight(1)
     {
     }
 
-    void SetPath(string sPath) { _sPath = sPath; }
+    void SetPath(const string& sPath) { _sPath = sPath; }
     string GetPath() const { return _sPath; }
 
     void SetBlockSizeInBytes(DWORD dwBlockSize) { _dwBlockSize = dwBlockSize; }
@@ -613,6 +646,7 @@ public:
 
     void SetBaseFileOffsetInBytes(UINT64 ullBaseFileOffset) { _ullBaseFileOffset = ullBaseFileOffset; }
     UINT64 GetBaseFileOffsetInBytes() const { return _ullBaseFileOffset; }
+    UINT64 GetThreadBaseFileOffsetInBytes(UINT32 ulThreadNo) const { return _ullBaseFileOffset + ulThreadNo * _ullThreadStride; }
 
     void SetSequentialScanHint(bool fBool) { _fSequentialScanHint = fBool; }
     bool GetSequentialScanHint() const { return _fSequentialScanHint; }
@@ -639,9 +673,9 @@ public:
     bool GetZeroWriteBuffers() const { return _fZeroWriteBuffers; }
 
     void SetRandomDataWriteBufferSize(UINT64 cbWriteBuffer) { _cbRandomDataWriteBuffer = cbWriteBuffer; }
-    UINT64 GetRandomDataWriteBufferSize(void) const { return _cbRandomDataWriteBuffer; }
+    UINT64 GetRandomDataWriteBufferSize() const { return _cbRandomDataWriteBuffer; }
 
-    void SetRandomDataWriteBufferSourcePath(string sPath) { _sRandomDataWriteBufferSourcePath = sPath; }
+    void SetRandomDataWriteBufferSourcePath(const string& sPath) { _sRandomDataWriteBufferSourcePath = sPath; }
     string GetRandomDataWriteBufferSourcePath() const { return _sRandomDataWriteBufferSourcePath; }
 
     void SetUseBurstSize(bool fBool) { _fUseBurstSize = fBool; }
@@ -687,6 +721,15 @@ public:
     }
     PRIORITY_HINT GetIOPriorityHint() const { return _ioPriorityHint; }
 
+    void SetWeight(UINT32 ulWeight) { _ulWeight = ulWeight; }
+    UINT32 GetWeight() const { return _ulWeight; }
+
+    void AddThreadTarget(const ThreadTarget &threadTarget) 
+    {
+        _vThreadTargets.push_back(threadTarget);
+    }
+    vector<ThreadTarget> GetThreadTargets() const { return _vThreadTargets; }
+
     void SetPrecreated(bool fBool) { _fPrecreated = fBool; }
     bool GetPrecreated() const { return _fPrecreated; }
 
@@ -695,11 +738,11 @@ public:
 
     string GetXml() const;
 
-    bool AllocateAndFillRandomDataWriteBuffer();
+    bool AllocateAndFillRandomDataWriteBuffer(Random *pRand);
     void FreeRandomDataWriteBuffer();
-    BYTE* GetRandomDataWriteBuffer();
+    BYTE* GetRandomDataWriteBuffer(Random *pRand) const;
 
-    DWORD GetCreateFlags(bool fAsync)
+    DWORD GetCreateFlags(bool fAsync) const
     {
         DWORD dwFlags = FILE_ATTRIBUTE_NORMAL;
 
@@ -718,7 +761,7 @@ public:
             dwFlags |= FILE_ATTRIBUTE_TEMPORARY;
         }
 
-        if (GetRequestCount() > 1 || fAsync)
+        if (fAsync)
         {
             dwFlags |= FILE_FLAG_OVERLAPPED;
         }
@@ -779,7 +822,10 @@ private:
 
     PRIORITY_HINT _ioPriorityHint;
 
-    bool _FillRandomDataWriteBuffer();
+    UINT32 _ulWeight;
+    vector<ThreadTarget> _vThreadTargets;
+
+    bool _FillRandomDataWriteBuffer(Random *pRand) const;
 
     friend class UnitTests::ProfileUnitTests;
     friend class UnitTests::TargetUnitTests;
@@ -808,6 +854,8 @@ public:
         _ulCoolDown(0),
         _ulRandSeed(0),
         _dwThreadCount(0),
+        _dwRequestCount(0),
+        _fRandomWriteData(false),
         _fDisableAffinity(false),
         _fCompletionRoutines(false),
         _fMeasureLatency(false),
@@ -830,6 +878,7 @@ public:
     {
         _vTargets.push_back(Target(target));
     }
+
     vector<Target> GetTargets() const { return _vTargets; }
 
     void SetDuration(UINT32 ulDuration) { _ulDuration = ulDuration; }
@@ -844,8 +893,14 @@ public:
     void SetRandSeed(UINT32 ulRandSeed) { _ulRandSeed = ulRandSeed; }
     UINT32 GetRandSeed() const { return _ulRandSeed; }
 
+    void SetRandomWriteData(bool fRandomWriteData) { _fRandomWriteData = fRandomWriteData; }
+    bool GetRandomWriteData() const { return _fRandomWriteData; }
+
     void SetThreadCount(DWORD dwThreadCount) { _dwThreadCount = dwThreadCount; }
     DWORD GetThreadCount() const { return _dwThreadCount; }
+
+    void SetRequestCount(DWORD dwRequestCount) { _dwRequestCount = dwRequestCount; }
+    DWORD GetRequestCount() const { return _dwRequestCount; }
 
     void SetDisableAffinity(bool fDisableAffinity) { _fDisableAffinity = fDisableAffinity; }
     bool GetDisableAffinity() const { return _fDisableAffinity; }
@@ -863,7 +918,7 @@ public:
     UINT32 GetIoBucketDurationInMilliseconds() const { return _ulIoBucketDurationInMilliseconds; }
     
     string GetXml() const;
-    void MarkFilesAsPrecreated(const vector<string> vFiles);
+    void MarkFilesAsPrecreated(const vector<string>& vFiles);
 
 private:
     vector<Target> _vTargets;
@@ -872,6 +927,8 @@ private:
     UINT32 _ulCoolDown;
     UINT32 _ulRandSeed;
     DWORD _dwThreadCount;
+    DWORD _dwRequestCount;
+    bool _fRandomWriteData;
     bool _fDisableAffinity;
     vector<AffinityAssignment> _vAffinity;
     bool _fCompletionRoutines;
@@ -902,6 +959,8 @@ public:
     Profile() :
         _fVerbose(false),
         _dwProgress(0),
+        _resultsFormat(ResultsFormat::Text),
+        _precreateFiles(PrecreateFiles::None),
         _fEtwEnabled(false),
         _fEtwProcess(false),
         _fEtwThread(false),
@@ -914,9 +973,7 @@ public:
         _fEtwUsePagedMemory(false),
         _fEtwUsePerfTimer(false),
         _fEtwUseSystemTimer(false),
-        _fEtwUseCyclesCounter(false),
-        _resultsFormat(ResultsFormat::Text),
-        _precreateFiles(PrecreateFiles::None)
+        _fEtwUseCyclesCounter(false)
     {
     }
 
@@ -938,7 +995,7 @@ public:
     void SetProgress(DWORD dwProgress) { _dwProgress = dwProgress; }
     DWORD GetProgress() const { return _dwProgress; }
 
-    void SetCmdLine(string sCmdLine) { _sCmdLine = sCmdLine; }
+    void SetCmdLine(const string& sCmdLine) { _sCmdLine = sCmdLine; }
     string GetCmdLine() const { return _sCmdLine; };
 
     void SetResultsFormat(ResultsFormat format) { _resultsFormat = format; }
@@ -978,11 +1035,11 @@ public:
 
     string GetXml() const;
     bool Validate(bool fSingleSpec, SystemInformation *pSystem = nullptr) const;
-    void MarkFilesAsPrecreated(const vector<string> vFiles);
+    void MarkFilesAsPrecreated(const vector<string>& vFiles);
+
+	Profile(const Profile& T) = delete;
 
 private:
-    Profile(const Profile& T);
-
     vector<TimeSpan>_vTimeSpans;
     bool _fVerbose;
     DWORD _dwProgress;
@@ -1008,18 +1065,111 @@ private:
     friend class UnitTests::ProfileUnitTests;
 };
 
+class IORequest
+{
+public:
+    explicit IORequest(Random *pRand) :
+		_overlapped({}),
+        _ullTotalWeight(0),
+		_fEqualWeights(true),
+		_pRand(pRand),
+		_pCurrentTarget(nullptr),
+		_ioType(IOOperation::ReadIO),
+		_ullStartTime(0),
+		_ulRequestIndex(0xFFFFFFFF)
+    {
+        memset(&_overlapped, 0, sizeof(OVERLAPPED));
+        _overlapped.Offset = 0xFFFFFFFF;
+        _overlapped.OffsetHigh = 0xFFFFFFFF;
+    }
+
+    static IORequest *OverlappedToIORequest(OVERLAPPED *pOverlapped)
+    {
+        return CONTAINING_RECORD(pOverlapped, IORequest, _overlapped);
+    }
+
+    OVERLAPPED *GetOverlapped() { return &_overlapped; }
+    
+    void AddTarget(Target *pTarget, UINT32 ulWeight)
+    { 
+        _vTargets.push_back(pTarget); 
+        _vulTargetWeights.push_back(ulWeight);
+        _ullTotalWeight += ulWeight;
+
+        if (ulWeight != _vulTargetWeights[0]) {
+            _fEqualWeights = false;
+        }
+    }
+
+    Target *GetCurrentTarget() const { return _pCurrentTarget; }
+
+    Target *GetNextTarget()
+    {
+	    if (_vTargets.size() == 1) {
+            _pCurrentTarget = _vTargets[0];
+        }
+        else if (_fEqualWeights) {
+            _pCurrentTarget = _vTargets[_pRand->Rand32() % _vTargets.size()];
+        }
+        else {
+            UINT64 ullWeight = _pRand->Rand64() % _ullTotalWeight;
+            
+            for (int iTarget = 0; iTarget < _vTargets.size(); iTarget++) {
+                if (ullWeight < _vulTargetWeights[iTarget]) {
+                    _pCurrentTarget = _vTargets[iTarget];
+                    break;
+                }
+            
+                ullWeight -= _vulTargetWeights[iTarget];
+            }
+        }
+
+        return _pCurrentTarget;
+    }
+
+    void SetIoType(IOOperation ioType) { _ioType = ioType; }
+    IOOperation GetIoType() const { return _ioType; }
+
+    void SetStartTime(UINT64 ullStartTime) { _ullStartTime = ullStartTime; }
+    UINT64 GetStartTime() const { return _ullStartTime; }
+
+    void SetRequestIndex(UINT32 ulRequestIndex) { _ulRequestIndex = ulRequestIndex; }
+    UINT32 GetRequestIndex() const { return _ulRequestIndex; }
+
+private:
+    OVERLAPPED _overlapped{};
+    vector<Target*> _vTargets;
+    vector<UINT32> _vulTargetWeights;
+    UINT64 _ullTotalWeight;
+    bool _fEqualWeights;
+    Random *_pRand;
+    Target *_pCurrentTarget;
+    IOOperation _ioType;
+    UINT64 _ullStartTime;
+    UINT32 _ulRequestIndex;
+};
+
 class ThreadParameters
 {
 public:
     ThreadParameters() :
-        pProfile(nullptr),
-        pTimeSpan(nullptr),
-        pullSharedSequentialOffsets(nullptr),
-        ulRandSeed(0),
-        ulThreadNo(0),
-        ulRelativeThreadNo(0)
-    {
-    }
+		pProfile(nullptr),
+		pTimeSpan(nullptr),
+		pullSharedSequentialOffsets(nullptr),
+		pRand(nullptr),
+		ulRandSeed(0),
+		ulThreadNo(0),
+		ulRelativeThreadNo(0),
+		pfAccountingOn(nullptr),
+		pullStartTime(nullptr),
+		pResults(nullptr),
+		dwIOCnt(0),
+		wGroupNum(0),
+		bProcNum(0),
+		hStartEvent(nullptr),
+		hEndEvent(nullptr)
+	{
+	}
 
     const Profile *pProfile;
     const TimeSpan *pTimeSpan;
@@ -1027,12 +1177,10 @@ public:
     vector<Target> vTargets;
     vector<HANDLE> vhTargets;
     vector<UINT64> vullFileSizes;
+    vector<size_t> vulReadBufferSize;
     vector<BYTE *> vpDataBuffers;
-    vector<OVERLAPPED> vOverlapped;             // each target has RequestCount OVERLAPPED structures
-    vector<size_t> vOverlappedIdToTargetId;
-    vector<size_t> vFirstOverlappedIdForTargetId;   //id of the first overlapped structure in the vOverlapped vector by target
-    vector<IOOperation> vdwIoType;                        //as many as vOverlapped; used by the completion routines
-    vector<UINT64> vIoStartTimes;
+    vector<IORequest> vIORequest;
+    vector<ThroughputMeter> vThroughputMeters;
   
     // For vanilla sequential access (-s):
     // Private per-thread offsets, incremented directly, indexed to number of targets
@@ -1042,6 +1190,8 @@ public:
     // Pointers to offsets shared between threads, incremented with an interlocked op
     UINT64* pullSharedSequentialOffsets;
 
+    Random *pRand;
+
     UINT32 ulRandSeed;
     UINT32 ulThreadNo;
     UINT32 ulRelativeThreadNo;
@@ -1050,6 +1200,9 @@ public:
     volatile bool *pfAccountingOn;
     PUINT64 pullStartTime;
     ThreadResults *pResults;
+
+    //progress dots
+    DWORD dwIOCnt;
 
     //group affinity
     WORD wGroupNum;
@@ -1065,12 +1218,12 @@ public:
     BYTE* GetWriteBuffer(size_t iTarget, size_t iRequest);
     DWORD GetTotalRequestCount() const;
 
-private:
-    ThreadParameters(const ThreadParameters& T);
+	ThreadParameters(const ThreadParameters& T) = delete;
 };
 
 class IResultParser
 {
 public:
-    virtual string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults) = 0;
+	virtual ~IResultParser() = default;
+	virtual string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults) = 0;
 };
