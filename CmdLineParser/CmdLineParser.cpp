@@ -107,7 +107,7 @@ bool CmdLineParser::_GetSizeInBytes(const char *pszSize, UINT64& ullSize) const
 
 bool CmdLineParser::_GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath) const
 {
-    bool fOk = true;
+    bool fOk;
 	const size_t iComma = sArg.find(',');
     if (iComma == std::string::npos)
     {
@@ -1095,7 +1095,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'w':    //write test [default=read]
             {
-                int c = -1;
+                int c;
                 if (*(arg + 1) == '\0')
                 {
                     c = _ulWriteRatio;
@@ -1313,7 +1313,7 @@ bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pP
 {
     assert(nullptr != argv);
     assert(nullptr != pProfile);
-    assert(NULL != synch);
+    assert(nullptr != synch);
 
     if (argc < 2)
     {
@@ -1334,7 +1334,7 @@ bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pP
     pProfile->SetCmdLine(sCmdLine);
 
     //check if parameters should be read from an xml file
-    bool fOk = true;
+    bool fOk;
     bool fCmdLine;
 
     if (argc == 2 && (argv[1][0] == '-' || argv[1][0] == '/') && argv[1][1] == 'X' && argv[1][2] != '\0')

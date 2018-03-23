@@ -80,10 +80,7 @@ BOOL WINAPI ctrlCRoutine(DWORD dwCtrlType)
         //indicate that the signal has been handled
         return TRUE;
     }
-    else
-    {
-        return FALSE;
-    }
+	return FALSE;
 }
 
 /*****************************************************************************/
@@ -156,7 +153,7 @@ int __cdecl main(int argc, const char* argv[])
     //
     ResultParser resultParser;
     XmlResultParser xmlResultParser;
-    IResultParser *pResultParser = nullptr;
+    IResultParser *pResultParser;
     if (profile.GetResultsFormat() == ResultsFormat::Xml)
     {
         pResultParser = &xmlResultParser;

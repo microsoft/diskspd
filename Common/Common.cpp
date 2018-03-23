@@ -106,7 +106,7 @@ Random::Random(UINT64 ulSeed)
 
 void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
 {
-	UINT32 Remaining = static_cast<UINT32>(reinterpret_cast<ULONG_PTR>(pBuffer) & 7);
+	auto Remaining = static_cast<UINT32>(reinterpret_cast<ULONG_PTR>(pBuffer) & 7);
     UINT64 r1, r2, r3, r4;
 
     //
@@ -125,7 +125,7 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
         }
     }
 
-    UINT64 *pBuffer64 = reinterpret_cast<UINT64*>(pBuffer);
+	auto*pBuffer64 = reinterpret_cast<UINT64*>(pBuffer);
     Remaining = ulLength / 8;
     ulLength -= Remaining * 8;
     pBuffer += Remaining * 8;
@@ -449,7 +449,6 @@ bool Target::_FillRandomDataWriteBuffer(Random *pRand) const
 bool Target::AllocateAndFillRandomDataWriteBuffer(Random *pRand)
 {
     assert(_pRandomDataWriteBuffer == nullptr);
-    bool fOk = true;
 	const auto cb = static_cast<size_t>(GetRandomDataWriteBufferSize());
     assert(cb > 0);
 
@@ -466,7 +465,7 @@ bool Target::AllocateAndFillRandomDataWriteBuffer(Random *pRand)
         _pRandomDataWriteBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cb, MEM_COMMIT, PAGE_READWRITE));
     }
 
-    fOk = (_pRandomDataWriteBuffer != nullptr);
+	auto fOk = (_pRandomDataWriteBuffer != nullptr);
     if (fOk)
     {
         fOk = _FillRandomDataWriteBuffer(pRand);
@@ -499,7 +498,7 @@ BYTE* Target::GetRandomDataWriteBuffer(Random *pRand) const
         randomOffset -= (randomOffset % cbAlignment);
     }
 
-    BYTE *pBuffer = reinterpret_cast<BYTE*>(reinterpret_cast<ULONG_PTR>(_pRandomDataWriteBuffer)+randomOffset);
+	auto pBuffer = reinterpret_cast<BYTE*>(reinterpret_cast<ULONG_PTR>(_pRandomDataWriteBuffer)+randomOffset);
 
     // unbuffered IO needs aligned addresses
     assert(!fUnbufferedIO || (reinterpret_cast<ULONG_PTR>(pBuffer) % 512 == 0));
@@ -870,8 +869,6 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 
 bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
 {
-    bool fOk = true;
-    BYTE *pDataBuffer = nullptr;
     DWORD requestCount = target.GetRequestCount();
 
 	// Use global request count
@@ -883,6 +880,7 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
 
     // Create separate read & write buffers so the write content doesn't get overriden by reads
 	const auto cbDataBuffer = static_cast<size_t>(target.GetBlockSizeInBytes()) * requestCount * 2;
+	BYTE *pDataBuffer;
     if (target.GetUseLargePages())
     {
 	    const size_t cbMinLargePage = GetLargePageMinimum();
@@ -895,7 +893,7 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
         pDataBuffer = static_cast<BYTE *>(VirtualAlloc(nullptr, cbDataBuffer, MEM_COMMIT, PAGE_READWRITE));
     }
 
-    fOk = (pDataBuffer != nullptr);
+	const bool fOk = (pDataBuffer != nullptr);
 
     //fill buffer (useful only for write tests)
     if (fOk && target.GetWriteRatio() > 0)
@@ -908,7 +906,8 @@ bool ThreadParameters::AllocateAndFillBufferForTarget(const Target& target)
         {
             for (size_t i = 0; i < cbDataBuffer; i++)
             {
-                pDataBuffer[i] = static_cast<BYTE>(i % 256); /* NB: the writable size may be 'cbRoundedSize' bytes, but '2' bytes might be written */
+                pDataBuffer[i] = static_cast<BYTE>(i % 256);
+	            /* NB: the writable size may be 'cbRoundedSize' bytes, but '2' bytes might be written */
             }
         }
     }
@@ -929,7 +928,7 @@ BYTE* ThreadParameters::GetReadBuffer(size_t iTarget, size_t iRequest)
 
 BYTE* ThreadParameters::GetWriteBuffer(size_t iTarget, size_t iRequest)
 {
-    BYTE *pBuffer = nullptr;
+    BYTE *pBuffer;
     
     Target& target(vTargets[iTarget]);
 	const auto cb = static_cast<size_t>(target.GetRandomDataWriteBufferSize());

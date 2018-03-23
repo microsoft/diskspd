@@ -71,7 +71,7 @@ private:
 	static void _DisplayFileSizeVerbose(bool fVerbose, UINT64 fsize);
     bool _GetActiveGroupsAndProcs() const; /* not implemented */
 	static struct ETWSessionInfo _GetResultETWSession(const EVENT_TRACE_PROPERTIES *pTraceProperties);
-    bool _GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount) const;
+	static bool _GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount);
     void _InitializeGlobalParameters();
     bool _LoadDLLs();
 	static bool _StopETW(bool fUseETW, TRACEHANDLE hTraceSession);

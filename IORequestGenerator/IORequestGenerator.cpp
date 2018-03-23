@@ -65,7 +65,6 @@ UINT64 GetPartitionSize(HANDLE hFile)
     }
 
     DWORD rbcnt = 0;
-    DWORD status = ERROR_SUCCESS;
 
 	BOOL rslt = DeviceIoControl(hFile,
 	                            IOCTL_DISK_GET_LENGTH_INFO,
@@ -78,7 +77,7 @@ UINT64 GetPartitionSize(HANDLE hFile)
 
     if (!rslt)
     {
-        status = GetLastError();
+	    const DWORD status = GetLastError();
         if (status == ERROR_IO_PENDING)
         {
             if (WAIT_OBJECT_0 != WaitForSingleObject(ovlp.hEvent, INFINITE))
@@ -124,7 +123,6 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
     }
 
     DWORD rbcnt = 0;
-    DWORD status = ERROR_SUCCESS;
 
 	BOOL rslt = DeviceIoControl(hFile,
 	                            IOCTL_DISK_GET_DRIVE_GEOMETRY,
@@ -137,7 +135,7 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
 
     if (!rslt)
     {
-        status = GetLastError();
+	    const DWORD status = GetLastError();
         if (status == ERROR_IO_PENDING)
         {
             if (WAIT_OBJECT_0 != WaitForSingleObject(ovlp.hEvent, INFINITE))
@@ -293,7 +291,7 @@ __declspec(align(4)) static LONG volatile g_lRunningThreadsCount = 0;   //must b
 
 static BOOL volatile g_bRun;                    //used for letting threads know that they should stop working
 
-typedef NTSTATUS (__stdcall *NtQuerySysInfo)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
+using NtQuerySysInfo = NTSTATUS(__stdcall *)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 static NtQuerySysInfo g_pfnNtQuerySysInfo;
 
 static PRINTF g_pfnPrintOut = nullptr;
@@ -434,10 +432,9 @@ bool IORequestGenerator::_LoadDLLs()
 }
 
 /*****************************************************************************/
-bool IORequestGenerator::_GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount) const
+bool IORequestGenerator::_GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount)
 {
-    NTSTATUS Status = NO_ERROR;
-    UINT32 uCpuCtr;
+	UINT32 uCpuCtr;
     WORD wActiveGroupCtr;
     BYTE bActiveProc;
     HANDLE hThread = GetCurrentThread();
@@ -479,10 +476,10 @@ bool IORequestGenerator::_GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMA
                 }
             }
 
-            Status = g_pfnNtQuerySysInfo(SystemProcessorPerformanceInformation,
-                                         static_cast<PVOID>(pInfo + uCpuCtr),
-                                         (sizeof(*pInfo) * uCpuCount) - (uCpuCtr * sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION)),
-                                         nullptr);
+	        const NTSTATUS Status = g_pfnNtQuerySysInfo(SystemProcessorPerformanceInformation,
+                                                  static_cast<PVOID>(pInfo + uCpuCtr),
+                                                  (sizeof(*pInfo) * uCpuCount) - (uCpuCtr * sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION)),
+                                                  nullptr);
 
             if (!NT_SUCCESS(Status))
             {
@@ -740,8 +737,7 @@ static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletion
     assert(nullptr != hCompletionPort);
 
     bool fOk = true;
-    BOOL rslt = FALSE;
-    OVERLAPPED * pCompletedOvrp;
+	OVERLAPPED * pCompletedOvrp;
     ULONG_PTR ulCompletionKey;
     DWORD dwBytesTransferred;
     OverlappedQueue overlappedQueue;
@@ -779,7 +775,7 @@ static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletion
                 }
             }
 
-            rslt = issueNextIO(p, pIORequest, nullptr, false);
+	        const BOOL rslt = issueNextIO(p, pIORequest, nullptr, false);
 
             if (!rslt && GetLastError() != ERROR_IO_PENDING)
             {
@@ -828,9 +824,7 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
 {
     assert(nullptr != pOverlapped);
 
-    BOOL rslt = FALSE;
-
-    ThreadParameters *p = static_cast<ThreadParameters *>(pOverlapped->hEvent);
+	auto*p = static_cast<ThreadParameters *>(pOverlapped->hEvent);
 
     assert(nullptr != p);
 
@@ -851,7 +845,7 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
         Target *pTarget = pIORequest->GetNextTarget();
 	    const size_t iTarget = pTarget - &p->vTargets[0];
 
-        rslt = issueNextIO(p, pIORequest, nullptr, true);
+	    const BOOL rslt = issueNextIO(p, pIORequest, nullptr, true);
 
         if (!rslt)
         {
@@ -861,7 +855,7 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
     }
 
 //cleanup:
-    return;
+    //return;
 }
 
 /*****************************************************************************/
@@ -872,9 +866,8 @@ static bool doWorkUsingCompletionRoutines(ThreadParameters *p)
 {
     assert(nullptr != p);
     bool fOk = true;
-    BOOL rslt = FALSE;
-    
-    //start IO operations
+
+	//start IO operations
 	const auto cIORequests = static_cast<UINT32>(p->vIORequest.size());
 
     for (size_t iIORequest = 0; iIORequest < cIORequests; iIORequest++) {
@@ -882,7 +875,7 @@ static bool doWorkUsingCompletionRoutines(ThreadParameters *p)
         Target *pTarget = pIORequest->GetNextTarget();
 	    const size_t iTarget = pTarget - &p->vTargets[0];
 
-        rslt = issueNextIO(p, pIORequest, nullptr, true);
+	    const BOOL rslt = issueNextIO(p, pIORequest, nullptr, true);
 
         if (!rslt)
         {
@@ -892,10 +885,9 @@ static bool doWorkUsingCompletionRoutines(ThreadParameters *p)
         }
     }
 
-    DWORD dwWaitResult = 0;
-    while( g_bRun && !g_bThreadError )
+	while( g_bRun && !g_bThreadError )
     {
-        dwWaitResult = WaitForSingleObjectEx(p->hEndEvent, INFINITE, TRUE);
+	    const DWORD dwWaitResult = WaitForSingleObjectEx(p->hEndEvent, INFINITE, TRUE);
 
         assert(WAIT_IO_COMPLETION == dwWaitResult || (WAIT_OBJECT_0 == dwWaitResult && (!g_bRun || g_bThreadError)));
 
@@ -922,30 +914,30 @@ struct UniqueTarget {
         if (path < ut.path) {
             return true;
         }
-        else if (ut.path < path) {
-            return false;
-        }
+	    if (ut.path < path) {
+		    return false;
+	    }
 
-        if (caching < ut.caching) {
+	    if (caching < ut.caching) {
             return true;
         }
-        else if (ut.caching < caching) {
-            return false;
-        }
+	    if (ut.caching < caching) {
+		    return false;
+	    }
 
-        if (priority < ut.priority) {
+	    if (priority < ut.priority) {
             return true;
         }
-        else if (ut.priority < priority) {
-            return false;
-        }
+	    if (ut.priority < priority) {
+		    return false;
+	    }
 
-        if (dwDesiredAccess < ut.dwDesiredAccess) {
+	    if (dwDesiredAccess < ut.dwDesiredAccess) {
             return true;
         }
-        else if (ut.dwDesiredAccess < dwDesiredAccess) {
-            return false;
-        }
+	    if (ut.dwDesiredAccess < dwDesiredAccess) {
+		    return false;
+	    }
 
 	    return dwFlags < ut.dwFlags;
     }
@@ -957,16 +949,15 @@ struct UniqueTarget {
 DWORD WINAPI threadFunc(LPVOID cookie)
 {
     bool fOk = true;
-    ThreadParameters *p = reinterpret_cast<ThreadParameters *>(cookie);
+	auto*p = reinterpret_cast<ThreadParameters *>(cookie);
+	const UINT32 cIORequests = p->GetTotalRequestCount();
+	const size_t cTargets = p->vTargets.size();
     HANDLE hCompletionPort = nullptr;
 
 	bool fUseThrougputMeter = false;
 	size_t iTarget = 0;
-	size_t cTargets = 0;
 
-	UINT32  cIORequests = 0;
-
-    //
+	//
     // A single file can be specified in multiple targets, so only open one
     // handle for each unique file.
     //
@@ -1015,8 +1006,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         }
     }
 
-    cIORequests = p->GetTotalRequestCount();
-
     // TODO: open files
     for (auto pTarget = p->vTargets.begin(); pTarget != p->vTargets.end(); ++pTarget)
     {
@@ -1062,7 +1051,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
 
         // get/set file flags
 	    const DWORD dwFlags = pTarget->GetCreateFlags(cIORequests > 1);
-        DWORD dwDesiredAccess = 0;
+        DWORD dwDesiredAccess;
         if (pTarget->GetWriteRatio() == 0)
         {
             dwDesiredAccess = GENERIC_READ;
@@ -1311,7 +1300,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     //
     // fill the throughput meter structures
     //
-	cTargets = p->vTargets.size();
     for (size_t i = 0; i < cTargets; i++)
     {
         ThroughputMeter throughputMeter;
@@ -1490,8 +1478,7 @@ struct ETWSessionInfo IORequestGenerator::_GetResultETWSession(const EVENT_TRACE
 
 DWORD IORequestGenerator::_CreateDirectoryPath(const char *pszPath) const
 {
-    char *c = nullptr;          //variable used to browse the path
-    char dirPath[MAX_PATH];  //copy of the path (it will be altered)
+	char dirPath[MAX_PATH];  //copy of the path (it will be altered)
 
     //only support absolute paths that specify the drive letter
     if (pszPath[0] == '\0' || pszPath[1] != ':')
@@ -1504,7 +1491,7 @@ DWORD IORequestGenerator::_CreateDirectoryPath(const char *pszPath) const
         return ERROR_BUFFER_OVERFLOW;
     }
     
-    c = dirPath;
+    char *c = dirPath;
     while('\0' != *c)
     {
         if ('\\' == *c)
@@ -1821,8 +1808,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //initialize all global parameters (in case of second run, after the first one is finished)
     _InitializeGlobalParameters();
 
-    HANDLE hStartEvent = nullptr;                       // start event (used to inform the worker threads that they should start the work)
-    HANDLE hEndEvent = nullptr;                         // end event (used only in case of completin routines (not for IO Completion Ports))
+	HANDLE hEndEvent = nullptr;                         // end event (used only in case of completin routines (not for IO Completion Ports))
 
     memset(&g_EtwEventCounters, 0, sizeof(struct ETWEventCounters));  // reset all etw event counters
 
@@ -1902,7 +1888,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //create start event
     //
 
-    hStartEvent = CreateEvent(nullptr, TRUE, FALSE, "");
+    HANDLE hStartEvent = CreateEvent(nullptr, TRUE, FALSE, ""); // start event (used to inform the worker threads that they should start the work)
     if (nullptr == hStartEvent)
     {
         PrintError("Error creating the start event\n");
@@ -1952,7 +1938,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     for (UINT32 iThread = 0; iThread < cThreads; ++iThread)
     {
         printfv(profile.GetVerbose(), "creating thread %u\n", iThread);
-        ThreadParameters *cookie = new ThreadParameters();  // threadFunc is going to free the memory
+	    auto*cookie = new ThreadParameters();  // threadFunc is going to free the memory
         if (nullptr == cookie)
         {
             PrintError("FATAL ERROR: could not allocate memory\n");
@@ -1961,7 +1947,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         }
 
         // each thread has a different random seed
-        Random *pRand = new Random(timeSpan.GetRandSeed() + iThread);
+	    auto*pRand = new Random(timeSpan.GetRandSeed() + iThread);
         if (nullptr == pRand)
         {
             PrintError("FATAL ERROR: could not allocate memory\n");
@@ -2103,7 +2089,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //
     // get cycle count (it will be used to calculate actual work time)
     //
-    DWORD dwWaitStatus = 0;
+    DWORD dwWaitStatus;
 
     //bAccountingOn = FALSE; // clear the accouning flag so that threads didn't count what they do while in the warmup phase
 
@@ -2245,24 +2231,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             _TerminateWorkerThreads(vhThreads);
             return false;
         }
-
-        //
-        // stop etw session
-        //
-        if (fUseETW)
-        {
-            printfv(profile.GetVerbose(), "stopping ETW session\n");
-            pETWSession = StopETWSession(hTraceSession);
-            if (nullptr == pETWSession)
-            {
-                PrintError("Error stopping ETW session\n");
-                return false;
-            }
-            else
-            {
-                free(pETWSession);
-            }
-        }
     }
     else
     {
@@ -2297,7 +2265,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     g_bRun = FALSE;
     if (timeSpan.GetCompletionRoutines())
     {
-        if (!SetEvent(hEndEvent))
+        if ((hEndEvent == nullptr) || !SetEvent(hEndEvent))
         {
             PrintError("Error signaling end event\n");
             //            stopETW(bUseETW, hTraceSession);

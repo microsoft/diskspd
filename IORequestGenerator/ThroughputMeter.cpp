@@ -81,22 +81,13 @@ DWORD ThroughputMeter::GetSleepTime() const
         {
             return static_cast<DWORD>(_ullDelayUntil - ullTimestamp);
         }
-        else
-        {
-            return (_fThrottle) ? _GetThrottleTime() : 0;
-        }
+	    return (_fThrottle) ? _GetThrottleTime() : 0;
     }
-    else
-    {
-        if (_fThrottle) // think time has not been specified only check for throttling
-        {
-            return _GetThrottleTime();
-        }
-        else
-        {
-            return 0;
-        }
-    }
+	if (_fThrottle) // think time has not been specified only check for throttling
+	{
+		return _GetThrottleTime();
+	}
+	return 0;
 }
 
 DWORD ThroughputMeter::_GetThrottleTime() const

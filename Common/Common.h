@@ -52,7 +52,7 @@ using namespace std;
 #define DISKSPD_NUMERIC_VERSION_STRING "2.0.19a" DISKSPD_RELEASE_TAG
 #define DISKSPD_DATE_VERSION_STRING "2017/4/28"
 
-typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
+using PRINTF = void(WINAPI *)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
 struct ETWEventCounters
 {
@@ -321,8 +321,8 @@ public:
     vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vSystemProcessorPerfInfo;
 };
 
-typedef void (*CALLBACK_TEST_STARTED)();    //callback function to notify that the measured test is about to start
-typedef void (*CALLBACK_TEST_FINISHED)();   //callback function to notify that the measured test has just finished
+using CALLBACK_TEST_STARTED = void(*)();    //callback function to notify that the measured test is about to start
+using CALLBACK_TEST_FINISHED = void(*)();   //callback function to notify that the measured test has just finished
 
 class ProcessorGroupInformation
 {
@@ -347,27 +347,12 @@ public:
 
     bool IsProcessorActive(BYTE Processor) const
     {
-        if (IsProcessorValid(Processor) &&
-            ((static_cast<KAFFINITY>(1) << Processor) & _activeProcessorMask) != 0)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+	    return IsProcessorValid(Processor) && ((static_cast<KAFFINITY>(1) << Processor) & _activeProcessorMask) != 0;
     }
 
     bool IsProcessorValid(BYTE Processor) const
     {
-        if (Processor < _maximumProcessorCount)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+	    return Processor < _maximumProcessorCount;
     }
 };
 
@@ -381,7 +366,7 @@ public:
     ProcessorTopology()
     {
 	    DWORD ReturnedLength = 1024;
-        PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX pInformation = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[ReturnedLength]);
+	    auto pInformation = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[ReturnedLength]);
 
         BOOL fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
         if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
@@ -417,14 +402,7 @@ public:
 
     bool IsGroupValid(WORD Group) const
     {
-        if (Group < _vProcessorGroupInformation.size())
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+	    return Group < _vProcessorGroupInformation.size();
     }
 
     // Return the next active processor in the system, exclusive (Next = true)

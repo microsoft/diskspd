@@ -136,13 +136,10 @@ BOOL TraceEvents()
         PrintError("ETW ERROR: OpenTrace failed (error code: %d)\n", GetLastError());
         return false;
     }
-    else
-    {
-        ProcessTrace(handles, 1, nullptr, nullptr);
-        CloseTrace(handles[0]);
-    }
+	ProcessTrace(handles, 1, nullptr, nullptr);
+	CloseTrace(handles[0]);
 
-    return true;
+	return true;
 }
 
 /*****************************************************************************/
@@ -151,7 +148,7 @@ BOOL TraceEvents()
 PEVENT_TRACE_PROPERTIES allocateEventTraceProperties()
 {
 	const size_t size = sizeof(EVENT_TRACE_PROPERTIES)+sizeof(KERNEL_LOGGER_NAME);
-    PEVENT_TRACE_PROPERTIES pProperties = static_cast<PEVENT_TRACE_PROPERTIES>(malloc(size));
+	auto pProperties = static_cast<PEVENT_TRACE_PROPERTIES>(malloc(size));
     if( nullptr == pProperties )
     {
         PrintError("FATAL ERROR: unable to allocate memory (error code: %d)\n", GetLastError());
