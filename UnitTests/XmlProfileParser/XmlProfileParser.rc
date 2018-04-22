@@ -8,7 +8,7 @@ DISKSPD.XSD HTML "..\\XmlProfileParser\\diskspd.xsd"
 #define VER_FILETYPE                VFT_APP
 #define VER_FILESUBTYPE             VFT2_UNKNOWN
 #define VER_FILEDESCRIPTION_STR     "DiskSpd Storage Performance Tool"
-#define VER_INTERNALNAME_STR        "diskspd.exe"
+#define VER_INTERNALNAME_STR        "XmlProfileParser.UnitTests.dll"
 
 #undef VER_PRODUCTVERSION
 #define VER_PRODUCTVERSION DISKSPD_MAJOR,DISKSPD_MINOR,DISKSPD_BUILD,DISKSPD_QFE

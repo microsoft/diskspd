@@ -1309,7 +1309,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 bool CmdLineParser::_ReadParametersFromXmlFile(const char *pszPath, Profile *pProfile)
 {
     XmlProfileParser parser;
-    return parser.ParseFile(pszPath, pProfile);
+    return parser.ParseFile(pszPath, pProfile, NULL);
 }
 
 bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch, SystemInformation *pSystem)

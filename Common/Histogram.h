@@ -148,7 +148,9 @@ class Histogram
             }
         }
 
-        throw std::runtime_error("Percentile is undefined");
+        // We can get here if no IOs are issued, simply return 0 since
+        // we don't want to throw an exception and crash
+        return 0;
     }
     
     T GetPercentile(int p) const 

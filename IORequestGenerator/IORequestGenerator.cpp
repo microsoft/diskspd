@@ -51,13 +51,128 @@ SOFTWARE.
 #include "OverlappedQueue.h"
 
 /*****************************************************************************/
+// gets size of a dynamic volume, return zero on failure
+//
+UINT64 GetDynamicPartitionSize(HANDLE hFile)
+{
+    assert(NULL != hFile && INVALID_HANDLE_VALUE != hFile);
+
+    UINT64 size = 0;
+    VOLUME_DISK_EXTENTS diskExt = {0};
+    PVOLUME_DISK_EXTENTS pDiskExt = &diskExt;
+    DWORD bytesReturned;
+
+    DWORD status = ERROR_SUCCESS;
+    BOOL rslt;
+
+    OVERLAPPED ovlp = {0};
+    ovlp.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (ovlp.hEvent == nullptr)
+    {
+        PrintError("ERROR: Failed to create event (error code: %u)\n", GetLastError());
+        return 0;
+    }
+
+    rslt = DeviceIoControl(hFile,
+                            IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                            NULL,
+                            0,
+                            pDiskExt,
+                            sizeof(VOLUME_DISK_EXTENTS),
+                            &bytesReturned,
+                            &ovlp);
+    if (!rslt) {
+        status = GetLastError();
+        if (status == ERROR_MORE_DATA) {
+            status = ERROR_SUCCESS;
+
+            bytesReturned = sizeof(VOLUME_DISK_EXTENTS) + ((pDiskExt->NumberOfDiskExtents - 1) * sizeof(DISK_EXTENT));
+            pDiskExt = (PVOLUME_DISK_EXTENTS)LocalAlloc(LPTR, bytesReturned);
+
+            if (pDiskExt)
+            {
+                rslt = DeviceIoControl(hFile,
+                                    IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                                    NULL,
+                                    0,
+                                    pDiskExt,
+                                    bytesReturned,
+                                    &bytesReturned,
+                                    &ovlp);
+                if (!rslt)
+                {
+                    status = GetLastError();
+                    if (status == ERROR_IO_PENDING)
+                    {
+                        if (WAIT_OBJECT_0 != WaitForSingleObject(ovlp.hEvent, INFINITE))
+                        {
+                            status = GetLastError();
+                            PrintError("ERROR: Failed while waiting for event to be signaled (error code: %u)\n", status);
+                        }
+                        else
+                        {
+                            status = ERROR_SUCCESS;
+                            assert(pDiskExt->NumberOfDiskExtents <= 1);
+                        }
+                    }
+                    else
+                    {
+                        PrintError("ERROR: Could not obtain dynamic volume extents (error code: %u)\n", status);
+                    }
+                }
+            }
+            else
+            {
+                status = GetLastError();
+                PrintError("ERROR: Could not allocate memory (error code: %u)\n", status);
+            }
+        }
+        else if (status == ERROR_IO_PENDING)
+        {
+            if (WAIT_OBJECT_0 != WaitForSingleObject(ovlp.hEvent, INFINITE))
+            {
+                status = GetLastError();
+                PrintError("ERROR: Failed while waiting for event to be signaled (error code: %u)\n", status);
+            }
+            else
+            {
+                status = ERROR_SUCCESS;
+                assert(pDiskExt->NumberOfDiskExtents <= 1);
+            }
+        }
+        else
+        {
+            PrintError("ERROR: Could not obtain dynamic volume extents (error code: %u)\n", status);
+        }
+    }
+    else
+    {
+        assert(pDiskExt->NumberOfDiskExtents <= 1);
+    }
+
+    if (status == ERROR_SUCCESS)
+    {
+        for (DWORD n = 0; n < pDiskExt->NumberOfDiskExtents; n++) {
+            size += pDiskExt->Extents[n].ExtentLength.QuadPart;
+        }
+    }
+
+    if (pDiskExt && (pDiskExt != &diskExt)) {
+        LocalFree(pDiskExt);
+    }
+    CloseHandle(ovlp.hEvent);
+
+    return size;
+}
+
+/*****************************************************************************/
 // gets partition size, return zero on failure
 //
 UINT64 GetPartitionSize(HANDLE hFile)
 {
     assert(NULL != hFile && INVALID_HANDLE_VALUE != hFile);
 
-    GET_LENGTH_INFORMATION pinf;
+    PARTITION_INFORMATION_EX pinf;
     OVERLAPPED ovlp = {};
 
     ovlp.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -69,18 +184,17 @@ UINT64 GetPartitionSize(HANDLE hFile)
 
     DWORD rbcnt = 0;
     DWORD status = ERROR_SUCCESS;
-    BOOL rslt;
+    UINT64 size = 0;
 
-    rslt = DeviceIoControl(hFile,
-        IOCTL_DISK_GET_LENGTH_INFO,
-        NULL,
-        0,
-        &pinf,
-        sizeof(pinf),
-        &rbcnt,
-        &ovlp);
-
-    if (!rslt)
+    if (!DeviceIoControl(hFile,
+                        IOCTL_DISK_GET_PARTITION_INFO_EX,
+                        NULL,
+                        0,
+                        &pinf,
+                        sizeof(pinf),
+                        &rbcnt,
+                        &ovlp)
+        )
     {
         status = GetLastError();
         if (status == ERROR_IO_PENDING)
@@ -91,23 +205,22 @@ UINT64 GetPartitionSize(HANDLE hFile)
             }
             else
             {
-                rslt = TRUE;
+                size = pinf.PartitionLength.QuadPart;
             }
         }
         else
         {
-            PrintError("ERROR: Could not obtain partition info (error code: %u)\n", status);
+            size = GetDynamicPartitionSize(hFile);
         }
+    }
+    else
+    {
+        size = pinf.PartitionLength.QuadPart;
     }
 
     CloseHandle(ovlp.hEvent);
 
-    if (!rslt)
-    {
-        return 0;
-    }
-
-    return pinf.Length.QuadPart;
+    return size;
 }
 
 /*****************************************************************************/
@@ -117,7 +230,7 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
 {
     assert(NULL != hFile && INVALID_HANDLE_VALUE != hFile);
 
-    DISK_GEOMETRY geom;
+    DISK_GEOMETRY_EX geom;
     OVERLAPPED ovlp = {};
 
     ovlp.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -132,7 +245,7 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
     BOOL rslt;
 
     rslt = DeviceIoControl(hFile,
-        IOCTL_DISK_GET_DRIVE_GEOMETRY,
+        IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
         NULL,
         0,
         &geom,
@@ -167,10 +280,7 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
         return 0;
     }
 
-    return (UINT64)geom.BytesPerSector *
-        (UINT64)geom.SectorsPerTrack   *
-        (UINT64)geom.TracksPerCylinder *
-        (UINT64)geom.Cylinders.QuadPart;
+    return (UINT64)geom.DiskSize.QuadPart;
 }
 
 /*****************************************************************************/
@@ -1842,7 +1952,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 
     memset(&g_EtwEventCounters, 0, sizeof(struct ETWEventCounters));  // reset all etw event counters
 
-    bool fUseETW = false;            //true if user wants ETW
+    bool fUseETW = profile.GetEtwEnabled();            //true if user wants ETW
 
     //
     // load dlls
@@ -2192,6 +2302,17 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             printfv(profile.GetVerbose(), "tracing events\n");
         }
 
+        printfv(profile.GetVerbose(), "starting measurements...\n");
+
+        //
+        // notify the front-end that the test is about to start;
+        // do it before starting timing in order not to perturb measurements
+        //
+        if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestStarted) && (NULL != pSynch->pfnCallbackTestStarted))
+        {
+            pSynch->pfnCallbackTestStarted();
+        }
+
         //
         // read performance counters
         //
@@ -2203,18 +2324,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             return false;
         }
 
-        printfv(profile.GetVerbose(), "starting measurements...\n");
         //get cycle count (it will be used to calculate actual work time)
-
-        //
-        // notify the front-end that the test is about to start;
-        // do it before starting timing in order not to perturb measurements
-        //
-        if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestStarted) && (NULL != pSynch->pfnCallbackTestStarted))
-        {
-            pSynch->pfnCallbackTestStarted();
-        }
-
         ullStartTime = PerfTimer::GetTime();
 
 #pragma warning( push )
@@ -2246,6 +2356,14 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         //get cycle count and perf counters
         ullTimeDiff = PerfTimer::GetTime() - ullStartTime;
 
+        if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
+        {
+            PrintError("Error getting performance counters\n");
+            _StopETW(fUseETW, hTraceSession);
+            _TerminateWorkerThreads(vhThreads);
+            return false;
+        }
+
         //
         // notify the front-end that the test has just finished;
         // do it after stopping timing in order not to perturb measurements
@@ -2253,14 +2371,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestFinished) && (NULL != pSynch->pfnCallbackTestFinished))
         {
             pSynch->pfnCallbackTestFinished();
-        }
-
-        if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
-        {
-            PrintError("Error getting performance counters\n");
-            _StopETW(fUseETW, hTraceSession);
-            _TerminateWorkerThreads(vhThreads);
-            return false;
         }
 
         //
@@ -2274,10 +2384,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             {
                 PrintError("Error stopping ETW session\n");
                 return false;
-            }
-            else
-            {
-                free(pETWSession);
             }
         }
     }
@@ -2404,6 +2510,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         results.EtwMask.bUsePerfTimer = profile.GetEtwUsePerfTimer();
         results.EtwMask.bUseSystemTimer = profile.GetEtwUseSystemTimer();
         results.EtwMask.bUseCyclesCounter = profile.GetEtwUseCyclesCounter();
+
+        free(pETWSession);
     }
 
     // free memory used by random data write buffers

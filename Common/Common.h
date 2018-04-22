@@ -49,9 +49,20 @@ using namespace std;
 //
 //      Monday, June 16, 2014 12:00:00 AM
 
-#define DISKSPD_RELEASE_TAG " (MS)"
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.19a" DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2017/4/28"
+#define DISKSPD_RELEASE_TAG ""
+#define DISKSPD_REVISION    "a"
+
+#define DISKSPD_MAJOR       2
+#define DISKSPD_MINOR       0
+#define DISKSPD_BUILD       20
+#define DISKSPD_QFE         0
+
+#define DISKSPD_MAJORMINOR_VER_STR(x,y,z) #x "." #y "." #z
+#define DISKSPD_MAJORMINOR_VERSION_STRING(x,y,z) DISKSPD_MAJORMINOR_VER_STR(x,y,z)
+#define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
+
+#define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
+#define DISKSPD_DATE_VERSION_STRING "2018/2/28"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -85,7 +96,6 @@ struct ETWEventCounters
     UINT64 ullRegQueryMultipleValue;    // NtQueryMultipleValueKey
     UINT64 ullRegSetInformation;        // NtSetInformationKey
     UINT64 ullRegFlush;                 // NtFlushKey
-    UINT64 ullRegKcbDmp;                // KcbDump/create
     UINT64 ullThreadStart;
     UINT64 ullThreadEnd;
     UINT64 ullProcessStart;
@@ -376,10 +386,54 @@ public:
     }
 };
 
+class ProcessorNumaInformation
+{
+public:
+    DWORD _nodeNumber;
+    WORD _groupNumber;
+    KAFFINITY _processorMask;
+
+    ProcessorNumaInformation() = delete;
+    ProcessorNumaInformation(
+        DWORD Node,
+        WORD Group,
+        KAFFINITY ProcessorMask) :
+        _nodeNumber(Node),
+        _groupNumber(Group),
+        _processorMask(ProcessorMask)
+    {
+    }
+};
+
+class ProcessorHyperThreadInformation
+{
+public:
+    WORD _groupNumber;
+    KAFFINITY _processorMask;
+
+    ProcessorHyperThreadInformation(
+        WORD Group,
+        KAFFINITY ProcessorMask) :
+        _groupNumber(Group),
+        _processorMask(ProcessorMask)
+    {
+    }
+};
+
+class ProcessorSocketInformation
+{
+public:
+    vector<pair<WORD, KAFFINITY>> _vProcessorMasks;
+};
+
 class ProcessorTopology
 {
 public:
     vector<ProcessorGroupInformation> _vProcessorGroupInformation;
+    vector<ProcessorNumaInformation> _vProcessorNumaInformation;
+    vector<ProcessorSocketInformation> _vProcessorSocketInformation;
+    vector<ProcessorHyperThreadInformation> _vProcessorHyperThreadInformation;
+    
     DWORD _ulProcCount;
     DWORD _ulActiveProcCount;
 
@@ -387,14 +441,16 @@ public:
     {
         BOOL fResult;
         PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX pInformation;
-        DWORD ReturnedLength = 1024;
-        pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[ReturnedLength];
+        DWORD AllocSize = 1024;
+        DWORD ReturnedLength = AllocSize;
+        pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
 
         fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
         if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
         {
             delete [] pInformation;
-            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[ReturnedLength];
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
             fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
         }
 
@@ -418,6 +474,113 @@ public:
                 _ulActiveProcCount += _vProcessorGroupInformation[i]._activeProcessorCount;
             }
         }
+
+        ReturnedLength = AllocSize;
+        fResult = GetLogicalProcessorInformationEx(RelationNumaNode, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            delete [] pInformation;
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
+            fResult = GetLogicalProcessorInformationEx(RelationNumaNode, pInformation, &ReturnedLength);
+        }
+
+        if (fResult)
+        {
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
+
+            while (ReturnedLength != 0)
+            {
+                assert(ReturnedLength >= cur->Size);
+
+                if (cur->Size > ReturnedLength)
+                {
+                    break;
+                }
+
+                _vProcessorNumaInformation.emplace_back(
+                    cur->NumaNode.NodeNumber,
+                    cur->NumaNode.GroupMask.Group,
+                    cur->NumaNode.GroupMask.Mask
+                    );
+
+                ReturnedLength -= cur->Size;
+                cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+            }
+        }
+
+        ReturnedLength = AllocSize;
+        fResult = GetLogicalProcessorInformationEx(RelationProcessorPackage, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            delete [] pInformation;
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
+            fResult = GetLogicalProcessorInformationEx(RelationProcessorPackage, pInformation, &ReturnedLength);
+        }
+
+        if (fResult)
+        {
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
+
+            while (ReturnedLength != 0)
+            {
+                ProcessorSocketInformation socket;
+                
+                assert(ReturnedLength >= cur->Size);
+
+                if (cur->Size > ReturnedLength)
+                {
+                    break;
+                }
+
+                for (WORD i = 0; i < pInformation->Processor.GroupCount; i++)
+                {
+                    socket._vProcessorMasks.emplace_back(cur->Processor.GroupMask[i].Group,
+                                                         cur->Processor.GroupMask[i].Mask);
+                }
+
+                _vProcessorSocketInformation.push_back(socket);
+
+                ReturnedLength -= cur->Size;
+                cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+            }
+        }
+
+        ReturnedLength = AllocSize;
+        fResult = GetLogicalProcessorInformationEx(RelationProcessorCore, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            delete [] pInformation;
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
+            fResult = GetLogicalProcessorInformationEx(RelationProcessorCore, pInformation, &ReturnedLength);
+        }
+
+        if (fResult)
+        {
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
+
+            while (ReturnedLength != 0)
+            {
+                assert(ReturnedLength >= cur->Size);
+
+                if (cur->Size > ReturnedLength)
+                {
+                    break;
+                }
+
+                assert(pInformation->Processor.GroupCount == 1);
+
+                _vProcessorHyperThreadInformation.emplace_back(cur->Processor.GroupMask[0].Group,
+                                                               cur->Processor.GroupMask[0].Mask);
+
+                ReturnedLength -= cur->Size;
+                cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+            }
+        }
+
+        // TODO: Get the cache relationships as well???
 
         delete [] pInformation;
     }
@@ -518,7 +681,7 @@ public:
         if (StartTime.wYear) {
 
             nWritten = sprintf_s(szBuffer, _countof(szBuffer),
-                "%u/%02u/%02u %02u:%02u:%02u GMT",
+                "%u/%02u/%02u %02u:%02u:%02u UTC",
                 StartTime.wYear,
                 StartTime.wMonth,
                 StartTime.wDay,
@@ -546,6 +709,43 @@ public:
             sXml += szBuffer;
             sXml += "\"/>\n";
 
+        }
+        for (const auto& n : processorTopology._vProcessorNumaInformation)
+        {
+            sXml += "<Node Node=\"";
+            sXml += to_string(n._nodeNumber);
+            sXml += "\" Group=\"";
+            sXml += to_string(n._groupNumber);
+            sXml += "\" Processors=\"0x";
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", n._processorMask);
+            assert(nWritten && nWritten < _countof(szBuffer));
+            sXml += szBuffer;
+            sXml += "\"/>\n";
+        }
+        for (const auto& s : processorTopology._vProcessorSocketInformation)
+        {
+            sXml += "<Socket>\n";
+            for (const auto& g : s._vProcessorMasks)
+            {
+                sXml += "<Group Group=\"";
+                sXml += to_string(g.first);
+                sXml += "\" Processors=\"0x";
+                nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g.second);
+                assert(nWritten && nWritten < _countof(szBuffer));
+                sXml += szBuffer;
+                sXml += "\"/>\n";
+            }
+            sXml += "</Socket>\n";
+        }
+        for (const auto& h : processorTopology._vProcessorHyperThreadInformation)
+        {
+            sXml += "<HyperThread Group=\"";
+            sXml += to_string(h._groupNumber);
+            sXml += "\" Processors=\"0x";
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", h._processorMask);
+            assert(nWritten && nWritten < _countof(szBuffer));
+            sXml += szBuffer;
+            sXml += "\"/>\n";
         }
         sXml += "</ProcessorTopology>\n";
 
@@ -1145,7 +1345,7 @@ public:
         else {
             ullWeight = _pRand->Rand64() % _ullTotalWeight;
             
-            for (int iTarget = 0; iTarget < _vTargets.size(); iTarget++) {
+            for (size_t iTarget = 0; iTarget < _vTargets.size(); iTarget++) {
                 if (ullWeight < _vulTargetWeights[iTarget]) {
                     _pCurrentTarget = _vTargets[iTarget];
                     break;
