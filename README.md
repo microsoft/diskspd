@@ -12,9 +12,22 @@ In addition DISKSPD itself, this repo hosts measurement frameworks which use DIS
 
 ## DISKSPD ##
 
-DISKSPD 2.0.18a 5/31/2016
+DISKSPD 2.0.20a 2/28/2018
 
-***IN PROGRESS***
+* Changes that may require rebaselining of results:
+  * New random number generator that may show an observable decreased cost
+  * Switched to 512-byte aligned buffers with the -Z option to increase performance
+* New -O option for specifying the number of outstanding IO requests per thread
+* New -Zr option for per-IO randomization of write buffer content
+* XML: Adds a new `<ThreadTarget>` element to support target weighting schemes
+* Enhanced statistics captured from IOPS data
+* Added support for validating XML profiles using an in-built XSD
+* Added support for handling RAW volumes
+* Updated CPU statistics to work on > 64-core systems
+* Updated calculation and accuracy of CPU statistics
+* Re-enable support for ETW statistics
+
+DISKSPD 2.0.18a 5/31/2016
 
 * update /? example to use -Sh v. deprecated -h
 * fix operation on volumes on GPT partitioned media (<driveletter>:)
@@ -29,16 +42,6 @@ DISKSPD 2.0.17 5/01/2016
 * Text output: OS/software cache and write-through state are now documented separately (adjacent lines)
 * Latency histogram now reports to 9-nines (one part in one billion) in both text and XML output
 * Error message added for failure to open write-content source file (`-Z<size>,<file>`)
-
-DISKSPD 2.0.16b 2/22/2016
-
-* -ag is now default (round robin group-aware affinity)
-* new -ag# for group-aware thread->core affinity assignment
-* -Sr : remote cache mode
-* -Sh : equivalent to -h, all cache modes collapsed under -S
-* `<ProcessorTopology>` (under `<System>`) element in XML results shows Processor Group topology of the system the test executed on
-* `<RunTime>` (under `<System>`) element shows run start time in GMT
-* -ft : specifies `FILE_ATTRIBUTE_TEMPORARY_FILE` on open (note: work in progress, effect of this attribute is not fully lit up yet)
 
 ## VM Fleet ##
 
