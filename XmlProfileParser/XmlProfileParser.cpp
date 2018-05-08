@@ -73,15 +73,15 @@ HRESULT ReportXmlError(
 	return errorCode;
 }
 
-bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
+bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, HMODULE hModule)
 {
     assert(pszPath != nullptr);
     assert(pProfile != nullptr);
 
     // import schema from the named resource
-    HRSRC hSchemaXmlResource = FindResource(NULL, L"DISKSPD.XSD", RT_HTML);
+    HRSRC hSchemaXmlResource = FindResource(hModule, L"DISKSPD.XSD", RT_HTML);
     assert(hSchemaXmlResource != NULL);
-    HGLOBAL hSchemaXml = LoadResource(NULL, hSchemaXmlResource);
+    HGLOBAL hSchemaXml = LoadResource(hModule, hSchemaXmlResource);
     assert(hSchemaXml != NULL);
     LPVOID pSchemaXml = LockResource(hSchemaXml);
     assert(pSchemaXml != NULL);
@@ -135,18 +135,11 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
         {
             hr = spXmlDoc->put_validateOnParse(VARIANT_TRUE);
         }
-        // work in progress to complete XML schema validation
-        // load schema and attach to schema collection, attach schema collection to spec doc, then load specification
-#if 0
-		//
-		// Issue at the moment: load fails with error as follows.
-		// ERROR: failed to load schema, line 1, line position 1, errorCode c00ce556
-		// ERROR: reason : Invalid at the top level of the document.
         if (SUCCEEDED(hr))
         {
             VARIANT_BOOL fvIsOk;
-            hr = spXmlSchema->loadXML(bSchemaXml.GetBSTR(), &fvIsOk);
-            if (SUCCEEDED(hr) && fvIsOk != VARIANT_TRUE)
+            hr = spXmlSchema->loadXML(bSchemaXml, &fvIsOk);
+            if (FAILED(hr) || fvIsOk != VARIANT_TRUE)
             {
                 hr = spXmlSchema->get_parseError(&spXmlParseError);
                 if (SUCCEEDED(hr))
@@ -167,14 +160,18 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile)
             CComVariant vSchemaCache(spXmlSchemaColl);
             hr = spXmlDoc->putref_schemas(vSchemaCache);
         }
-#endif
         if (SUCCEEDED(hr))
         {
             VARIANT_BOOL fvIsOk;
             CComVariant vPath(pszPath);
             hr = spXmlDoc->load(vPath, &fvIsOk);
-            if (SUCCEEDED(hr) && fvIsOk != VARIANT_TRUE)
+            if (FAILED(hr) || fvIsOk != VARIANT_TRUE)
             {
+                hr = spXmlDoc->get_parseError(&spXmlParseError);
+                if (SUCCEEDED(hr))
+                {
+                    ReportXmlError("profile", spXmlParseError);
+                }
                 hr = E_FAIL;
             }
         }
@@ -459,11 +456,31 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeS
 
     if (SUCCEEDED(hr))
     {
+        bool fRandomWriteData;
+        hr = _GetBool(pXmlNode, "RandomWriteData", &fRandomWriteData);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTimeSpan->SetRandomWriteData(fRandomWriteData);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
         UINT32 ulThreadCount;
         hr = _GetUINT32(pXmlNode, "ThreadCount", &ulThreadCount);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTimeSpan->SetThreadCount(ulThreadCount);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        UINT32 ulRequestCount;
+        hr = _GetUINT32(pXmlNode, "RequestCount", &ulRequestCount);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTimeSpan->SetRequestCount(ulRequestCount);
         }
     }
 
@@ -896,6 +913,69 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
         {
             PRIORITY_HINT hint[] = { IoPriorityHintVeryLow, IoPriorityHintLow, IoPriorityHintNormal };
             pTarget->SetIOPriorityHint(hint[ulIOPriority - 1]);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        UINT32 ulWeight;
+        hr = _GetUINT32(pXmlNode, "Weight", &ulWeight);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTarget->SetWeight(ulWeight);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        hr = _ParseThreadTargets(pXmlNode, pTarget);
+    }
+    return hr;
+}
+
+HRESULT XmlProfileParser::_ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget)
+{
+    CComVariant query("ThreadTargets/ThreadTarget");
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
+    if (SUCCEEDED(hr))
+    {
+        long cNodes;
+        hr = spNodeList->get_length(&cNodes);
+        if (SUCCEEDED(hr))
+        {
+            for (int i = 0; i < cNodes; i++)
+            {
+                CComPtr<IXMLDOMNode> spNode = nullptr;
+                hr = spNodeList->get_item(i, &spNode);
+                if (SUCCEEDED(hr))
+                {
+                    ThreadTarget threadTarget;
+                    _ParseThreadTarget(spNode, &threadTarget);
+                    pTarget->AddThreadTarget(threadTarget);
+                }
+            }
+        }
+    }
+    return hr;
+}
+
+HRESULT XmlProfileParser::_ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget *pThreadTarget)
+{
+    UINT32 ulThread;
+    HRESULT hr = _GetUINT32(pXmlNode, "Thread", &ulThread);
+    if (SUCCEEDED(hr) && (hr != S_FALSE))
+    {
+        pThreadTarget->SetThread(ulThread);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        UINT32 ulWeight;
+        hr = _GetUINT32(pXmlNode, "Weight", &ulWeight);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pThreadTarget->SetWeight(ulWeight);
         }
     }
     return hr;

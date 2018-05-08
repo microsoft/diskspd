@@ -170,6 +170,11 @@ int __cdecl main(int argc, const char* argv[])
     IORequestGenerator ioGenerator;
     if (!ioGenerator.GenerateRequests(profile, *pResultParser, (PRINTF)PrintOut, (PRINTF)PrintError, (PRINTF)PrintOut, &synch))
     {
+        if (profile.GetResultsFormat() == ResultsFormat::Xml)
+        {
+            fprintf(stderr, "\n");
+        }
+
         fprintf(stderr, "Error generating I/O requests\n");
         return 1;
     }

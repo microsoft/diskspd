@@ -36,6 +36,7 @@ SOFTWARE.
 #include <assert.h>
 #include "Histogram.h"
 #include "IoBucketizer.h"
+#include "ThroughputMeter.h"
 
 using namespace std;
 
@@ -49,8 +50,19 @@ using namespace std;
 //      Monday, June 16, 2014 12:00:00 AM
 
 #define DISKSPD_RELEASE_TAG ""
-#define DISKSPD_NUMERIC_VERSION_STRING "2.0.18a" DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2016/5/31"
+#define DISKSPD_REVISION    "a"
+
+#define DISKSPD_MAJOR       2
+#define DISKSPD_MINOR       0
+#define DISKSPD_BUILD       20
+#define DISKSPD_QFE         0
+
+#define DISKSPD_MAJORMINOR_VER_STR(x,y,z) #x "." #y "." #z
+#define DISKSPD_MAJORMINOR_VERSION_STRING(x,y,z) DISKSPD_MAJORMINOR_VER_STR(x,y,z)
+#define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
+
+#define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
+#define DISKSPD_DATE_VERSION_STRING "2018/2/28"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -84,7 +96,6 @@ struct ETWEventCounters
     UINT64 ullRegQueryMultipleValue;    // NtQueryMultipleValueKey
     UINT64 ullRegSetInformation;        // NtSetInformationKey
     UINT64 ullRegFlush;                 // NtFlushKey
-    UINT64 ullRegKcbDmp;                // KcbDump/create
     UINT64 ullThreadStart;
     UINT64 ullThreadEnd;
     UINT64 ullProcessStart;
@@ -157,6 +168,40 @@ private:
     friend class UnitTests::PerfTimerUnitTests;
 };
 
+//
+// This code implements Bob Jenkins public domain simple random number generator
+// See http://burtleburtle.net/bob/rand/smallprng.html for details
+//
+
+class Random
+{
+public:
+    Random(UINT64 ulSeed = 0);
+
+    inline UINT64 Rand64()
+    {
+        UINT64 e;
+        
+        e =           _ulState[0] - _rotl64(_ulState[1], 7);
+        _ulState[0] = _ulState[1] ^ _rotl64(_ulState[2], 13);
+        _ulState[1] = _ulState[2] + _rotl64(_ulState[3], 37);
+        _ulState[2] = _ulState[3] + e;
+        _ulState[3] = e + _ulState[0];
+        
+        return _ulState[3];
+    }
+
+    inline UINT32 Rand32()
+    {
+        return (UINT32)Rand64();
+    }
+
+    void RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay);
+
+private:
+    UINT64 _ulState[4];
+};
+
 struct PercentileDescriptor
 {
     double Percentile;
@@ -197,47 +242,48 @@ public:
 
     void Add(DWORD dwBytesTransferred,
              IOOperation type,
-             PUINT64 pullIoStartTime,
-             PUINT64 pullSpanStartTime,
+             UINT64 ullIoStartTime,
+             UINT64 ullSpanStartTime,
              bool fMeasureLatency,
              bool fCalculateIopsStdDev
              )
     {
-        float fDurationMsec = 0;
+        double lfDurationUsec = 0;
         UINT64 ullEndTime = 0;
+        UINT64 ullDuration = 0;
+        
         // assume it is worthwhile to stay off of the time query path unless needed (micro-overhead)
         if (fMeasureLatency || fCalculateIopsStdDev)
         {
             ullEndTime = PerfTimer::GetTime();
+            ullDuration = ullEndTime - ullIoStartTime;
+            lfDurationUsec = PerfTimer::PerfTimeToMicroseconds(ullDuration);
         }
 
         if (fMeasureLatency)
         {
-            UINT64 ullDuration = ullEndTime - *pullIoStartTime;
-            fDurationMsec = static_cast<float>(PerfTimer::PerfTimeToMicroseconds(ullDuration));
-
             if (type == IOOperation::ReadIO)
             {
-                readLatencyHistogram.Add(fDurationMsec);
+                readLatencyHistogram.Add(static_cast<float>(lfDurationUsec));
             }
             else
             {
-                writeLatencyHistogram.Add(fDurationMsec);
+                writeLatencyHistogram.Add(static_cast<float>(lfDurationUsec));
             }
         }
 
         UINT64 ullRelativeCompletionTime = 0;
         if (fCalculateIopsStdDev)
         {
-            ullRelativeCompletionTime = ullEndTime - *pullSpanStartTime;
+            ullRelativeCompletionTime = ullEndTime - ullSpanStartTime;
 
             if (type == IOOperation::ReadIO)
             {
-                readBucketizer.Add(ullRelativeCompletionTime);
+                readBucketizer.Add(ullRelativeCompletionTime, lfDurationUsec);
             }
             else
             {
-                writeBucketizer.Add(ullRelativeCompletionTime);
+                writeBucketizer.Add(ullRelativeCompletionTime, lfDurationUsec);
             }
         }
 
@@ -314,7 +360,7 @@ public:
     {
     }
 
-    bool IsProcessorActive(BYTE Processor)
+    bool IsProcessorActive(BYTE Processor) const
     {
         if (IsProcessorValid(Processor) &&
             (((KAFFINITY)1 << Processor) & _activeProcessorMask) != 0)
@@ -327,7 +373,7 @@ public:
         }
     }
 
-    bool IsProcessorValid(BYTE Processor)
+    bool IsProcessorValid(BYTE Processor) const
     {
         if (Processor < _maximumProcessorCount)
         {
@@ -340,24 +386,71 @@ public:
     }
 };
 
+class ProcessorNumaInformation
+{
+public:
+    DWORD _nodeNumber;
+    WORD _groupNumber;
+    KAFFINITY _processorMask;
+
+    ProcessorNumaInformation() = delete;
+    ProcessorNumaInformation(
+        DWORD Node,
+        WORD Group,
+        KAFFINITY ProcessorMask) :
+        _nodeNumber(Node),
+        _groupNumber(Group),
+        _processorMask(ProcessorMask)
+    {
+    }
+};
+
+class ProcessorHyperThreadInformation
+{
+public:
+    WORD _groupNumber;
+    KAFFINITY _processorMask;
+
+    ProcessorHyperThreadInformation(
+        WORD Group,
+        KAFFINITY ProcessorMask) :
+        _groupNumber(Group),
+        _processorMask(ProcessorMask)
+    {
+    }
+};
+
+class ProcessorSocketInformation
+{
+public:
+    vector<pair<WORD, KAFFINITY>> _vProcessorMasks;
+};
+
 class ProcessorTopology
 {
 public:
     vector<ProcessorGroupInformation> _vProcessorGroupInformation;
+    vector<ProcessorNumaInformation> _vProcessorNumaInformation;
+    vector<ProcessorSocketInformation> _vProcessorSocketInformation;
+    vector<ProcessorHyperThreadInformation> _vProcessorHyperThreadInformation;
+    
     DWORD _ulProcCount;
+    DWORD _ulActiveProcCount;
 
     ProcessorTopology()
     {
         BOOL fResult;
         PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX pInformation;
-        DWORD ReturnedLength = 1024;
-        pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[ReturnedLength];
+        DWORD AllocSize = 1024;
+        DWORD ReturnedLength = AllocSize;
+        pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
 
         fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
         if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
         {
             delete [] pInformation;
-            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[ReturnedLength];
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
             fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
         }
 
@@ -366,6 +459,7 @@ public:
             // Group information comes back as a single (large) element, not an array.
             assert(ReturnedLength == pInformation->Size);
             _ulProcCount = 0;
+            _ulActiveProcCount = 0;
 
             // Fill in group topology vector so we can answer questions about active/max procs
             for (WORD i = 0; i < pInformation->Group.ActiveGroupCount; i++)
@@ -377,8 +471,116 @@ public:
                     pInformation->Group.GroupInfo[i].ActiveProcessorMask
                     );
                 _ulProcCount += _vProcessorGroupInformation[i]._maximumProcessorCount;
+                _ulActiveProcCount += _vProcessorGroupInformation[i]._activeProcessorCount;
             }
         }
+
+        ReturnedLength = AllocSize;
+        fResult = GetLogicalProcessorInformationEx(RelationNumaNode, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            delete [] pInformation;
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
+            fResult = GetLogicalProcessorInformationEx(RelationNumaNode, pInformation, &ReturnedLength);
+        }
+
+        if (fResult)
+        {
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
+
+            while (ReturnedLength != 0)
+            {
+                assert(ReturnedLength >= cur->Size);
+
+                if (cur->Size > ReturnedLength)
+                {
+                    break;
+                }
+
+                _vProcessorNumaInformation.emplace_back(
+                    cur->NumaNode.NodeNumber,
+                    cur->NumaNode.GroupMask.Group,
+                    cur->NumaNode.GroupMask.Mask
+                    );
+
+                ReturnedLength -= cur->Size;
+                cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+            }
+        }
+
+        ReturnedLength = AllocSize;
+        fResult = GetLogicalProcessorInformationEx(RelationProcessorPackage, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            delete [] pInformation;
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
+            fResult = GetLogicalProcessorInformationEx(RelationProcessorPackage, pInformation, &ReturnedLength);
+        }
+
+        if (fResult)
+        {
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
+
+            while (ReturnedLength != 0)
+            {
+                ProcessorSocketInformation socket;
+                
+                assert(ReturnedLength >= cur->Size);
+
+                if (cur->Size > ReturnedLength)
+                {
+                    break;
+                }
+
+                for (WORD i = 0; i < pInformation->Processor.GroupCount; i++)
+                {
+                    socket._vProcessorMasks.emplace_back(cur->Processor.GroupMask[i].Group,
+                                                         cur->Processor.GroupMask[i].Mask);
+                }
+
+                _vProcessorSocketInformation.push_back(socket);
+
+                ReturnedLength -= cur->Size;
+                cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+            }
+        }
+
+        ReturnedLength = AllocSize;
+        fResult = GetLogicalProcessorInformationEx(RelationProcessorCore, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            delete [] pInformation;
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
+            fResult = GetLogicalProcessorInformationEx(RelationProcessorCore, pInformation, &ReturnedLength);
+        }
+
+        if (fResult)
+        {
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
+
+            while (ReturnedLength != 0)
+            {
+                assert(ReturnedLength >= cur->Size);
+
+                if (cur->Size > ReturnedLength)
+                {
+                    break;
+                }
+
+                assert(pInformation->Processor.GroupCount == 1);
+
+                _vProcessorHyperThreadInformation.emplace_back(cur->Processor.GroupMask[0].Group,
+                                                               cur->Processor.GroupMask[0].Mask);
+
+                ReturnedLength -= cur->Size;
+                cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+            }
+        }
+
+        // TODO: Get the cache relationships as well???
 
         delete [] pInformation;
     }
@@ -479,7 +681,7 @@ public:
         if (StartTime.wYear) {
 
             nWritten = sprintf_s(szBuffer, _countof(szBuffer),
-                "%u/%02u/%02u %02u:%02u:%02u GMT",
+                "%u/%02u/%02u %02u:%02u:%02u UTC",
                 StartTime.wYear,
                 StartTime.wMonth,
                 StartTime.wDay,
@@ -507,6 +709,43 @@ public:
             sXml += szBuffer;
             sXml += "\"/>\n";
 
+        }
+        for (const auto& n : processorTopology._vProcessorNumaInformation)
+        {
+            sXml += "<Node Node=\"";
+            sXml += to_string(n._nodeNumber);
+            sXml += "\" Group=\"";
+            sXml += to_string(n._groupNumber);
+            sXml += "\" Processors=\"0x";
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", n._processorMask);
+            assert(nWritten && nWritten < _countof(szBuffer));
+            sXml += szBuffer;
+            sXml += "\"/>\n";
+        }
+        for (const auto& s : processorTopology._vProcessorSocketInformation)
+        {
+            sXml += "<Socket>\n";
+            for (const auto& g : s._vProcessorMasks)
+            {
+                sXml += "<Group Group=\"";
+                sXml += to_string(g.first);
+                sXml += "\" Processors=\"0x";
+                nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g.second);
+                assert(nWritten && nWritten < _countof(szBuffer));
+                sXml += szBuffer;
+                sXml += "\"/>\n";
+            }
+            sXml += "</Socket>\n";
+        }
+        for (const auto& h : processorTopology._vProcessorHyperThreadInformation)
+        {
+            sXml += "<HyperThread Group=\"";
+            sXml += to_string(h._groupNumber);
+            sXml += "\" Processors=\"0x";
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", h._processorMask);
+            assert(nWritten && nWritten < _countof(szBuffer));
+            sXml += szBuffer;
+            sXml += "\"/>\n";
         }
         sXml += "</ProcessorTopology>\n";
 
@@ -552,6 +791,29 @@ enum class WriteThroughMode {
     On,
 };
 
+class ThreadTarget
+{
+public:
+
+    ThreadTarget() :
+        _ulThread(0xFFFFFFFF),
+        _ulWeight(0)
+    {
+    }
+
+    void SetThread(UINT32 ulThread) { _ulThread = ulThread; }
+    UINT32 GetThread() const { return _ulThread; }
+
+    void SetWeight(UINT32 ulWeight) { _ulWeight = ulWeight; }
+    UINT32 GetWeight() const { return _ulWeight; }
+
+    string GetXml() const;
+
+private:
+    UINT32 _ulThread;
+    UINT32 _ulWeight;
+};
+
 class Target
 {
 public:
@@ -584,6 +846,7 @@ public:
         _fTemporaryFileHint(false),
         _fUseLargePages(false),
         _ioPriorityHint(IoPriorityHintNormal),
+        _ulWeight(1),
         _dwThroughputBytesPerMillisecond(0),
         _cbRandomDataWriteBuffer(0),
         _sRandomDataWriteBufferSourcePath(),
@@ -613,6 +876,7 @@ public:
 
     void SetBaseFileOffsetInBytes(UINT64 ullBaseFileOffset) { _ullBaseFileOffset = ullBaseFileOffset; }
     UINT64 GetBaseFileOffsetInBytes() const { return _ullBaseFileOffset; }
+    UINT64 GetThreadBaseFileOffsetInBytes(UINT32 ulThreadNo) { return _ullBaseFileOffset + ulThreadNo * _ullThreadStride; }
 
     void SetSequentialScanHint(bool fBool) { _fSequentialScanHint = fBool; }
     bool GetSequentialScanHint() const { return _fSequentialScanHint; }
@@ -687,6 +951,15 @@ public:
     }
     PRIORITY_HINT GetIOPriorityHint() const { return _ioPriorityHint; }
 
+    void SetWeight(UINT32 ulWeight) { _ulWeight = ulWeight; }
+    UINT32 GetWeight() const { return _ulWeight; }
+
+    void AddThreadTarget(const ThreadTarget &threadTarget) 
+    {
+        _vThreadTargets.push_back(threadTarget);
+    }
+    vector<ThreadTarget> GetThreadTargets() const { return _vThreadTargets; }
+
     void SetPrecreated(bool fBool) { _fPrecreated = fBool; }
     bool GetPrecreated() const { return _fPrecreated; }
 
@@ -695,9 +968,9 @@ public:
 
     string GetXml() const;
 
-    bool AllocateAndFillRandomDataWriteBuffer();
+    bool AllocateAndFillRandomDataWriteBuffer(Random *pRand);
     void FreeRandomDataWriteBuffer();
-    BYTE* GetRandomDataWriteBuffer();
+    BYTE* GetRandomDataWriteBuffer(Random *pRand);
 
     DWORD GetCreateFlags(bool fAsync)
     {
@@ -718,7 +991,7 @@ public:
             dwFlags |= FILE_ATTRIBUTE_TEMPORARY;
         }
 
-        if (GetRequestCount() > 1 || fAsync)
+        if (fAsync)
         {
             dwFlags |= FILE_FLAG_OVERLAPPED;
         }
@@ -779,7 +1052,10 @@ private:
 
     PRIORITY_HINT _ioPriorityHint;
 
-    bool _FillRandomDataWriteBuffer();
+    UINT32 _ulWeight;
+    vector<ThreadTarget> _vThreadTargets;
+
+    bool _FillRandomDataWriteBuffer(Random *pRand);
 
     friend class UnitTests::ProfileUnitTests;
     friend class UnitTests::TargetUnitTests;
@@ -808,6 +1084,8 @@ public:
         _ulCoolDown(0),
         _ulRandSeed(0),
         _dwThreadCount(0),
+        _dwRequestCount(0),
+        _fRandomWriteData(false),
         _fDisableAffinity(false),
         _fCompletionRoutines(false),
         _fMeasureLatency(false),
@@ -830,6 +1108,7 @@ public:
     {
         _vTargets.push_back(Target(target));
     }
+
     vector<Target> GetTargets() const { return _vTargets; }
 
     void SetDuration(UINT32 ulDuration) { _ulDuration = ulDuration; }
@@ -844,8 +1123,14 @@ public:
     void SetRandSeed(UINT32 ulRandSeed) { _ulRandSeed = ulRandSeed; }
     UINT32 GetRandSeed() const { return _ulRandSeed; }
 
+    void SetRandomWriteData(bool fRandomWriteData) { _fRandomWriteData = fRandomWriteData; }
+    bool GetRandomWriteData() const { return _fRandomWriteData; }
+
     void SetThreadCount(DWORD dwThreadCount) { _dwThreadCount = dwThreadCount; }
     DWORD GetThreadCount() const { return _dwThreadCount; }
+
+    void SetRequestCount(DWORD dwRequestCount) { _dwRequestCount = dwRequestCount; }
+    DWORD GetRequestCount() const { return _dwRequestCount; }
 
     void SetDisableAffinity(bool fDisableAffinity) { _fDisableAffinity = fDisableAffinity; }
     bool GetDisableAffinity() const { return _fDisableAffinity; }
@@ -872,6 +1157,8 @@ private:
     UINT32 _ulCoolDown;
     UINT32 _ulRandSeed;
     DWORD _dwThreadCount;
+    DWORD _dwRequestCount;
+    bool _fRandomWriteData;
     bool _fDisableAffinity;
     vector<AffinityAssignment> _vAffinity;
     bool _fCompletionRoutines;
@@ -1008,6 +1295,91 @@ private:
     friend class UnitTests::ProfileUnitTests;
 };
 
+class IORequest
+{
+public:
+    IORequest(Random *pRand) :
+        _ioType(IOOperation::ReadIO),
+        _pRand(pRand),
+        _pCurrentTarget(nullptr),
+        _ullStartTime(0),
+        _ulRequestIndex(0xFFFFFFFF),
+        _ullTotalWeight(0),
+        _fEqualWeights(true)
+    {
+        memset(&_overlapped, 0, sizeof(OVERLAPPED));
+        _overlapped.Offset = 0xFFFFFFFF;
+        _overlapped.OffsetHigh = 0xFFFFFFFF;
+    }
+
+    static IORequest *OverlappedToIORequest(OVERLAPPED *pOverlapped)
+    {
+        return CONTAINING_RECORD(pOverlapped, IORequest, _overlapped);
+    }
+
+    OVERLAPPED *GetOverlapped() { return &_overlapped; }
+    
+    void AddTarget(Target *pTarget, UINT32 ulWeight)
+    { 
+        _vTargets.push_back(pTarget); 
+        _vulTargetWeights.push_back(ulWeight);
+        _ullTotalWeight += ulWeight;
+
+        if (ulWeight != _vulTargetWeights[0]) {
+            _fEqualWeights = false;
+        }
+    }
+
+    Target *GetCurrentTarget() { return _pCurrentTarget; }
+
+    Target *GetNextTarget()
+    {
+        UINT64 ullWeight;
+
+        if (_vTargets.size() == 1) {
+            _pCurrentTarget = _vTargets[0];
+        }
+        else if (_fEqualWeights) {
+            _pCurrentTarget = _vTargets[_pRand->Rand32() % _vTargets.size()];
+        }
+        else {
+            ullWeight = _pRand->Rand64() % _ullTotalWeight;
+            
+            for (size_t iTarget = 0; iTarget < _vTargets.size(); iTarget++) {
+                if (ullWeight < _vulTargetWeights[iTarget]) {
+                    _pCurrentTarget = _vTargets[iTarget];
+                    break;
+                }
+            
+                ullWeight -= _vulTargetWeights[iTarget];
+            }
+        }
+
+        return _pCurrentTarget;
+    }
+
+    void SetIoType(IOOperation ioType) { _ioType = ioType; }
+    IOOperation GetIoType() const { return _ioType; }
+
+    void SetStartTime(UINT64 ullStartTime) { _ullStartTime = ullStartTime; }
+    UINT64 GetStartTime() const { return _ullStartTime; }
+
+    void SetRequestIndex(UINT32 ulRequestIndex) { _ulRequestIndex = ulRequestIndex; }
+    UINT32 GetRequestIndex() const { return _ulRequestIndex; }
+
+private:
+    OVERLAPPED _overlapped;
+    vector<Target*> _vTargets;
+    vector<UINT32> _vulTargetWeights;
+    UINT64 _ullTotalWeight;
+    bool _fEqualWeights;
+    Random *_pRand;
+    Target *_pCurrentTarget;
+    IOOperation _ioType;
+    UINT64 _ullStartTime;
+    UINT32 _ulRequestIndex;
+};
+
 class ThreadParameters
 {
 public:
@@ -1027,12 +1399,10 @@ public:
     vector<Target> vTargets;
     vector<HANDLE> vhTargets;
     vector<UINT64> vullFileSizes;
+    vector<size_t> vulReadBufferSize;
     vector<BYTE *> vpDataBuffers;
-    vector<OVERLAPPED> vOverlapped;             // each target has RequestCount OVERLAPPED structures
-    vector<size_t> vOverlappedIdToTargetId;
-    vector<size_t> vFirstOverlappedIdForTargetId;   //id of the first overlapped structure in the vOverlapped vector by target
-    vector<IOOperation> vdwIoType;                        //as many as vOverlapped; used by the completion routines
-    vector<UINT64> vIoStartTimes;
+    vector<IORequest> vIORequest;
+    vector<ThroughputMeter> vThroughputMeters;
   
     // For vanilla sequential access (-s):
     // Private per-thread offsets, incremented directly, indexed to number of targets
@@ -1042,6 +1412,8 @@ public:
     // Pointers to offsets shared between threads, incremented with an interlocked op
     UINT64* pullSharedSequentialOffsets;
 
+    Random *pRand;
+
     UINT32 ulRandSeed;
     UINT32 ulThreadNo;
     UINT32 ulRelativeThreadNo;
@@ -1050,6 +1422,9 @@ public:
     volatile bool *pfAccountingOn;
     PUINT64 pullStartTime;
     ThreadResults *pResults;
+
+    //progress dots
+    DWORD dwIOCnt;
 
     //group affinity
     WORD wGroupNum;

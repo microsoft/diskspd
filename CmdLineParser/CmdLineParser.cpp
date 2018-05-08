@@ -179,6 +179,8 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("  -o<count>             number of outstanding I/O requests per target per thread\n");
     printf("                          (1=synchronous I/O, unless more than 1 thread is specified with -F)\n");
     printf("                          [default=2]\n");
+    printf("  -O<count>             number of outstanding I/O requests per thread - for use with -F\n");
+    printf("                          (1=synchronous I/O)\n");
     printf("  -p                    start parallel sequential I/O operations with the same offset\n");
     printf("                          (ignored if -r is specified, makes sense only with -o2 or greater)\n");
     printf("  -P<count>             enable printing a progress dot after each <count> [default=65536]\n");
@@ -215,6 +217,9 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("\n");
     printf("Write buffers:\n");
     printf("  -Z                        zero buffers used for write tests\n");
+    printf("  -Zr                       per IO random buffers used for write tests - this incurrs additional run-time\n");
+    printf("                              overhead to create random content and shouln't be compared to results run\n");
+    printf("                              without -Zr\n");
     printf("  -Z<size>[K|M|G|b]         use a <size> buffer filled with random data as a source for write operations.\n");
     printf("  -Z<size>[K|M|G|b],<file>  use a <size> buffer filled with data from <file> as a source for write operations.\n");
     printf("\n");
@@ -566,7 +571,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             // nop - block size has been taken care of before the loop
             break;
 
-        case 'B':    //base file offset (offset from the beginning of the file), cannot be used with 'random'
+        case 'B':    //base file offset (offset from the beginning of the file)
             if (*(arg + 1) != '\0')
             {
                 UINT64 cb;
@@ -841,6 +846,20 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     {
                         i->SetRequestCount(c);
                     }
+                }
+                else
+                {
+                    fError = true;
+                }
+            }
+            break;
+
+        case 'O':   //total number of IOs/thread - for use with -F
+            {
+                int c = atoi(arg + 1);
+                if (c > 0)
+                {
+                    timeSpan.SetRequestCount(c);
                 }
                 else
                 {
@@ -1210,6 +1229,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     i->SetZeroWriteBuffers(true);
                 }
             }
+            else if (*(arg + 1) == 'r' && *(arg + 2) == '\0')
+            {
+                timeSpan.SetRandomWriteData(true);
+            }
             else
             {
                 UINT64 cb = 0;
@@ -1286,7 +1309,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 bool CmdLineParser::_ReadParametersFromXmlFile(const char *pszPath, Profile *pProfile)
 {
     XmlProfileParser parser;
-    return parser.ParseFile(pszPath, pProfile);
+    return parser.ParseFile(pszPath, pProfile, NULL);
 }
 
 bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch, SystemInformation *pSystem)

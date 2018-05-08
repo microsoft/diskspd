@@ -36,7 +36,7 @@ public:
     string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults);
 
 private:
-    void _PrintCpuUtilization(const Results& results);
+    void _PrintCpuUtilization(const Results& results, const SystemInformation& system);
     void _PrintETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters);
     void _PrintETWSessionInfo(struct ETWSessionInfo sessionInfo);
     void _PrintLatencyPercentiles(const Results& results);

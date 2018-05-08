@@ -1,0 +1,17 @@
+#include <windows.h>
+#include "Common.h"
+
+#include <ntverp.h>
+
+#define VER_FILETYPE                VFT_APP
+#define VER_FILESUBTYPE             VFT2_UNKNOWN
+#define VER_FILEDESCRIPTION_STR     "DiskSpd Storage Performance Tool"
+#define VER_INTERNALNAME_STR        "ResultParser.UnitTests.dll"
+
+#undef VER_PRODUCTVERSION
+#define VER_PRODUCTVERSION DISKSPD_MAJOR,DISKSPD_MINOR,DISKSPD_BUILD,DISKSPD_QFE
+
+#undef VER_PRODUCTVERSION_STR
+#define VER_PRODUCTVERSION_STR      DISKSPD_NUMERIC_VERSION_STRING
+
+#include "common.ver"

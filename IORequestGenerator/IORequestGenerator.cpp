@@ -51,13 +51,128 @@ SOFTWARE.
 #include "OverlappedQueue.h"
 
 /*****************************************************************************/
+// gets size of a dynamic volume, return zero on failure
+//
+UINT64 GetDynamicPartitionSize(HANDLE hFile)
+{
+    assert(NULL != hFile && INVALID_HANDLE_VALUE != hFile);
+
+    UINT64 size = 0;
+    VOLUME_DISK_EXTENTS diskExt = {0};
+    PVOLUME_DISK_EXTENTS pDiskExt = &diskExt;
+    DWORD bytesReturned;
+
+    DWORD status = ERROR_SUCCESS;
+    BOOL rslt;
+
+    OVERLAPPED ovlp = {0};
+    ovlp.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (ovlp.hEvent == nullptr)
+    {
+        PrintError("ERROR: Failed to create event (error code: %u)\n", GetLastError());
+        return 0;
+    }
+
+    rslt = DeviceIoControl(hFile,
+                            IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                            NULL,
+                            0,
+                            pDiskExt,
+                            sizeof(VOLUME_DISK_EXTENTS),
+                            &bytesReturned,
+                            &ovlp);
+    if (!rslt) {
+        status = GetLastError();
+        if (status == ERROR_MORE_DATA) {
+            status = ERROR_SUCCESS;
+
+            bytesReturned = sizeof(VOLUME_DISK_EXTENTS) + ((pDiskExt->NumberOfDiskExtents - 1) * sizeof(DISK_EXTENT));
+            pDiskExt = (PVOLUME_DISK_EXTENTS)LocalAlloc(LPTR, bytesReturned);
+
+            if (pDiskExt)
+            {
+                rslt = DeviceIoControl(hFile,
+                                    IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                                    NULL,
+                                    0,
+                                    pDiskExt,
+                                    bytesReturned,
+                                    &bytesReturned,
+                                    &ovlp);
+                if (!rslt)
+                {
+                    status = GetLastError();
+                    if (status == ERROR_IO_PENDING)
+                    {
+                        if (WAIT_OBJECT_0 != WaitForSingleObject(ovlp.hEvent, INFINITE))
+                        {
+                            status = GetLastError();
+                            PrintError("ERROR: Failed while waiting for event to be signaled (error code: %u)\n", status);
+                        }
+                        else
+                        {
+                            status = ERROR_SUCCESS;
+                            assert(pDiskExt->NumberOfDiskExtents <= 1);
+                        }
+                    }
+                    else
+                    {
+                        PrintError("ERROR: Could not obtain dynamic volume extents (error code: %u)\n", status);
+                    }
+                }
+            }
+            else
+            {
+                status = GetLastError();
+                PrintError("ERROR: Could not allocate memory (error code: %u)\n", status);
+            }
+        }
+        else if (status == ERROR_IO_PENDING)
+        {
+            if (WAIT_OBJECT_0 != WaitForSingleObject(ovlp.hEvent, INFINITE))
+            {
+                status = GetLastError();
+                PrintError("ERROR: Failed while waiting for event to be signaled (error code: %u)\n", status);
+            }
+            else
+            {
+                status = ERROR_SUCCESS;
+                assert(pDiskExt->NumberOfDiskExtents <= 1);
+            }
+        }
+        else
+        {
+            PrintError("ERROR: Could not obtain dynamic volume extents (error code: %u)\n", status);
+        }
+    }
+    else
+    {
+        assert(pDiskExt->NumberOfDiskExtents <= 1);
+    }
+
+    if (status == ERROR_SUCCESS)
+    {
+        for (DWORD n = 0; n < pDiskExt->NumberOfDiskExtents; n++) {
+            size += pDiskExt->Extents[n].ExtentLength.QuadPart;
+        }
+    }
+
+    if (pDiskExt && (pDiskExt != &diskExt)) {
+        LocalFree(pDiskExt);
+    }
+    CloseHandle(ovlp.hEvent);
+
+    return size;
+}
+
+/*****************************************************************************/
 // gets partition size, return zero on failure
 //
 UINT64 GetPartitionSize(HANDLE hFile)
 {
     assert(NULL != hFile && INVALID_HANDLE_VALUE != hFile);
 
-    GET_LENGTH_INFORMATION pinf;
+    PARTITION_INFORMATION_EX pinf;
     OVERLAPPED ovlp = {};
 
     ovlp.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -69,18 +184,17 @@ UINT64 GetPartitionSize(HANDLE hFile)
 
     DWORD rbcnt = 0;
     DWORD status = ERROR_SUCCESS;
-    BOOL rslt;
+    UINT64 size = 0;
 
-    rslt = DeviceIoControl(hFile,
-        IOCTL_DISK_GET_LENGTH_INFO,
-        NULL,
-        0,
-        &pinf,
-        sizeof(pinf),
-        &rbcnt,
-        &ovlp);
-
-    if (!rslt)
+    if (!DeviceIoControl(hFile,
+                        IOCTL_DISK_GET_PARTITION_INFO_EX,
+                        NULL,
+                        0,
+                        &pinf,
+                        sizeof(pinf),
+                        &rbcnt,
+                        &ovlp)
+        )
     {
         status = GetLastError();
         if (status == ERROR_IO_PENDING)
@@ -91,23 +205,22 @@ UINT64 GetPartitionSize(HANDLE hFile)
             }
             else
             {
-                rslt = TRUE;
+                size = pinf.PartitionLength.QuadPart;
             }
         }
         else
         {
-            PrintError("ERROR: Could not obtain partition info (error code: %u)\n", status);
+            size = GetDynamicPartitionSize(hFile);
         }
+    }
+    else
+    {
+        size = pinf.PartitionLength.QuadPart;
     }
 
     CloseHandle(ovlp.hEvent);
 
-    if (!rslt)
-    {
-        return 0;
-    }
-
-    return pinf.Length.QuadPart;
+    return size;
 }
 
 /*****************************************************************************/
@@ -117,7 +230,7 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
 {
     assert(NULL != hFile && INVALID_HANDLE_VALUE != hFile);
 
-    DISK_GEOMETRY geom;
+    DISK_GEOMETRY_EX geom;
     OVERLAPPED ovlp = {};
 
     ovlp.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -132,7 +245,7 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
     BOOL rslt;
 
     rslt = DeviceIoControl(hFile,
-        IOCTL_DISK_GET_DRIVE_GEOMETRY,
+        IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
         NULL,
         0,
         &geom,
@@ -167,10 +280,7 @@ UINT64 GetPhysicalDriveSize(HANDLE hFile)
         return 0;
     }
 
-    return (UINT64)geom.BytesPerSector *
-        (UINT64)geom.SectorsPerTrack   *
-        (UINT64)geom.TracksPerCylinder *
-        (UINT64)geom.Cylinders.QuadPart;
+    return (UINT64)geom.DiskSize.QuadPart;
 }
 
 /*****************************************************************************/
@@ -426,18 +536,6 @@ void IORequestGenerator::_DisplayFileSizeVerbose(bool fVerbose, UINT64 fsize) co
 }
 
 /*****************************************************************************/
-// generate 64-bit random number
-static ULONG64 rand64()
-{
-    return
-        ((((ULONG64)rand()) & 0x7fff) |
-        ((((ULONG64)rand()) & 0x7fff) << 15) |
-        ((((ULONG64)rand()) & 0x7fff) << 30) |
-        (((((ULONG64)rand()) & 0x7fff) << 30) << 15) |
-        (((((ULONG64)rand()) & 0xF) << 30) << 30));
-}
-
-/*****************************************************************************/
 bool IORequestGenerator::_LoadDLLs()
 {
     _hNTDLL = LoadLibraryExW(L"ntdll.dll", nullptr, 0);
@@ -459,16 +557,64 @@ bool IORequestGenerator::_LoadDLLs()
 bool IORequestGenerator::_GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount) const
 {
     NTSTATUS Status = NO_ERROR;
+    UINT32 uCpuCtr;
+    WORD wActiveGroupCtr;
+    BYTE bActiveProc;
+    HANDLE hThread = GetCurrentThread();
+    GROUP_AFFINITY GroupAffinity;
+    PROCESSOR_NUMBER procNumber;
+    bool fOk = true;
 
     assert(NULL != pInfo);
     assert(uCpuCount > 0);
 
-    Status = g_pfnNtQuerySysInfo(SystemProcessorPerformanceInformation,
-                                    pInfo,
-                                    sizeof(*pInfo) * uCpuCount,
-                                    NULL);
+    for (uCpuCtr=0,wActiveGroupCtr=0; wActiveGroupCtr < g_SystemInformation.processorTopology._vProcessorGroupInformation.size(); wActiveGroupCtr++)
+    {
+        ProcessorGroupInformation *pGroup = &g_SystemInformation.processorTopology._vProcessorGroupInformation[wActiveGroupCtr];
+        
+        if (pGroup->_activeProcessorCount != 0) {
+            
+            //
+            // Affinitize to the group we're querying counters from
+            //
+            
+            GetCurrentProcessorNumberEx(&procNumber);
+            
+            if (procNumber.Group != wActiveGroupCtr)
+            {
+                for (bActiveProc = 0; bActiveProc < pGroup->_maximumProcessorCount; bActiveProc++)
+                {
+                    if (pGroup->IsProcessorActive(bActiveProc))
+                    {
+                        SetProcGroupMask(wActiveGroupCtr, bActiveProc, &GroupAffinity);
+                        break;
+                    }
+                }
 
-    return NT_SUCCESS(Status);
+                if (bActiveProc == pGroup->_maximumProcessorCount ||
+                    SetThreadGroupAffinity(hThread, &GroupAffinity, nullptr) == FALSE)
+                {
+                    fOk = false;
+                    break;
+                }
+            }
+
+            Status = g_pfnNtQuerySysInfo(SystemProcessorPerformanceInformation,
+                                         (PVOID)(pInfo + uCpuCtr),
+                                         (sizeof(*pInfo) * uCpuCount) - (uCpuCtr * sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION)),
+                                         NULL);
+
+            if (!NT_SUCCESS(Status))
+            {
+                fOk = false;
+                break;
+            }
+        }
+    
+        uCpuCtr += pGroup->_maximumProcessorCount;
+    }
+
+    return fOk;
 }
 
 /*****************************************************************************/
@@ -481,48 +627,62 @@ __inline UINT64 IORequestGenerator::GetNextFileOffset(ThreadParameters& tp, size
 
     UINT64 blockAlignment = target.GetBlockAlignmentInBytes();
     UINT64 baseFileOffset = target.GetBaseFileOffsetInBytes();
+    UINT64 baseThreadOffset = target.GetThreadBaseFileOffsetInBytes(tp.ulRelativeThreadNo);
     UINT64 blockSize = target.GetBlockSizeInBytes();
     UINT64 nextBlockOffset;
-
-    // increment/produce - note, logically relative to base offset
-    if (target.GetUseRandomAccessPattern())
-    {
-        nextBlockOffset = rand64();
-        nextBlockOffset -= (nextBlockOffset % blockAlignment);
-    }
-    else if (target.GetUseParallelAsyncIO())
-    {
-        nextBlockOffset = prevOffset - baseFileOffset + blockAlignment;
-    }
-    else if (target.GetUseInterlockedSequential())
-    {
-        nextBlockOffset = InterlockedAdd64((PLONGLONG) &tp.pullSharedSequentialOffsets[targetNum], blockAlignment) - blockAlignment;
-    }
-    else // normal sequential access pattern
-    {
-        nextBlockOffset = (tp.vullPrivateSequentialOffsets[targetNum] += blockAlignment);
-    }
 
     // now apply bounds for IO offset
     // aligned target size is the closed interval of byte offsets at which it is legal to issue IO
     // ISSUE IMPROVEMENT: much of this should be precalculated. It belongs within Target, which will
     //      need discovery of target sizing moved from its current just-in-time at thread launch.
     UINT64 alignedTargetSize = tp.vullFileSizes[targetNum] - baseFileOffset - blockSize;
+
     if (target.GetUseRandomAccessPattern() ||
         target.GetUseInterlockedSequential())
     {
-        // these access patterns occur on blockaligned boundaries relative to base
         // convert aligned target size to the open interval
         alignedTargetSize = ((alignedTargetSize / blockAlignment) + 1) * blockAlignment;
-        nextBlockOffset %= alignedTargetSize;
+
+        // increment/produce - note, logically relative to base offset
+        if (target.GetUseRandomAccessPattern())
+        {
+            nextBlockOffset = tp.pRand->Rand64();
+            nextBlockOffset -= (nextBlockOffset % blockAlignment);
+            nextBlockOffset %= alignedTargetSize;
+        }
+        else
+        {
+            nextBlockOffset = InterlockedAdd64((PLONGLONG) &tp.pullSharedSequentialOffsets[targetNum], blockAlignment) - blockAlignment;
+            nextBlockOffset %= alignedTargetSize;
+        }
     }
     else
     {
+        if (prevOffset == FIRST_OFFSET)
+        {
+            nextBlockOffset = baseThreadOffset - baseFileOffset;
+        }
+        else 
+        {
+            if (target.GetUseParallelAsyncIO())
+            {
+                nextBlockOffset = prevOffset - baseFileOffset + blockAlignment;
+            }
+            else // normal sequential access pattern
+            {
+                nextBlockOffset = tp.vullPrivateSequentialOffsets[targetNum] + blockAlignment;
+            }
+        }
+
         // parasync and seq bases are potentially modified by threadstride and loop back to the
         // file base offset + increment which will return them to their initial base offset.
-        if (nextBlockOffset > alignedTargetSize)
+        if (nextBlockOffset > alignedTargetSize) {
+            nextBlockOffset = (baseThreadOffset - baseFileOffset) % blockAlignment;
+
+        }
+
+        if (!target.GetUseParallelAsyncIO())
         {
-            nextBlockOffset = (IORequestGenerator::GetThreadBaseFileOffset(tp, targetNum) - baseFileOffset) % blockAlignment;
             tp.vullPrivateSequentialOffsets[targetNum] = nextBlockOffset;
         }
     }
@@ -539,120 +699,179 @@ __inline UINT64 IORequestGenerator::GetNextFileOffset(ThreadParameters& tp, size
     return nextBlockOffset;
 }
 
-__inline UINT64 IORequestGenerator::GetThreadBaseFileOffset(ThreadParameters& tp, size_t targetNum)
-{
-    const Target &target = tp.vTargets[targetNum];
-
-    UINT64 baseFileOffset = target.GetBaseFileOffsetInBytes();
-    UINT64 nextBlockOffset;
-
-    if (target.GetUseRandomAccessPattern())
-    {
-        nextBlockOffset = IORequestGenerator::GetNextFileOffset(tp, targetNum, 0);
-    }
-    else
-    {
-        // interlocked sequential   - thread stride is always zero, enforced during profile validation
-        // parallel async           - apply thread stride
-        // sequential               - apply thread stride
-        nextBlockOffset = baseFileOffset + tp.ulRelativeThreadNo * target.GetThreadStrideInBytes();
-    }
-
-    return nextBlockOffset;
-}
-
-__inline UINT64 IORequestGenerator::GetStartingFileOffset(ThreadParameters& tp, size_t targetNum)
-{
-    const Target &target = tp.vTargets[targetNum];
-
-    UINT64 baseFileOffset = target.GetBaseFileOffsetInBytes();
-    UINT64 nextBlockOffset;
-
-    if (target.GetUseRandomAccessPattern())
-    {
-        nextBlockOffset = IORequestGenerator::GetNextFileOffset(tp, targetNum, 0);
-    }
-    else
-    {
-        // interlocked sequential   - getnext starts the clock from zero, thread independent
-        // parallel async           - getthreadbase, thread dependent
-        // sequential               - "", and initialize private counter
-        if (target.GetUseInterlockedSequential())
-        {
-            nextBlockOffset = IORequestGenerator::GetNextFileOffset(tp, targetNum, 0);
-        }
-        else
-        {
-            nextBlockOffset = IORequestGenerator::GetThreadBaseFileOffset(tp, targetNum);
-
-            if (!target.GetUseParallelAsyncIO())
-            {
-                tp.vullPrivateSequentialOffsets[targetNum] = nextBlockOffset - baseFileOffset;
-            }
-        }
-    }
-
-    return nextBlockOffset;
-}
-
 /*****************************************************************************/
 // Decide the kind of IO to issue during a mix test
 // Future Work: Add more types of distribution in addition to random
-__inline static IOOperation DecideIo(UINT32 ulWriteRatio)
+__inline static IOOperation DecideIo(Random *pRand, UINT32 ulWriteRatio)
 {
-    return (((UINT32)abs(rand() % 100 + 1)) > ulWriteRatio) ? IOOperation::ReadIO : IOOperation::WriteIO;
- }
+    return ((pRand->Rand32() % 100 + 1) > ulWriteRatio) ? IOOperation::ReadIO : IOOperation::WriteIO;
+}
+
+VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferred, LPOVERLAPPED pOverlapped);
+
+static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBytesTransferred, bool useCompletionRoutines)
+{
+    OVERLAPPED *pOverlapped = pIORequest->GetOverlapped();
+    Target *pTarget = pIORequest->GetCurrentTarget();
+    size_t iTarget = pTarget - &p->vTargets[0];
+    UINT32 iRequest = pIORequest->GetRequestIndex();
+    LARGE_INTEGER li;
+    bool rslt;
+
+    li.LowPart = pOverlapped->Offset;
+    li.HighPart = pOverlapped->OffsetHigh;
+    
+    li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, iTarget, li.QuadPart);
+    
+    pOverlapped->Offset = li.LowPart;
+    pOverlapped->OffsetHigh = li.HighPart;
+    
+    printfv(p->pProfile->GetVerbose(), "t[%u:%u] new I/O op at %I64u (starting in block: %I64u)\n",
+        p->ulThreadNo,
+        iTarget,
+        li.QuadPart,
+        li.QuadPart / pTarget->GetBlockSizeInBytes());
+    
+    IOOperation readOrWrite = DecideIo(p->pRand, pTarget->GetWriteRatio());
+    pIORequest->SetIoType(readOrWrite);
+    
+    if (p->pTimeSpan->GetMeasureLatency())
+    {
+        pIORequest->SetStartTime(PerfTimer::GetTime());
+    }
+    
+    if (readOrWrite == IOOperation::ReadIO)
+    {
+        if (useCompletionRoutines)
+        {
+            rslt = ReadFileEx(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pOverlapped, fileIOCompletionRoutine);
+        }
+        else
+        {
+            rslt = ReadFile(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pdwBytesTransferred, pOverlapped);
+        }
+    }
+    else
+    {
+        if (useCompletionRoutines)
+        {
+            rslt = WriteFileEx(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pOverlapped, fileIOCompletionRoutine);
+        }
+        else
+        {
+            rslt = WriteFile(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pdwBytesTransferred, pOverlapped);
+        }
+    }
+
+    if (p->vThroughputMeters.size() != 0 && p->vThroughputMeters[iTarget].IsRunning())
+    {
+        p->vThroughputMeters[iTarget].Adjust(pTarget->GetBlockSizeInBytes());
+    }
+
+    return rslt;
+}
+
+static void completeIO(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytesTransferred)
+{
+    Target *pTarget = pIORequest->GetCurrentTarget();
+    size_t iTarget = pTarget - &p->vTargets[0];
+
+    //check if I/O transferred all of the requested bytes
+    if (dwBytesTransferred != pTarget->GetBlockSizeInBytes())
+    {
+        PrintError("Warning: thread %u transferred %u bytes instead of %u bytes\n",
+            p->ulThreadNo,
+            dwBytesTransferred,
+            pTarget->GetBlockSizeInBytes());
+    }
+
+    if (*p->pfAccountingOn)
+    {
+        p->pResults->vTargetResults[iTarget].Add(dwBytesTransferred,
+            pIORequest->GetIoType(),
+            pIORequest->GetStartTime(),
+            *(p->pullStartTime),
+            p->pTimeSpan->GetMeasureLatency(),
+            p->pTimeSpan->GetCalculateIopsStdDev());
+    }
+
+    // check if we should print a progress dot
+    if (p->pProfile->GetProgress() != 0)
+    {
+        DWORD dwIOCnt = ++p->dwIOCnt;
+        if (dwIOCnt % p->pProfile->GetProgress() == 0)
+        {
+            print(".");
+        }
+    }
+}
+
+/*****************************************************************************/
+// function called from worker thread
+// performs synch I/O
+//
+static bool doWorkUsingSynchronousIO(ThreadParameters *p)
+{
+    bool fOk = true;
+    BOOL rslt = FALSE;
+    DWORD dwBytesTransferred;
+    IORequest *pIORequest = &p->vIORequest[0];
+
+    while(g_bRun && !g_bThreadError)
+    {
+        Target *pTarget = pIORequest->GetNextTarget();
+
+        if (p->vThroughputMeters.size() != 0)
+        {
+            size_t iTarget = pTarget - &p->vTargets[0];
+            ThroughputMeter *pThroughputMeter = &p->vThroughputMeters[iTarget];
+            DWORD dwSleepTime = pThroughputMeter->GetSleepTime();
+            if (pThroughputMeter->IsRunning() && dwSleepTime > 0)
+            {
+                Sleep(dwSleepTime);
+                continue;
+            }
+        }
+
+        rslt = issueNextIO(p, pIORequest, &dwBytesTransferred, false);
+        
+        if (!rslt)
+        {
+            PrintError("t[%u] error during %s error code: %u)\n", 0, (pIORequest->GetIoType()== IOOperation::ReadIO ? "read" : "write"), GetLastError());
+            fOk = false;
+            goto cleanup;
+        }
+
+        completeIO(p, pIORequest, dwBytesTransferred);
+
+        assert(!g_bError);  // at this point we shouldn't be seeing initialization error
+    }
+
+cleanup:
+    return fOk;
+}
 
 /*****************************************************************************/
 // function called from worker thread
 // performs asynch I/O using IO Completion Ports
 //
-__inline static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletionPort)
+static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletionPort)
 {
     assert(nullptr!= p);
     assert(nullptr != hCompletionPort);
 
     bool fOk = true;
-
-    LARGE_INTEGER li;
     BOOL rslt = FALSE;
     OVERLAPPED * pCompletedOvrp;
     ULONG_PTR ulCompletionKey;
     DWORD dwBytesTransferred;
-    DWORD dwIOCnt = 0;
     OverlappedQueue overlappedQueue;
-    size_t cOverlapped = p->vOverlapped.size();
-
-    bool fMeasureLatency = p->pTimeSpan->GetMeasureLatency();
-
-    size_t cTargets = p->vTargets.size();
-    vector<ThroughputMeter> vThroughputMeters(cTargets);
-    bool fUseThrougputMeter = false;
-    // TODO: move to a separate function
-    for (size_t i = 0; i < cTargets; i++)
-    {
-        Target *pTarget = &p->vTargets[i];
-        DWORD dwBurstSize = pTarget->GetBurstSize();
-        if (p->pTimeSpan->GetThreadCount() > 0)
-        {
-            dwBurstSize /= p->pTimeSpan->GetThreadCount();
-        }
-        else
-        {
-            dwBurstSize /= pTarget->GetThreadsPerFile();
-        }
-
-        if (pTarget->GetThroughputInBytesPerMillisecond() > 0 || pTarget->GetThinkTime() > 0)
-        {
-            fUseThrougputMeter = true;
-            vThroughputMeters[i].Start(pTarget->GetThroughputInBytesPerMillisecond(), pTarget->GetBlockSizeInBytes(), pTarget->GetThinkTime(), dwBurstSize);
-        }
-    }
+    size_t cIORequests = p->vIORequest.size();
 
     //start IO operations
-    for (size_t i = 0; i < cOverlapped; i++)
+    for (size_t i = 0; i < cIORequests; i++)
     {
-        overlappedQueue.Add(&p->vOverlapped[i]);
+        overlappedQueue.Add(p->vIORequest[i].GetOverlapped());
     }
 
     //
@@ -664,51 +883,36 @@ __inline static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hC
         for (size_t i = 0; i < overlappedQueue.GetCount(); i++)
         {
             OVERLAPPED *pReadyOverlapped = overlappedQueue.Remove();
-            DWORD iOverlapped = (DWORD)(pReadyOverlapped - &p->vOverlapped[0]);
-            size_t iTarget = p->vOverlappedIdToTargetId[iOverlapped];
-            size_t iRequest = iOverlapped - p->vFirstOverlappedIdForTargetId[iTarget];
-            Target *pTarget = &p->vTargets[iTarget];
-            ThroughputMeter *pThroughputMeter = &vThroughputMeters[iTarget];
+            IORequest *pIORequest = IORequest::OverlappedToIORequest(pReadyOverlapped);
+            Target *pTarget = pIORequest->GetNextTarget();
 
-            DWORD dwSleepTime = pThroughputMeter->GetSleepTime();
-            if (pThroughputMeter->IsRunning() && dwSleepTime > 0)
+            if (p->vThroughputMeters.size() != 0)
             {
-                dwMinSleepTime = min(dwMinSleepTime, dwSleepTime);
-                overlappedQueue.Add(pReadyOverlapped);
-                continue;
-            }
+                size_t iTarget = pTarget - &p->vTargets[0];
+                ThroughputMeter *pThroughputMeter = &p->vThroughputMeters[iTarget];
 
-            if (fMeasureLatency)
-            {
-                p->vIoStartTimes[iOverlapped] = PerfTimer::GetTime(); // record IO start time 
+                DWORD dwSleepTime = pThroughputMeter->GetSleepTime();
+                if (pThroughputMeter->IsRunning() && dwSleepTime > 0)
+                {
+                    dwMinSleepTime = min(dwMinSleepTime, dwSleepTime);
+                    overlappedQueue.Add(pReadyOverlapped);
+                    continue;
+                }
             }
 
-            IOOperation readOrWrite;
-            readOrWrite = p->vdwIoType[iOverlapped] = DecideIo(pTarget->GetWriteRatio());
-            if (readOrWrite == IOOperation::ReadIO)
-            {
-                rslt = ReadFile(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), nullptr, pReadyOverlapped);
-            }
-            else
-            {
-                rslt = WriteFile(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), nullptr, pReadyOverlapped);
-            }
+            rslt = issueNextIO(p, pIORequest, NULL, false);
 
             if (!rslt && GetLastError() != ERROR_IO_PENDING)
             {
-                PrintError("t[%u] error during %s error code: %u)\n", iOverlapped, (readOrWrite == IOOperation::ReadIO ? "read" : "write"), GetLastError());
+                UINT32 iIORequest = (UINT32)(pIORequest - &p->vIORequest[0]);
+                PrintError("t[%u] error during %s error code: %u)\n", iIORequest, (pIORequest->GetIoType()== IOOperation::ReadIO ? "read" : "write"), GetLastError());
                 fOk = false;
                 goto cleanup;
-            }
-
-            if (pThroughputMeter->IsRunning())
-            {
-                pThroughputMeter->Adjust(pTarget->GetBlockSizeInBytes());
             }
         }
 
         // if no IOs are in flight, wait for the next scheduling time
-        if (fUseThrougputMeter && (overlappedQueue.GetCount() == p->vOverlapped.size()) && dwMinSleepTime != ~((DWORD)0))
+        if ((overlappedQueue.GetCount() == p->vIORequest.size()) && dwMinSleepTime != ~((DWORD)0))
         {
             Sleep(dwMinSleepTime);
         }
@@ -717,56 +921,8 @@ __inline static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hC
         if (GetQueuedCompletionStatus(hCompletionPort, &dwBytesTransferred, &ulCompletionKey, &pCompletedOvrp, 1) != 0)
         {
             //find which I/O operation it was (so we know to which buffer should we use)
-            DWORD iOverlapped = (DWORD)(pCompletedOvrp - &p->vOverlapped[0]);
-            size_t iTarget = p->vOverlappedIdToTargetId[iOverlapped];
-
-            //check if I/O transferred all of the requested bytes
-            Target *pTarget = &p->vTargets[iTarget];
-            if (dwBytesTransferred != pTarget->GetBlockSizeInBytes())
-            {
-                PrintError("Warning: thread %u transferred %u bytes instead of %u bytes\n",
-                    p->ulThreadNo,
-                    dwBytesTransferred,
-                    pTarget->GetBlockSizeInBytes());
-            }
-
-            li.HighPart = pCompletedOvrp->OffsetHigh;
-            li.LowPart = pCompletedOvrp->Offset;
-
-            if (*p->pfAccountingOn)
-            {
-                p->pResults->vTargetResults[iTarget].Add(dwBytesTransferred,
-                    p->vdwIoType[iOverlapped],
-                    &p->vIoStartTimes[iOverlapped],
-                    p->pullStartTime,
-                    fMeasureLatency,
-                    p->pTimeSpan->GetCalculateIopsStdDev());
-            }
-
-            // TODO: move to a separate function
-            // check if we should print a progress dot
-            if (p->pProfile->GetProgress() != 0)
-            {
-                ++dwIOCnt;
-                if (dwIOCnt == p->pProfile->GetProgress())
-                {
-                    print(".");
-                    dwIOCnt = 0;
-                }
-            }
-
-            //restart the I/O operation that just completed
-            li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, iTarget, li.QuadPart);
-
-            pCompletedOvrp->Offset = li.LowPart;
-            pCompletedOvrp->OffsetHigh = li.HighPart;
-
-            printfv(p->pProfile->GetVerbose(), "t[%u:%u] new I/O op at %I64u (starting in block: %I64u)\n",
-                p->ulThreadNo,
-                iTarget,
-                li.QuadPart,
-                li.QuadPart / pTarget->GetBlockSizeInBytes());
-
+            IORequest *pIORequest = IORequest::OverlappedToIORequest(pCompletedOvrp);
+            completeIO(p, pIORequest, dwBytesTransferred);
             overlappedQueue.Add(pCompletedOvrp);
         }
         else
@@ -794,10 +950,8 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
     assert(NULL != pOverlapped);
 
     BOOL rslt = FALSE;
-    LARGE_INTEGER li;
 
     ThreadParameters *p = (ThreadParameters *)pOverlapped->hEvent;
-    bool fMeasureLatency = p->pTimeSpan->GetMeasureLatency();
 
     assert(NULL != p);
 
@@ -808,80 +962,21 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
         goto cleanup;
     }
 
-    size_t iOverlapped = (pOverlapped - &p->vOverlapped[0]);
-    size_t iTarget = p->vOverlappedIdToTargetId[iOverlapped];
-    Target *pTarget = &p->vTargets[iTarget];
+    IORequest *pIORequest = IORequest::OverlappedToIORequest(pOverlapped);
 
-    //check if I/O operation transferred requested number of bytes
-    if (dwBytesTransferred != pTarget->GetBlockSizeInBytes())
-    {
-        PrintError("Warning: thread %u transferred %u bytes instead of %u bytes\n",
-            p->ulThreadNo,
-            dwBytesTransferred,
-            pTarget->GetBlockSizeInBytes());
-    }
-
-    // check if we should print a progress dot
-    // BUGBUG: does not work ... io counter must be global
-    DWORD cdwIO = 0;
-    if (p->pProfile->GetProgress() != 0)
-    {
-        ++cdwIO;
-        if (cdwIO == p->pProfile->GetProgress())
-        {
-            print(".");
-            cdwIO = 0;
-        }
-    }
-
-    if (*p->pfAccountingOn)
-    {
-        p->pResults->vTargetResults[iTarget].Add(dwBytesTransferred,
-            p->vdwIoType[iOverlapped],
-            &p->vIoStartTimes[iOverlapped],
-            p->pullStartTime,
-            fMeasureLatency,
-            p->pTimeSpan->GetCalculateIopsStdDev());
-    }
-
-    //restart the I/O operation that just completed
-    li.HighPart = pOverlapped->OffsetHigh;
-    li.LowPart = pOverlapped->Offset;
-
-    li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, iTarget, li.QuadPart);
-
-    pOverlapped->Offset = li.LowPart;
-    pOverlapped->OffsetHigh = li.HighPart;
-
-    printfv(p->pProfile->GetVerbose(), "t[%u:%u] new I/O op at %I64u (starting in block: %I64u)\n",
-        p->ulThreadNo,
-        iTarget,
-        li.QuadPart,
-        li.QuadPart / pTarget->GetBlockSizeInBytes());
+    completeIO(p, pIORequest, dwBytesTransferred);
 
     // start a new IO operation
     if (g_bRun && !g_bThreadError)
     {
-        size_t iRequest = iOverlapped - p->vFirstOverlappedIdForTargetId[iTarget];
-        if (fMeasureLatency)
-        {
-            p->vIoStartTimes[iOverlapped] = PerfTimer::GetTime(); // record IO start time 
-        }
+        Target *pTarget = pIORequest->GetNextTarget();
+        size_t iTarget = pTarget - &p->vTargets[0];
 
-        IOOperation readOrWrite;
-        readOrWrite = p->vdwIoType[iOverlapped] = DecideIo(pTarget->GetWriteRatio());
-        if (readOrWrite == IOOperation::ReadIO)
-        {
-            rslt = ReadFileEx(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pOverlapped, fileIOCompletionRoutine);
-        }
-        else
-        {
-            rslt = WriteFileEx(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pOverlapped, fileIOCompletionRoutine);
-        }
+        rslt = issueNextIO(p, pIORequest, NULL, true);
 
         if (!rslt)
         {
-            PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, iTarget, (readOrWrite == IOOperation::ReadIO ? "read" : "write"), GetLastError());
+            PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, iTarget, (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
             goto cleanup;
         }
     }
@@ -894,45 +989,27 @@ cleanup:
 // function called from worker thread
 // performs asynch I/O using IO Completion Routines (ReadFileEx, WriteFileEx)
 //
-__inline static bool doWorkUsingCompletionRoutines(ThreadParameters *p)
+static bool doWorkUsingCompletionRoutines(ThreadParameters *p)
 {
     assert(NULL != p);
     bool fOk = true;
     BOOL rslt = FALSE;
     
     //start IO operations
-    size_t iOverlapped = 0;
+    UINT32 cIORequests = (UINT32)p->vIORequest.size();
 
-    bool fMeasureLatency = p->pTimeSpan->GetMeasureLatency();
+    for (size_t iIORequest = 0; iIORequest < cIORequests; iIORequest++) {
+        IORequest *pIORequest = &p->vIORequest[iIORequest];
+        Target *pTarget = pIORequest->GetNextTarget();
+        size_t iTarget = pTarget - &p->vTargets[0];
 
-    for (size_t iTarget = 0; iTarget < p->vTargets.size(); iTarget++)
-    {
-        Target *pTarget = &p->vTargets[iTarget];
-        for (size_t iRequest = 0; iRequest < pTarget->GetRequestCount(); ++iRequest)
+        rslt = issueNextIO(p, pIORequest, NULL, true);
+
+        if (!rslt)
         {
-            if (fMeasureLatency)
-            {
-                p->vIoStartTimes[iOverlapped] = PerfTimer::GetTime(); // record IO start time 
-            }
-
-            IOOperation readOrWrite;
-            readOrWrite = p->vdwIoType[iOverlapped] = DecideIo(pTarget->GetWriteRatio());
-            if (readOrWrite == IOOperation::ReadIO)
-            {
-                rslt = ReadFileEx(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), &p->vOverlapped[iOverlapped], fileIOCompletionRoutine);
-            }
-            else
-            {
-                rslt = WriteFileEx(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), &p->vOverlapped[iOverlapped], fileIOCompletionRoutine);
-            }
-
-            if (!rslt)
-            {
-                PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, iTarget, (readOrWrite == IOOperation::ReadIO ? "read" : "write"), GetLastError());
-                fOk = false;
-                goto cleanup;
-            }
-            iOverlapped++;
+            PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, iTarget, (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
+            fOk = false;
+            goto cleanup;
         }
     }
 
@@ -955,6 +1032,50 @@ cleanup:
     return fOk;
 }
 
+struct UniqueTarget {
+    string path;
+    TargetCacheMode caching;
+    PRIORITY_HINT priority;
+    DWORD dwDesiredAccess;
+    DWORD dwFlags;
+
+    bool operator < (const struct UniqueTarget &ut) const {
+        if (path < ut.path) {
+            return true;
+        }
+        else if (ut.path < path) {
+            return false;
+        }
+
+        if (caching < ut.caching) {
+            return true;
+        }
+        else if (ut.caching < caching) {
+            return false;
+        }
+
+        if (priority < ut.priority) {
+            return true;
+        }
+        else if (ut.priority < priority) {
+            return false;
+        }
+
+        if (dwDesiredAccess < ut.dwDesiredAccess) {
+            return true;
+        }
+        else if (ut.dwDesiredAccess < dwDesiredAccess) {
+            return false;
+        }
+
+        if (dwFlags < ut.dwFlags) {
+            return true;
+        }
+
+        return false;
+    }
+};
+
 /*****************************************************************************/
 // worker thread function
 //
@@ -964,7 +1085,14 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     ThreadParameters *p = reinterpret_cast<ThreadParameters *>(cookie);
     HANDLE hCompletionPort = nullptr;
 
-    bool fMeasureLatency = p->pTimeSpan->GetMeasureLatency();
+    //
+    // A single file can be specified in multiple targets, so only open one
+    // handle for each unique file.
+    //
+    
+    vector<HANDLE> vhUniqueHandles;
+    map< UniqueTarget, UINT32 > mHandleMap;
+
     bool fCalculateIopsStdDev = p->pTimeSpan->GetCalculateIopsStdDev();
     UINT64 ioBucketDuration = 0;
     UINT32 expectedNumberOfBuckets = 0;
@@ -974,9 +1102,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         ioBucketDuration = PerfTimer::MillisecondsToPerfTime(ioBucketDurationInMilliseconds);
         expectedNumberOfBuckets = Util::QuotientCeiling(p->pTimeSpan->GetDuration() * 1000, ioBucketDurationInMilliseconds);
     }
-
-    //set random seed (each thread has a different one)
-    srand(p->ulRandSeed);
 
     // apply affinity. The specific assignment is provided in the thread profile up front.
     if (!p->pTimeSpan->GetDisableAffinity())
@@ -1008,6 +1133,8 @@ DWORD WINAPI threadFunc(LPVOID cookie)
             break;
         }
     }
+
+    UINT32 cIORequests = p->GetTotalRequestCount();
 
     // TODO: open files
     size_t iTarget = 0;
@@ -1054,7 +1181,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         }
 
         // get/set file flags
-        DWORD dwFlags = pTarget->GetCreateFlags(p->vTargets.size() > 1);
+        DWORD dwFlags = pTarget->GetCreateFlags(cIORequests > 1);
         DWORD dwDesiredAccess = 0;
         if (pTarget->GetWriteRatio() == 0)
         {
@@ -1069,46 +1196,62 @@ DWORD WINAPI threadFunc(LPVOID cookie)
             dwDesiredAccess = GENERIC_READ | GENERIC_WRITE;
         }
 
-        HANDLE hFile = CreateFile(fname,
-            dwDesiredAccess,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            nullptr,        //security
-            OPEN_EXISTING,
-            dwFlags,        //flags
-            nullptr);       //template file
-        if (INVALID_HANDLE_VALUE == hFile)
-        {
-            // TODO: error out
-            PrintError("Error opening file: %s [%u]\n", sPath.c_str(), GetLastError());
-            fOk = false;
-            goto cleanup;
-        }
+        HANDLE hFile;
+        UniqueTarget ut;
+        ut.path = sPath;
+        ut.priority = pTarget->GetIOPriorityHint();
+        ut.caching = pTarget->GetCacheMode();
+        ut.dwDesiredAccess = dwDesiredAccess;
+        ut.dwFlags = dwFlags;
 
-        if (pTarget->GetCacheMode() == TargetCacheMode::DisableLocalCache)
-        {
-            DWORD Status = DisableLocalCache(hFile);
-            if (Status != ERROR_SUCCESS)
+        if (mHandleMap.find(ut) == mHandleMap.end()) {
+            hFile = CreateFile(fname,
+                dwDesiredAccess,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                nullptr,        //security
+                OPEN_EXISTING,
+                dwFlags,        //flags
+                nullptr);       //template file
+            if (INVALID_HANDLE_VALUE == hFile)
             {
-                PrintError("Failed to disable local caching (error %u). NOTE: only supported on remote filesystems with Windows 8 or newer.\n", Status);
+                // TODO: error out
+                PrintError("Error opening file: %s [%u]\n", sPath.c_str(), GetLastError());
                 fOk = false;
                 goto cleanup;
             }
+
+            if (pTarget->GetCacheMode() == TargetCacheMode::DisableLocalCache)
+            {
+                DWORD Status = DisableLocalCache(hFile);
+                if (Status != ERROR_SUCCESS)
+                {
+                    PrintError("Failed to disable local caching (error %u). NOTE: only supported on remote filesystems with Windows 8 or newer.\n", Status);
+                    fOk = false;
+                    goto cleanup;
+                }
+            }
+
+            //set IO priority
+            if (pTarget->GetIOPriorityHint() != IoPriorityHintNormal)
+            {
+                _declspec(align(8)) FILE_IO_PRIORITY_HINT_INFO hintInfo;
+                hintInfo.PriorityHint = pTarget->GetIOPriorityHint();
+                if (!SetFileInformationByHandle(hFile, FileIoPriorityHintInfo, &hintInfo, sizeof(hintInfo)))
+                {
+                    PrintError("Error setting IO priority for file: %s [%u]\n", sPath.c_str(), GetLastError());
+                    fOk = false;
+                    goto cleanup;
+                }
+            }
+            
+            mHandleMap[ut] = (UINT32)vhUniqueHandles.size();
+            vhUniqueHandles.push_back(hFile);
+        }
+        else {
+            hFile = vhUniqueHandles[mHandleMap[ut]];
         }
 
         p->vhTargets.push_back(hFile);
-
-        //set IO priority
-        if (pTarget->GetIOPriorityHint() != IoPriorityHintNormal)
-        {
-            _declspec(align(8)) FILE_IO_PRIORITY_HINT_INFO hintInfo;
-            hintInfo.PriorityHint = pTarget->GetIOPriorityHint();
-            if (!SetFileInformationByHandle(hFile, FileIoPriorityHintInfo, &hintInfo, sizeof(hintInfo)))
-            {
-                PrintError("Error setting IO priority for file: %s [%u]\n", sPath.c_str(), GetLastError());
-                fOk = false;
-                goto cleanup;
-            }
-        }
 
         // obtain file/disk/partition size
         {
@@ -1168,7 +1311,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
                 p->vullFileSizes.push_back(fsize);
             }
 
-            UINT64 startingFileOffset = IORequestGenerator::GetThreadBaseFileOffset(*p, iTarget);
+            UINT64 startingFileOffset = pTarget->GetThreadBaseFileOffsetInBytes(p->ulRelativeThreadNo);
 
             // test whether the file is large enough for this thread to do work
             if (startingFileOffset + pTarget->GetBlockSizeInBytes() >= p->vullFileSizes[iTarget])
@@ -1217,10 +1360,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
 
     printfv(p->pProfile->GetVerbose(), "thread %u started (random seed: %u)\n", p->ulThreadNo, p->ulRandSeed);
     
-    // TODO: check if it's still used
-    LARGE_INTEGER li;        //used for setting file positions, etc.
-    DWORD dwIOCnt = 0;        //number of completed I/O operations since last progress dot
-
     p->vullPrivateSequentialOffsets.clear();
     p->vullPrivateSequentialOffsets.resize(p->vTargets.size());
     p->pResults->vTargetResults.clear();
@@ -1237,283 +1376,180 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     }
 
     //
-    // synchronous access
+    // fill the IORequest structures
     //
-    //FUTURE EXTENSION: enable asynchronous I/O even if only 1 outstanding I/O per file (requires another parameter)
-
-    if (p->vTargets.size() == 1 && p->vTargets[0].GetRequestCount() == 1)
+    
+    p->vIORequest.clear();
+    
+    if (p->pTimeSpan->GetThreadCount() != 0 &&
+        p->pTimeSpan->GetRequestCount() != 0)
     {
-        Target *pTarget = &p->vTargets[0];
-        DWORD dwBytesTransferred = 0;
+        p->vIORequest.resize(cIORequests, IORequest(p->pRand));
 
-        //advance file pointer to base file offset
-        li.QuadPart = IORequestGenerator::GetStartingFileOffset(*p, 0);
-        printfv(p->pProfile->GetVerbose(), "t[%u] initial I/O op at %I64u (starting in block: %I64u)\n", 
-            p->ulThreadNo, 
-            li.QuadPart,
-            li.QuadPart / pTarget->GetBlockSizeInBytes());
-        //FUTURE EXTENSION: file pointer should be set through OVERLAPPED stucture for consistency with other scenarios (unless this is suspected to be the common way in real scenarios)
-        if (!SetFilePointerEx(p->vhTargets[0], li, NULL, FILE_BEGIN))
+        for (UINT32 iIORequest = 0; iIORequest < cIORequests; iIORequest++)
         {
-            PrintError("Error setting file pointer. Error code: %d.\n", GetLastError());
-            fOk = false;
-            goto cleanup;
+            p->vIORequest[iIORequest].SetRequestIndex(iIORequest);
+
+            for (unsigned int iFile = 0; iFile < p->vTargets.size(); iFile++)
+            {
+                Target *pTarget = &p->vTargets[iFile];
+                const vector<ThreadTarget> vThreadTargets = pTarget->GetThreadTargets();
+                UINT32 ulWeight = pTarget->GetWeight();
+
+                for (UINT32 iThreadTarget = 0; iThreadTarget < vThreadTargets.size(); iThreadTarget++)
+                {
+                    if (vThreadTargets[iThreadTarget].GetThread() == p->ulRelativeThreadNo)
+                    {
+                        if (vThreadTargets[iThreadTarget].GetWeight() != 0)
+                        {
+                            ulWeight = vThreadTargets[iThreadTarget].GetWeight();
+                        }
+                        break;
+                    }
+                }
+
+                p->vIORequest[iIORequest].AddTarget(pTarget, ulWeight);
+            }
         }
-
-        BOOL rslt = FALSE;
-
-        assert(nullptr != p->hStartEvent);
-
-        //wait for a signal to start
-        printfv(p->pProfile->GetVerbose(), "thread %u: waiting for a signal to start\n", p->ulThreadNo);
-        if (WAIT_FAILED == WaitForSingleObject(p->hStartEvent, INFINITE))
+    }
+    else
+    {
+        for (unsigned int iFile = 0; iFile < p->vTargets.size(); iFile++)
         {
-            PrintError("Waiting for a signal to start failed (error code: %u)\n", GetLastError());
-            fOk = false;
-            goto cleanup;
+            Target *pTarget = &p->vTargets[iFile];
+    
+            for (DWORD iRequest = 0; iRequest < pTarget->GetRequestCount(); ++iRequest)
+            {
+                IORequest ioRequest(p->pRand);
+                ioRequest.AddTarget(pTarget, 1);
+                ioRequest.SetRequestIndex(iRequest);
+                p->vIORequest.push_back(ioRequest);
+            }
         }
-        printfv(p->pProfile->GetVerbose(), "thread %u: received signal to start\n", p->ulThreadNo);
+    }
 
-        // TODO: check if this is needed
-        //check if everything is ok
-        if (g_bError)
-        {
-            fOk = false;
-            goto cleanup;
-        }
-
-        //
-        // perform work
-        //
-
-        assert(nullptr != p->vhTargets[0] );
-        assert(pTarget->GetBlockSizeInBytes() > 0);
-
+    //
+    // fill the throughput meter structures
+    //
+    size_t cTargets = p->vTargets.size();
+    bool fUseThrougputMeter = false;
+    for (size_t i = 0; i < cTargets; i++)
+    {
         ThroughputMeter throughputMeter;
-        DWORD dwSleepTime;
-
+        Target *pTarget = &p->vTargets[i];
         DWORD dwBurstSize = pTarget->GetBurstSize();
         if (p->pTimeSpan->GetThreadCount() > 0)
         {
-            dwBurstSize /= p->pTimeSpan->GetThreadCount();
+            if (pTarget->GetThreadTargets().size() == 0)
+            {
+                dwBurstSize /= p->pTimeSpan->GetThreadCount();
+            }
+            else
+            {
+                dwBurstSize /= (DWORD)pTarget->GetThreadTargets().size();
+            }
         }
         else
         {
             dwBurstSize /= pTarget->GetThreadsPerFile();
         }
-        throughputMeter.Start(pTarget->GetThroughputInBytesPerMillisecond(), pTarget->GetBlockSizeInBytes(), pTarget->GetThinkTime(), dwBurstSize);
 
-        while(g_bRun && !g_bThreadError)
+        if (pTarget->GetThroughputInBytesPerMillisecond() > 0 || pTarget->GetThinkTime() > 0)
         {
-            if (throughputMeter.IsRunning())
-            {
-                dwSleepTime = throughputMeter.GetSleepTime();
-                if (0 != dwSleepTime)
-                {
-                    Sleep(dwSleepTime);
-                    continue;
-                }
-            }
-
-            //start read or write operation (depends of the type of test)
-            //first access is always performed on base offset (even in case of random access)
-
-            UINT64 ullStartTime = 0;
-
-            if (fMeasureLatency)
-            {
-                ullStartTime = PerfTimer::GetTime(); // record IO start time 
-            }
-
-            IOOperation readOrWrite;
-            readOrWrite = DecideIo(pTarget->GetWriteRatio());
-            if (readOrWrite == IOOperation::ReadIO) 
-            {
-                rslt = ReadFile(p->vhTargets[0], p->GetReadBuffer(0, 0), pTarget->GetBlockSizeInBytes(), &dwBytesTransferred, nullptr);
-            }
-            else
-            {
-                rslt = WriteFile(p->vhTargets[0], p->GetWriteBuffer(0, 0), pTarget->GetBlockSizeInBytes(), &dwBytesTransferred, nullptr);
-            }
-
-            if (!rslt)
-            {
-                PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, 0, (readOrWrite == IOOperation::ReadIO ? "read" : "write"), GetLastError()); 
-                fOk = false;
-                goto cleanup;
-            }
-
-            //check if I/O operation transferred requested number of bytes
-            if (dwBytesTransferred != pTarget->GetBlockSizeInBytes())
-            {
-                PrintError("Warning: thread %u transfered %u bytes instead of %u bytes\n", p->ulThreadNo, dwBytesTransferred, pTarget->GetBlockSizeInBytes());
-            }
-
-            if (throughputMeter.IsRunning())
-            {
-                throughputMeter.Adjust(pTarget->GetBlockSizeInBytes());
-            }
-
-            if (*p->pfAccountingOn)
-            {
-                p->pResults->vTargetResults[0].Add(dwBytesTransferred,
-                    readOrWrite,
-                    &ullStartTime,
-                    p->pullStartTime,
-                    fMeasureLatency,
-                    fCalculateIopsStdDev);
-            }
-
-            // check if we should print a progress dot
-            if (0 != p->pProfile->GetProgress() > 0)
-            {
-                ++dwIOCnt;
-                if (dwIOCnt == p->pProfile->GetProgress())
-                {
-                    print(".");
-                    dwIOCnt = 0;
-                }
-            }
-
-            li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, 0, li.QuadPart);
-
-            printfv(p->pProfile->GetVerbose(), "t[%u] new I/O op at %I64u (starting in block: %I64u)\n",
-                    p->ulThreadNo, 
-                    li.QuadPart,
-                    li.QuadPart / pTarget->GetBlockSizeInBytes());
-
-            if (!SetFilePointerEx(p->vhTargets[0], li, NULL, FILE_BEGIN))
-            {
-                PrintError("thread %u: Error setting file pointer\n", p->ulThreadNo);
-                fOk = false;
-                goto cleanup;
-            }
-
-            assert(!g_bError);  // at this point we shouldn't be seeing initialization error
+            fUseThrougputMeter = true;
+            throughputMeter.Start(pTarget->GetThroughputInBytesPerMillisecond(), pTarget->GetBlockSizeInBytes(), pTarget->GetThinkTime(), dwBurstSize);
         }
-    }//end of synchronous access
-    //
-    // overlapped IO operations
-    //
+
+        p->vThroughputMeters.push_back(throughputMeter);
+    }
+
+    if (!fUseThrougputMeter)
+    {
+        p->vThroughputMeters.clear();
+    }
+    
+    //FUTURE EXTENSION: enable asynchronous I/O even if only 1 outstanding I/O per file (requires another parameter)
+    if (cIORequests == 1)
+    {
+        //synchronous IO - no setup needed
+    }
+    else if (p->pTimeSpan->GetCompletionRoutines())
+    {
+        //in case of completion routines hEvent field is not used,
+        //so we can use it to pass a pointer to the thread parameters
+        for (UINT32 iIORequest = 0; iIORequest < cIORequests; iIORequest++) {
+            OVERLAPPED *pOverlapped;
+
+            pOverlapped = p->vIORequest[iIORequest].GetOverlapped();
+            pOverlapped->hEvent = (HANDLE)p;
+        }
+    }
     else
     {
         //
-        // create IO completion port if not doing completion routines
+        // create IO completion port if not doing completion routines or synchronous IO
         //
-        if (!p->pTimeSpan->GetCompletionRoutines())
+        for (unsigned int i = 0; i < vhUniqueHandles.size(); i++)
         {
-            for (unsigned int i = 0; i < p->vTargets.size(); i++)
+            hCompletionPort = CreateIoCompletionPort(vhUniqueHandles[i], hCompletionPort, 0, 1);
+            if (nullptr == hCompletionPort)
             {
-                hCompletionPort = CreateIoCompletionPort(p->vhTargets[i], hCompletionPort, 0, 1);
-                if (nullptr == hCompletionPort)
-                {
-                    PrintError("unable to create IO completion port (error code: %u)\n", GetLastError());
-                    fOk = false;
-                    goto cleanup;
-                }
-            }
-        }
-
-        //
-        // fill the OVERLAPPED structures
-        //
-        
-        UINT32 cOverlapped = p->GetTotalRequestCount();
-        
-        p->vOverlapped.clear();
-        p->vOverlapped.resize(cOverlapped);
-
-        p->vdwIoType.clear();
-        p->vdwIoType.resize(cOverlapped);
-    
-        p->vIoStartTimes.clear();
-        p->vIoStartTimes.resize(cOverlapped);
-
-        p->vFirstOverlappedIdForTargetId.clear();
-        
-        UINT32 iOverlapped = 0;
-        for (unsigned int iFile = 0; iFile < p->vTargets.size(); iFile++)
-        {
-            Target *pTarget = &p->vTargets[iFile];
-            
-            li.QuadPart = IORequestGenerator::GetStartingFileOffset(*p, iFile);
-            p->vFirstOverlappedIdForTargetId.push_back(iOverlapped);
-
-            for (DWORD iRequest = 0; iRequest < pTarget->GetRequestCount(); ++iRequest)
-            {
-                // on increment, get next except in the case of parallel async, which all start at the initial offset.
-                // note that we must only do this when needed, since it will advance global state.
-                if (iRequest != 0 && !pTarget->GetUseParallelAsyncIO())
-                {
-                    li.QuadPart = IORequestGenerator::GetNextFileOffset(*p, iFile, li.QuadPart);
-                }
-
-                p->vOverlappedIdToTargetId.push_back(iFile);
-                if (!p->pTimeSpan->GetCompletionRoutines())
-                {
-                    p->vOverlapped[iOverlapped].hEvent = nullptr;    //we don't need event, because we use IO completion port
-                }
-                else
-                {
-                    //in case of completion routines hEvent field is not used,
-                    //so we can use it to pass a pointer to the thread parameters
-                    p->vOverlapped[iOverlapped].hEvent = (HANDLE)p;
-                }
-
-                printfv(p->pProfile->GetVerbose(), "t[%u:%u] initial I/O op at %I64u (starting in block: %I64u)\n",
-                    p->ulThreadNo,
-                    iFile,
-                    li.QuadPart,
-                    li.QuadPart / pTarget->GetBlockSizeInBytes());
-
-                p->vOverlapped[iOverlapped].Offset = li.LowPart;
-                p->vOverlapped[iOverlapped].OffsetHigh = li.HighPart;
-
-                ++iOverlapped;
-            }
-        }
-
-        //
-        // wait for a signal to start
-        //
-        printfv(p->pProfile->GetVerbose(), "thread %u: waiting for a signal to start\n", p->ulThreadNo);
-        if( WAIT_FAILED == WaitForSingleObject(p->hStartEvent, INFINITE) )
-        {
-            PrintError("Waiting for a signal to start failed (error code: %u)\n", GetLastError());
-            fOk = false;
-            goto cleanup;
-        }
-        printfv(p->pProfile->GetVerbose(), "thread %u: received signal to start\n", p->ulThreadNo);
-
-        //check if everything is ok
-        if (g_bError)
-        {
-            fOk = false;
-            goto cleanup;
-        }
-
-        //error handling and memory freeing is done in doWorkUsingIOCompletionPorts and doWorkUsingCompletionRoutines
-        if (!p->pTimeSpan->GetCompletionRoutines())
-        {
-            // use IO Completion Ports (it will also close the I/O completion port)
-            if (!doWorkUsingIOCompletionPorts(p, hCompletionPort))
-            {
+                PrintError("unable to create IO completion port (error code: %u)\n", GetLastError());
                 fOk = false;
                 goto cleanup;
             }
         }
-        else
-        {
-            //use completion routines
-            if (!doWorkUsingCompletionRoutines(p))
-            {
-                fOk = false;
-                goto cleanup;
-            }
-        }
+    }
 
-        assert(!g_bError);  // at this point we shouldn't be seeing initialization error
-    } // end of overlapped IO operations
+    //
+    // wait for a signal to start
+    //
+    printfv(p->pProfile->GetVerbose(), "thread %u: waiting for a signal to start\n", p->ulThreadNo);
+    if( WAIT_FAILED == WaitForSingleObject(p->hStartEvent, INFINITE) )
+    {
+        PrintError("Waiting for a signal to start failed (error code: %u)\n", GetLastError());
+        fOk = false;
+        goto cleanup;
+    }
+    printfv(p->pProfile->GetVerbose(), "thread %u: received signal to start\n", p->ulThreadNo);
+
+    //check if everything is ok
+    if (g_bError)
+    {
+        fOk = false;
+        goto cleanup;
+    }
+
+    //error handling and memory freeing is done in doWorkUsingIOCompletionPorts and doWorkUsingCompletionRoutines
+    if (cIORequests == 1)
+    {
+        // use synchronous IO (it will also clse the event)
+        if (!doWorkUsingSynchronousIO(p))
+        {
+            fOk = false;
+            goto cleanup;
+        }
+    }
+    else if (!p->pTimeSpan->GetCompletionRoutines())
+    {
+        // use IO Completion Ports (it will also close the I/O completion port)
+        if (!doWorkUsingIOCompletionPorts(p, hCompletionPort))
+        {
+            fOk = false;
+            goto cleanup;
+        }
+    }
+    else
+    {
+        //use completion routines
+        if (!doWorkUsingCompletionRoutines(p))
+        {
+            fOk = false;
+            goto cleanup;
+        }
+    }
+
+    assert(!g_bError);  // at this point we shouldn't be seeing initialization error
 
     // save results
 
@@ -1534,7 +1570,7 @@ cleanup:
     }
 
     // close files
-    for (auto i = p->vhTargets.begin(); i != p->vhTargets.end(); i++)
+    for (auto i = vhUniqueHandles.begin(); i != vhUniqueHandles.end(); i++)
     {
         CloseHandle(*i);
     }
@@ -1545,6 +1581,7 @@ cleanup:
         CloseHandle(hCompletionPort);
     }
 
+    delete p->pRand;
     delete p;
 
     // notify master thread that we've finished
@@ -1844,6 +1881,7 @@ void IORequestGenerator::_InitializeGlobalParameters()
 bool IORequestGenerator::_PrecreateFiles(Profile& profile) const
 {
     bool fOk = true;
+
     if (profile.GetPrecreateFiles() != PrecreateFiles::None)
     {
         vector<CreateFileParameters> vFilesToCreate = _GetFilesToPrecreate(profile);
@@ -1863,6 +1901,7 @@ bool IORequestGenerator::_PrecreateFiles(Profile& profile) const
             profile.MarkFilesAsPrecreated(vCreatedFiles);
         }
     }
+
     return fOk;
 }
 
@@ -1913,7 +1952,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 
     memset(&g_EtwEventCounters, 0, sizeof(struct ETWEventCounters));  // reset all etw event counters
 
-    bool fUseETW = false;            //true if user wants ETW
+    bool fUseETW = profile.GetEtwEnabled();            //true if user wants ETW
 
     //
     // load dlls
@@ -1927,12 +1966,13 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 
     //FUTURE EXTENSION: check for conflicts in alignment (when cache is turned off only sector aligned I/O are permitted)
     //FUTURE EXTENSION: check if file sizes are enough to have at least first requests not wrapping around
-    
+
+    Random r;
     vector<Target> vTargets = timeSpan.GetTargets();
     // allocate memory for random data write buffers
     for (auto i = vTargets.begin(); i != vTargets.end(); i++)
     {
-        if ((i->GetRandomDataWriteBufferSize() > 0) && !i->AllocateAndFillRandomDataWriteBuffer())
+        if ((i->GetRandomDataWriteBufferSize() > 0) && !i->AllocateAndFillRandomDataWriteBuffer(&r))
         {
             return false;
         }
@@ -2009,6 +2049,13 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     }
 
     //
+    // set to high priority to ensure the controller thread gets to run immediately
+    // when signalled.
+    //
+
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
+    //
     // create the threads
     //
 
@@ -2038,16 +2085,49 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             return false;
         }
 
+        // each thread has a different random seed
+        Random *pRand = new Random(timeSpan.GetRandSeed() + iThread);
+        if (nullptr == pRand)
+        {
+            PrintError("FATAL ERROR: could not allocate memory\n");
+            _AbortWorkerThreads(hStartEvent, vhThreads);
+            delete cookie;
+            return false;
+        }
+
         UINT32 ulRelativeThreadNo = 0;
 
         if (timeSpan.GetThreadCount() > 0)
         {
-            // fixed thread mode: all threads operate on all files
+            // fixed thread mode: threads operate on specified files
             // and receive the entire seq index array.
             // relative thread number is the same as thread number.
-            cookie->vTargets = vTargets;
             cookie->pullSharedSequentialOffsets = &vullSharedSequentialOffsets[0];
             ulRelativeThreadNo = iThread;
+            for (auto i = vTargets.begin();
+                 i != vTargets.end();
+                 i++)
+            {
+                const vector<ThreadTarget> vThreadTargets = i->GetThreadTargets();
+
+                // no thread targets specified - add to all threads
+                if (vThreadTargets.size() == 0)
+                {
+                    cookie->vTargets.push_back(*i);
+                }
+                else
+                {
+                    // check if the target should be added to the current thread
+                    for (UINT32 iThreadTarget = 0; iThreadTarget < vThreadTargets.size(); iThreadTarget++)
+                    {
+                        if (vThreadTargets[iThreadTarget].GetThread() == iThread)
+                        {
+                            cookie->vTargets.push_back(*i);
+                            break;
+                        }
+                    }
+                }
+            }
         }
         else
         {
@@ -2093,6 +2173,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         cookie->pfAccountingOn = &fAccountingOn;
         cookie->pullStartTime = &ullStartTime;
         cookie->ulRandSeed = timeSpan.GetRandSeed() + iThread;  // each thread has a different random seed
+        cookie->pRand = pRand;
 
         //Set thread group and proc affinity
 
@@ -2127,6 +2208,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             PrintError("ERROR: unable to create thread (error code: %u)\n", GetLastError());
             InterlockedDecrement(&g_lRunningThreadsCount);
             _AbortWorkerThreads(hStartEvent, vhThreads);
+            delete pRand;
             delete cookie;
             return false;
         }
@@ -2134,10 +2216,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         //store handle to the thread
         vhThreads[iThread] = hThread;
     }
-
-    //FUTURE EXTENSION: SetPriorityClass HIGH/ABOVE_NORMAL
-    //FUTURE EXTENSION: lower priority so the worker threads will initialize (-2)
-    //FUTURE EXTENSION: raise priority so this thread will run after the time end
 
     if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, hStartEvent) && (NULL != pSynch->hStartEvent))
     {
@@ -2224,6 +2302,17 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             printfv(profile.GetVerbose(), "tracing events\n");
         }
 
+        printfv(profile.GetVerbose(), "starting measurements...\n");
+
+        //
+        // notify the front-end that the test is about to start;
+        // do it before starting timing in order not to perturb measurements
+        //
+        if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestStarted) && (NULL != pSynch->pfnCallbackTestStarted))
+        {
+            pSynch->pfnCallbackTestStarted();
+        }
+
         //
         // read performance counters
         //
@@ -2235,18 +2324,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             return false;
         }
 
-        printfv(profile.GetVerbose(), "starting measurements...\n");
         //get cycle count (it will be used to calculate actual work time)
-
-        //
-        // notify the front-end that the test is about to start;
-        // do it before starting timing in order not to perturb measurements
-        //
-        if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestStarted) && (NULL != pSynch->pfnCallbackTestStarted))
-        {
-            pSynch->pfnCallbackTestStarted();
-        }
-
         ullStartTime = PerfTimer::GetTime();
 
 #pragma warning( push )
@@ -2278,6 +2356,14 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         //get cycle count and perf counters
         ullTimeDiff = PerfTimer::GetTime() - ullStartTime;
 
+        if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
+        {
+            PrintError("Error getting performance counters\n");
+            _StopETW(fUseETW, hTraceSession);
+            _TerminateWorkerThreads(vhThreads);
+            return false;
+        }
+
         //
         // notify the front-end that the test has just finished;
         // do it after stopping timing in order not to perturb measurements
@@ -2285,14 +2371,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         if (STRUCT_SYNCHRONIZATION_SUPPORTS(pSynch, pfnCallbackTestFinished) && (NULL != pSynch->pfnCallbackTestFinished))
         {
             pSynch->pfnCallbackTestFinished();
-        }
-
-        if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
-        {
-            PrintError("Error getting performance counters\n");
-            _StopETW(fUseETW, hTraceSession);
-            _TerminateWorkerThreads(vhThreads);
-            return false;
         }
 
         //
@@ -2306,10 +2384,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             {
                 PrintError("Error stopping ETW session\n");
                 return false;
-            }
-            else
-            {
-                free(pETWSession);
             }
         }
     }
@@ -2394,16 +2468,16 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         assert(vPerfDone[p].IdleTime.QuadPart >= vPerfInit[p].IdleTime.QuadPart);
         assert(vPerfDone[p].KernelTime.QuadPart >= vPerfInit[p].KernelTime.QuadPart);
         assert(vPerfDone[p].UserTime.QuadPart >= vPerfInit[p].UserTime.QuadPart);
-        //assert(vPerfDone[p].Reserved1[0].QuadPart >= vPerfInit[p].Reserved1[0].QuadPart);
-        //assert(vPerfDone[p].Reserved1[1].QuadPart >= vPerfInit[p].Reserved1[1].QuadPart);
-        //assert(vPerfDone[p].Reserved2 >= vPerfInit[p].Reserved2);
+        assert(vPerfDone[p].Reserved1[0].QuadPart >= vPerfInit[p].Reserved1[0].QuadPart);
+        assert(vPerfDone[p].Reserved1[1].QuadPart >= vPerfInit[p].Reserved1[1].QuadPart);
+        assert(vPerfDone[p].Reserved2 >= vPerfInit[p].Reserved2);
 
         vPerfDiff[p].IdleTime.QuadPart = vPerfDone[p].IdleTime.QuadPart - vPerfInit[p].IdleTime.QuadPart;
         vPerfDiff[p].KernelTime.QuadPart = vPerfDone[p].KernelTime.QuadPart - vPerfInit[p].KernelTime.QuadPart;
         vPerfDiff[p].UserTime.QuadPart = vPerfDone[p].UserTime.QuadPart - vPerfInit[p].UserTime.QuadPart;
-        //vPerfDiff[p].Reserved1[0].QuadPart = vPerfDone[p].Reserved1[0].QuadPart - vPerfInit[p].Reserved1[0].QuadPart;
-        //vPerfDiff[p].Reserved1[1].QuadPart = vPerfDone[p].Reserved1[1].QuadPart - vPerfInit[p].Reserved1[1].QuadPart;
-        //vPerfDiff[p].Reserved2 = vPerfDone[p].Reserved2 - vPerfInit[p].Reserved2;
+        vPerfDiff[p].Reserved1[0].QuadPart = vPerfDone[p].Reserved1[0].QuadPart - vPerfInit[p].Reserved1[0].QuadPart;
+        vPerfDiff[p].Reserved1[1].QuadPart = vPerfDone[p].Reserved1[1].QuadPart - vPerfInit[p].Reserved1[1].QuadPart;
+        vPerfDiff[p].Reserved2 = vPerfDone[p].Reserved2 - vPerfInit[p].Reserved2;
     }
 
     //
@@ -2436,6 +2510,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         results.EtwMask.bUsePerfTimer = profile.GetEtwUsePerfTimer();
         results.EtwMask.bUseSystemTimer = profile.GetEtwUseSystemTimer();
         results.EtwMask.bUseCyclesCounter = profile.GetEtwUseCyclesCounter();
+
+        free(pETWSession);
     }
 
     // free memory used by random data write buffers
@@ -2527,3 +2603,4 @@ vector<struct IORequestGenerator::CreateFileParameters> IORequestGenerator::_Get
 
     return vFilesToCreate;
 }
+
