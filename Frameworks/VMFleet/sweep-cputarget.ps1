@@ -42,7 +42,7 @@ $qoswindow = 5
 
 # clean result file and set column headers
 del -Force $outfile -ErrorAction SilentlyContinue
-'WriteRatio','QOS','AVCPU','IOPS' -join "`t" > $outfile
+'WriteRatio','QOS','AVCPU','IOPS','AVRLat','AVWLat' -join "`t" > $outfile
 
 # make qos policy and reset
 Get-StorageQosPolicy -Name SweepQos -ErrorAction SilentlyContinue | Remove-StorageQosPolicy -Confirm:$false
@@ -73,6 +73,13 @@ function get-pc(
     ($pc[$t0 .. $t1].CounterSamples.CookedValue | measure -Average).Average
 }
 
+$pc = @('\Hyper-V Hypervisor Logical Processor(_Total)\% Total Run Time',
+        '\Processor Information(_Total)\% Processor Performance',
+        '\Cluster CSVFS(_Total)\reads/sec',
+        '\Cluster CSVFS(_Total)\avg. sec/read',
+        '\Cluster CSVFS(_Total)\writes/sec',
+        '\Cluster CSVFS(_Total)\avg. sec/write')
+
 # limit the number of attempts per sweep (mix) to 4 per targeted cpu util
 $sweeplimit = ($cputargets.count * 4)
 
@@ -102,10 +109,11 @@ foreach ($w in 0,10,30) {
             write-host -fore Cyan Starting loop with QoS target $qos
 
             $curaddspec = "$($addspec)w$($w)qos$qos"
-            start-sweep.ps1 -addspec $curaddspec -b 4 -o 32 -t 1 -w $w -p r -d 60 -warm 15 -cool 15 -pc '\Hyper-V Hypervisor Logical Processor(_Total)\% Total Run Time','\Processor Information(_Total)\% Processor Performance'
+            start-sweep.ps1 -addspec $curaddspec -b 4 -o 32 -t 1 -w $w -p r -d 60 -warm 15 -cool 15 -pc $pc
 
             # HACKHACK bounce collect
-             Get-ClusterSharedVolume |? { $_.SharedVolumeInfo.FriendlyVolumeName -match 'collect' } | Move-ClusterSharedVolume
+            Get-ClusterSharedVolume |? { $_.SharedVolumeInfo.FriendlyVolumeName -match 'collect' } | Move-ClusterSharedVolume
+            sleep 1
 
             # get average IOPS at DISKSPD
 
@@ -123,10 +131,37 @@ foreach ($w in 0,10,30) {
                 $trt = get-pc $_ $center '\Hyper-V Hypervisor Logical Processor(_Total)\% Total Run Time'
                 $ppc = get-pc $_ $center '\Processor Information(_Total)\% Processor Performance'
                 $trt*$ppc/100
+
+
             } | measure -Average).Average
 
+            # get average latency for central 60 seconds, all nodes
+            # note we must aggregate the product of av latency and iops per node to get total
+            # latency, and then divide by total iops to get whole-cluster average.
+
+            $csvrtotal = 0
+            $csvwtotal = 0
+
+            ($avrlat,$avwlat) = $(dir $result\*.blg |% {
+
+                $csvrlat = get-pc $_ $center '\Cluster CSVFS(_Total)\avg. sec/read'
+                $csvwlat = get-pc $_ $center '\Cluster CSVFS(_Total)\avg. sec/write'
+                $csvr = get-pc $_ $center '\Cluster CSVFS(_Total)\reads/sec'
+                $csvw = get-pc $_ $center '\Cluster CSVFS(_Total)\writes/sec'
+
+                $csvrtotal += $csvr
+
+                $csvwtotal += $csvw
+
+                [pscustomobject] @{ 'avrtime' = $csvrlat*$csvr; 'avwtime' = $csvwlat*$csvw }
+
+            } | measure -Sum -Property avrtime,avwtime).Sum
+
+            $avrlat /= $csvrtotal
+            $avwlat /= $csvwtotal
+
             # capture results
-            $w,$qos,$avcpu,$iops -join "`t" >> $outfile
+            $w,$qos,$avcpu,$iops,$avrlat,$avwlat -join "`t" >> $outfile
 
             # archive results
             compress-archive -Path $(dir $result\* -Exclude *.zip) -DestinationPath $result\$curaddspec.zip
@@ -135,7 +170,7 @@ foreach ($w in 0,10,30) {
 
             # stop within targetwindow% of cpu (+/- % of target)
             if (is-within $avcpu $cputarget $cputargetwindow) {
-                write-host -ForegroundColor Green Stopping in target window at $avcpu with QoS at $qos
+                write-host -ForegroundColor Green "Stopping in target window at $('{0:N2}' -f $avcpu) with QoS $qos"
                 break
             }
     
@@ -154,17 +189,17 @@ foreach ($w in 0,10,30) {
             }
 
             if ($inwindow) {
-                write-host -ForegroundColor Yellow Stopping in window of prior measurement at $avcpu with QoS at $qos
+                write-host -ForegroundColor Yellow "Stopping in window of prior measurement at $('{0:N2}' -f $avcpu) with QoS $qos"
                 break
             }
 
             # stop if next qos target is less than initial
             if ($nextqos -lt $qosinitial) {
-                write-host -ForegroundColor Red Stopping with underflow targeting $nextqos less than initial $qosinitial
+                write-host -ForegroundColor Red "Stopping with underflow targeting $nextqos less than initial $qosinitial"
                 break
             }
 
-            write-host -ForegroundColor Cyan Next loop targeting $nextqos
+            write-host -ForegroundColor Cyan "Loop acheived $('{0:N2}' -f $avcpu) @ QoS $qos v. target $cputarget - next loop targeting QoS $nextqos"
 
             # record this datapoint as measured, move along to the next
             $h[$qos] = 1

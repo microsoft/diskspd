@@ -45,6 +45,11 @@ DISKSPD 2.0.17 5/01/2016
 
 ## VM Fleet ##
 
+VM Fleet 0.9 10/2017 (minor)
+
+* watch-cpu: now provides total normalized cpu utility (accounting for turbo/speedstep)
+* sweep-cputarget: now provides average CSV FS read/write latency in the csv
+
 VM Fleet 0.8 6/2017
 
 * get-cluspc: add SMB Client/Server and SMB Direct (not defaulted in Storage group yet)
