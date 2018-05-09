@@ -173,6 +173,9 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("  -i<count>             number of IOs per burst; see -j [default: inactive]\n");
     printf("  -j<milliseconds>      interval in <milliseconds> between issuing IO bursts; see -i [default: inactive]\n");
     printf("  -I<priority>          Set IO priority to <priority>. Available values are: 1-very low, 2-low, 3-normal (default)\n");
+    printf("  -k<align>[K|M|b]      Align the start VA and PA of IO request buffers on this boundary.\n");
+    printf("                          Valid values are [block size, 2MB]");
+    printf("                          This implies large pages.\n");
     printf("  -l                    Use large pages for IO buffers\n");
     printf("  -L                    measure latency statistics\n");
     printf("  -n                    disable default affinity (-a)\n");
@@ -819,6 +822,37 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 {
                     fError = true;
                 }
+            }
+            break;
+
+        case 'k':    // IO buffer alignment
+            if (isdigit(*(arg + 1)))
+            {
+                UINT64 cb;
+                if (_GetSizeInBytes(arg + 1, cb))
+                {
+                    if (cb > (2 * 1024 * 1024))
+                    {
+                        fprintf(stderr, "Invalid IO buffer alignment passed to -k\n");
+                        fError = true;
+                    }
+                    else
+                    {
+                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        {
+                            i->SetIOBufferAlignment(cb);
+                        }
+                    }
+                }
+                else
+                {
+                    fprintf(stderr, "Invalid IO buffer alignment passed to -k\n");
+                    fError = true;
+                }
+            }
+            else
+            {
+                fError = true;
             }
             break;
 

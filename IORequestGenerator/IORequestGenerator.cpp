@@ -1123,7 +1123,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     // adjust thread token if large pages are needed
     for (auto pTarget = p->vTargets.begin(); pTarget != p->vTargets.end(); pTarget++)
     {
-        if (pTarget->GetUseLargePages())
+        if (pTarget->GetUseLargePages() | pTarget->GetIOBufferAlignmentSpecified())
         {
             if (!SetPrivilege(SE_LOCK_MEMORY_NAME))
             {
