@@ -1,14 +1,15 @@
 DiskSpd
 =======
 
-DISKSPD is a storage load generator / performance test tool from the Microsoft Windows, Windows Server and Cloud Server Infrastructure Engineering teams. Please see the included documentation (docx and pdf formats).
+DiskSpd is a storage performance tool from the Windows, Windows Server and Cloud Server Infrastructure engineering teams at Microsoft. Please visit <https://github.com/Microsoft/diskspd/wiki> for updated documentation. The latest update to DiskSpd can be downloaded from <https://aka.ms/diskspd>.
+
+
+In addition to the tool itself, this repository hosts measurement frameworks which utilize DiskSpd. The initial example is [VM Fleet](https://github.com/Microsoft/diskspd/blob/master/Frameworks/VMFleet) that was used for the Windows Server 2016 Hyper-Converged Storage Spaces Direct work.
 
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
 
 What's New?
 ===========
-
-In addition DISKSPD itself, this repo hosts measurement frameworks which use DISKSPD. The initial example is the ***VM Fleet*** being used for Windows Server 2016 Hyper-Converged Storage Spaces Direct work. Look for these under the *Frameworks* directory.
 
 ## DISKSPD ##
 
@@ -16,9 +17,9 @@ DISKSPD 2.0.20a 2/28/2018
 
 * Changes that may require rebaselining of results:
   * New random number generator that may show an observable decreased cost
-  * Switched to 512-byte aligned buffers with the -Z option to increase performance
-* New -O option for specifying the number of outstanding IO requests per thread
-* New -Zr option for per-IO randomization of write buffer content
+  * Switched to 512-byte aligned buffers with the `-Z` option to increase performance
+* New `-O` option for specifying the number of outstanding IO requests per thread
+* New `-Zr` option for per-IO randomization of write buffer content
 * XML: Adds a new `<ThreadTarget>` element to support target weighting schemes
 * Enhanced statistics captured from IOPS data
 * Added support for validating XML profiles using an in-built XSD
@@ -29,14 +30,14 @@ DISKSPD 2.0.20a 2/28/2018
 
 DISKSPD 2.0.18a 5/31/2016
 
-* update /? example to use -Sh v. deprecated -h
+* update `/?` example to use `-Sh` v. deprecated `-h`
 * fix operation on volumes on GPT partitioned media (<driveletter>:)
 * fix IO priority hint to proper stack alignment (if not 8 byte, will fail)
 * use iB notation to clarify that text result output is in 2^n units (KiB/MiB/GiB)
 
-DISKSPD 2.0.17 5/01/2016
+DISKSPD 2.0.17a 5/01/2016
 
-* -S is expanded to control write-through independent of OS/software cache. Among other things, this allows buffered write-through to be specified (-Sbw).
+* `-S` is expanded to control write-through independent of OS/software cache. Among other things, this allows buffered write-through to be specified (`-Sbw`).
 * XML: adds a new `<WriteThrough>` element to specify write-through
 * XML: `<DisableAllCache>` is no longer emitted (still parsed, though), in favor or `<WriteThrough>` and `<DisableOSCache>`
 * Text output: OS/software cache and write-through state are now documented separately (adjacent lines)
@@ -89,15 +90,13 @@ VM Fleet 0.6 7/18/2016
 * watch-cluster handles downed/recovered nodes gracefully
 * update-csv now handles node names which are logical prefixes of another (node1, node10)
 
-Compiling / Source
-=========
+Source Code
+===========
 
-Compilation is supported with Visual Studio and Visual Studio Express. Use the Visual Studio solution file inside the diskspd_vs directory.
+The source code for DiskSpd is hosted on GitHub at:
 
-Source code is hosted at the following repo, if you did not clone it directly:
+<https://github.com/Microsoft/diskspd>
 
-[https://github.com/microsoft/diskspd](https://github.com/microsoft/diskspd "https://github.com/microsoft/diskspd")
+Any issues with DiskSpd can be reported using the following link:
 
-A binary release is hosted by Microsoft at the following location:
-
-[http://aka.ms/diskspd](http://aka.ms/diskspd "http://aka.ms/diskspd")
+<https://github.com/Microsoft/diskspd/issues>
