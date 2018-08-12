@@ -538,7 +538,7 @@ void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInfo
 
 void ResultParser::_PrintSectionFieldNames(const TimeSpan& timeSpan)
 {
-    _Print("thread |       bytes     |     I/Os     |    MiB/s   |  I/O per s %s%s%s|  file\n",
+    _Print("thread |       bytes     |     I/Os     |    MB/s   |  I/O per s %s%s%s|  file\n",
            timeSpan.GetMeasureLatency()      ? "|  AvgLat  "   : "",
            timeSpan.GetCalculateIopsStdDev() ? "| IopsStdDev " : "",
            timeSpan.GetMeasureLatency()      ? "| LatStdDev "  : "");
@@ -896,7 +896,7 @@ string ResultParser::ParseResults(Profile& profile, const SystemInformation& sys
     {
         _Print("\n\nTotals:\n");
         _Print("*******************************************************************************\n\n");
-        _Print("type   |       bytes     |     I/Os     |    MiB/s   |  I/O per s\n");
+        _Print("type   |       bytes     |     I/Os     |    MB/s   |  I/O per s\n");
         _Print("-------------------------------------------------------------------------------\n");
 
 
@@ -930,7 +930,7 @@ string ResultParser::ParseResults(Profile& profile, const SystemInformation& sys
         _Print("write  | %15I64u | %12I64u | %10.2lf | %10.2lf\n",
                cbTotalWritten,
                cTotalWriteIO,
-               (double)cbTotalWritten / 1024 / 1024 / totalTime,
+               (double)cbTotalWritten / 1000 / 1000 / totalTime,
                (double)cTotalWriteIO / totalTime);
 
         _Print("read   | %15I64u | %12I64u | %10.2lf | %10.2lf\n",
