@@ -457,6 +457,11 @@ void ResultParser::_PrintProfile(const Profile& profile)
     }
 }
 
+void ResultParser::_PrintSystemInfo(const SystemInformation& system)
+{
+    _Print(system.GetText().c_str());
+}
+
 void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInformation& system)
 {
     size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
@@ -841,12 +846,10 @@ void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogr
 
 string ResultParser::ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults)
 {
-    // TODO: print text representation of system information (see xml parser)
-    UNREFERENCED_PARAMETER(system);
-
     _sResult.clear();
 
     _PrintProfile(profile);
+    _PrintSystemInfo(system);
 
     for (size_t iResult = 0; iResult < vResults.size(); iResult++)
     {

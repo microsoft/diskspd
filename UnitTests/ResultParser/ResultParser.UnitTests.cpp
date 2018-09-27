@@ -91,6 +91,7 @@ namespace UnitTests
         // to verify a static null as anything else.
         SystemInformation system;
         system.sComputerName.clear();
+        system.ResetTime();
         system.processorTopology._ulProcCount = 1;
         system.processorTopology._ulActiveProcCount = 1;
         system.processorTopology._vProcessorGroupInformation[0]._maximumProcessorCount = 1;
@@ -117,7 +118,9 @@ namespace UnitTests
             "\tgathering IOPS at intervals of 1000ms\n"
             "\trandom seed: 0\n"
             "\n"
-            "\n"
+            "System information:\n\n"
+            "\tcomputer name: \n"
+            "\tstart time: \n"
             "\n"
             "Results for timespan 1:\n"
             "*******************************************************************************\n"

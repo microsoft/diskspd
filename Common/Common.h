@@ -669,6 +669,35 @@ public:
         StartTime = { 0 };
     }
 
+    string SystemInformation::GetText() const
+    {
+        char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
+        int nWritten;
+        string sText("System information:\n\n");
+
+        // identify computer which ran the test
+        sText += "\tcomputer name: ";
+        sText += sComputerName;
+        sText += "\n";
+
+        sText += "\tstart time: ";
+        if (StartTime.wYear) {
+
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer),
+                "%u/%02u/%02u %02u:%02u:%02u UTC",
+                StartTime.wYear,
+                StartTime.wMonth,
+                StartTime.wDay,
+                StartTime.wHour,
+                StartTime.wMinute,
+                StartTime.wSecond);
+            assert(nWritten && nWritten < _countof(szBuffer));
+            sText += szBuffer;
+        }
+
+        return sText;
+    }
+
     string SystemInformation::GetXml() const
     {
         char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
