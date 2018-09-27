@@ -288,6 +288,28 @@ string Target::GetXml() const
         break;
     }
     
+    // MemoryMappedIoMode::Off is implied default
+    switch (_memoryMappedIoMode)
+    {
+    case MemoryMappedIoMode::On:
+        sXml += "<MemoryMappedIo>true</MemoryMappedIo>\n";
+        break;
+    }
+
+    // MemoryMappedIoFlushMode::Undefined is implied default
+    switch (_memoryMappedIoFlushMode)
+    {
+    case MemoryMappedIoFlushMode::ViewOfFile:
+        sXml += "<FlushType>ViewOfFile</FlushType>\n";
+        break;
+    case MemoryMappedIoFlushMode::NonVolatileMemory:
+        sXml += "<FlushType>NonVolatileMemory</FlushType>\n";
+        break;
+    case MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain:
+        sXml += "<FlushType>NonVolatileMemoryNoDrain</FlushType>\n";
+        break;
+    }
+
     sXml += "<WriteBufferContent>\n";
     if (_fZeroWriteBuffers)
     {
@@ -854,6 +876,26 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     }
                 }
 
+                if (target.GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+                {
+                    if (timeSpan.GetCompletionRoutines())
+                    {
+                        fprintf(stderr, "ERROR: completion routines (-x) can't be used with memory mapped IO (-Sm)\n");
+                        fOk = false;
+                    }
+                    if (target.GetCacheMode() == TargetCacheMode::DisableOSCache)
+                    {
+                        fprintf(stderr, "ERROR: unbuffered IO (-Su or -Sh) can't be used with memory mapped IO (-Sm)\n");
+                        fOk = false;
+                    }
+                }
+
+                if (target.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off &&
+                    target.GetMemoryMappedIoFlushMode() != MemoryMappedIoFlushMode::Undefined)
+                {
+                    fprintf(stderr, "ERROR: memory mapped flush mode (-N) can only be specified with memory mapped IO (-Sm)\n");
+                }
+
                 // in the cases where there is only a single configuration specified for each target (e.g., cmdline),
                 // currently there are no validations specific to individual targets (e.g., pre-existing files)
                 // so we can stop validation now. this allows us to only warn/error once, as opposed to repeating
@@ -958,6 +1000,45 @@ BYTE* ThreadParameters::GetWriteBuffer(size_t iTarget, size_t iRequest)
         pBuffer = target.GetRandomDataWriteBuffer(pRand);
     }
     return pBuffer;
+}
+
+bool ThreadParameters::InitializeMappedViewForTarget(Target& target, DWORD DesiredAccess)
+{
+    bool fOk = true;
+    DWORD dwProtect = PAGE_READWRITE;
+
+    if (DesiredAccess == GENERIC_READ)
+    {
+        dwProtect = PAGE_READONLY;
+    }
+
+    HANDLE hFile = CreateFileMapping(target.GetMappedViewFileHandle(), NULL, dwProtect, 0, 0, NULL);
+    fOk = (hFile != NULL);
+    if (fOk)
+    {
+        DWORD dwDesiredAccess = FILE_MAP_WRITE;
+
+        if (DesiredAccess == GENERIC_READ)
+        {
+            dwDesiredAccess = FILE_MAP_READ;
+        }
+
+        BYTE *mapView = (BYTE*) MapViewOfFile(hFile, dwDesiredAccess, 0, 0, 0);
+        fOk = (mapView != NULL);
+        if (fOk)
+        {
+            target.SetMappedView(mapView);
+        }
+        else
+        {
+            fprintf(stderr, "FATAL ERROR: Could not map view for target '%s'. Error code: 0x%x\n", target.GetPath().c_str(), GetLastError());
+        }
+    }
+    else
+    {
+        fprintf(stderr, "FATAL ERROR: Could not create a file mapping for target '%s'. Error code: 0x%x\n", target.GetPath().c_str(), GetLastError());
+    }
+    return fOk;
 }
 
 DWORD ThreadParameters::GetTotalRequestCount() const

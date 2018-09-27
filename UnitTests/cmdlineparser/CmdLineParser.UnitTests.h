@@ -43,6 +43,7 @@ namespace UnitTests
     {
     private:
         void VerifyParseCmdLineDisableAllCache(Profile &profile);
+        void VerifyParseCmdLineMappedIO(Profile &profile, MemoryMappedIoFlushMode FlushMode);
         void VerifyParseCmdLineAccessHints(Profile &profile, bool RandomAccess, bool SequentialScan, bool TemporaryFile);
 
     public:
@@ -68,6 +69,7 @@ namespace UnitTests
         TEST_METHOD(TestParseCmdLineDisableOSCache);
         TEST_METHOD(TestParseCmdLineDisableLocalCache);
         TEST_METHOD(TestParseCmdLineBufferedWriteThrough);
+        TEST_METHOD(TestParseCmdLineMappedIO);
         TEST_METHOD(TestParseCmdLineConflictingCacheModes);
         TEST_METHOD(TestParseCmdLineUseCompletionRoutines);
         TEST_METHOD(TestParseCmdLineRandSeed);

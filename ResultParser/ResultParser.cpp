@@ -254,6 +254,23 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
         _Print("\t\tusing hardware write cache, writethrough off\n");
     }
 
+    if (target.GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+    {
+        _Print("\t\tmemory mapped I/O enabled");
+        switch(target.GetMemoryMappedIoFlushMode())
+        {
+        case MemoryMappedIoFlushMode::ViewOfFile:
+            _Print(", flush mode: FlushViewOfFile");
+            break;
+        case MemoryMappedIoFlushMode::NonVolatileMemory:
+            _Print(", flush mode: FlushNonVolatileMemory");
+            break;
+        case MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain:
+            _Print(", flush mode: FlushNonVolatileMemory with no drain");
+            break;
+        }
+        _Print("\n");
+    }
 
     if (target.GetZeroWriteBuffers())
     {

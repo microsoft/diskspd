@@ -45,6 +45,7 @@ private:
     bool _ReadParametersFromXmlFile(const char *pszPath, Profile *pProfile);
 
     bool _ParseETWParameter(const char *arg, Profile *pProfile);
+    bool _ParseFlushParameter(const char *arg, MemoryMappedIoFlushMode *FlushMode );
     bool _ParseAffinity(const char *arg, TimeSpan *pTimeSpan);
 
     void _DisplayUsageInfo(const char *pszFilename) const;

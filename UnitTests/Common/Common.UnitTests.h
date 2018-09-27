@@ -100,6 +100,10 @@ namespace UnitTests
         TEST_METHOD(Test_TargetGetXmlDisableLocalCache);
         TEST_METHOD(Test_TargetGetXmlDisableOSCache);
         TEST_METHOD(Test_TargetGetXmlBufferedWriteThrough);
+        TEST_METHOD(Test_TargetGetXmlMemoryMappedIo);
+        TEST_METHOD(Test_TargetGetXmlMemoryMappedIoFlushModeViewOfFile);
+        TEST_METHOD(Test_TargetGetXmlMemoryMappedIoFlushModeNonVolatileMemory);
+        TEST_METHOD(Test_TargetGetXmlMemoryMappedIoFlushModeNonVolatileMemoryNoDrain);
         TEST_METHOD(Test_TargetGetXmlRandomAccessHint);
         TEST_METHOD(Test_TargetGetXmlSequentialScanHint);
         TEST_METHOD(Test_TargetGetXmlCombinedAccessHint);

@@ -749,6 +749,136 @@ namespace UnitTests
             "</Target>\n");
     }
 
+    void TargetUnitTests::Test_TargetGetXmlMemoryMappedIo()
+    {
+        Target target;
+        target.SetMemoryMappedIoMode(MemoryMappedIoMode::On);
+        string sXml = target.GetXml();
+        VERIFY_IS_TRUE(sXml == "<Target>\n"
+            "<Path></Path>\n"
+            "<BlockSize>65536</BlockSize>\n"
+            "<BaseFileOffset>0</BaseFileOffset>\n"
+            "<SequentialScan>false</SequentialScan>\n"
+            "<RandomAccess>false</RandomAccess>\n"
+            "<TemporaryFile>false</TemporaryFile>\n"
+            "<UseLargePages>false</UseLargePages>\n"
+            "<MemoryMappedIo>true</MemoryMappedIo>\n"
+            "<WriteBufferContent>\n"
+            "<Pattern>sequential</Pattern>\n"
+            "</WriteBufferContent>\n"
+            "<ParallelAsyncIO>false</ParallelAsyncIO>\n"
+            "<StrideSize>65536</StrideSize>\n"
+            "<InterlockedSequential>false</InterlockedSequential>\n"
+            "<ThreadStride>0</ThreadStride>\n"
+            "<MaxFileSize>0</MaxFileSize>\n"
+            "<RequestCount>2</RequestCount>\n"
+            "<WriteRatio>0</WriteRatio>\n"
+            "<Throughput>0</Throughput>\n"
+            "<ThreadsPerFile>1</ThreadsPerFile>\n"
+            "<IOPriority>3</IOPriority>\n"
+            "<Weight>1</Weight>\n"
+            "</Target>\n");
+    }
+
+    void TargetUnitTests::Test_TargetGetXmlMemoryMappedIoFlushModeViewOfFile()
+    {
+        Target target;
+        target.SetMemoryMappedIoMode(MemoryMappedIoMode::On);
+        target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::ViewOfFile);
+        string sXml = target.GetXml();
+        VERIFY_IS_TRUE(sXml == "<Target>\n"
+            "<Path></Path>\n"
+            "<BlockSize>65536</BlockSize>\n"
+            "<BaseFileOffset>0</BaseFileOffset>\n"
+            "<SequentialScan>false</SequentialScan>\n"
+            "<RandomAccess>false</RandomAccess>\n"
+            "<TemporaryFile>false</TemporaryFile>\n"
+            "<UseLargePages>false</UseLargePages>\n"
+            "<MemoryMappedIo>true</MemoryMappedIo>\n"
+            "<FlushType>ViewOfFile</FlushType>\n"
+            "<WriteBufferContent>\n"
+            "<Pattern>sequential</Pattern>\n"
+            "</WriteBufferContent>\n"
+            "<ParallelAsyncIO>false</ParallelAsyncIO>\n"
+            "<StrideSize>65536</StrideSize>\n"
+            "<InterlockedSequential>false</InterlockedSequential>\n"
+            "<ThreadStride>0</ThreadStride>\n"
+            "<MaxFileSize>0</MaxFileSize>\n"
+            "<RequestCount>2</RequestCount>\n"
+            "<WriteRatio>0</WriteRatio>\n"
+            "<Throughput>0</Throughput>\n"
+            "<ThreadsPerFile>1</ThreadsPerFile>\n"
+            "<IOPriority>3</IOPriority>\n"
+            "<Weight>1</Weight>\n"
+            "</Target>\n");
+    }
+
+    void TargetUnitTests::Test_TargetGetXmlMemoryMappedIoFlushModeNonVolatileMemory()
+    {
+        Target target;
+        target.SetMemoryMappedIoMode(MemoryMappedIoMode::On);
+        target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::NonVolatileMemory);
+        string sXml = target.GetXml();
+        VERIFY_IS_TRUE(sXml == "<Target>\n"
+            "<Path></Path>\n"
+            "<BlockSize>65536</BlockSize>\n"
+            "<BaseFileOffset>0</BaseFileOffset>\n"
+            "<SequentialScan>false</SequentialScan>\n"
+            "<RandomAccess>false</RandomAccess>\n"
+            "<TemporaryFile>false</TemporaryFile>\n"
+            "<UseLargePages>false</UseLargePages>\n"
+            "<MemoryMappedIo>true</MemoryMappedIo>\n"
+            "<FlushType>NonVolatileMemory</FlushType>\n"
+            "<WriteBufferContent>\n"
+            "<Pattern>sequential</Pattern>\n"
+            "</WriteBufferContent>\n"
+            "<ParallelAsyncIO>false</ParallelAsyncIO>\n"
+            "<StrideSize>65536</StrideSize>\n"
+            "<InterlockedSequential>false</InterlockedSequential>\n"
+            "<ThreadStride>0</ThreadStride>\n"
+            "<MaxFileSize>0</MaxFileSize>\n"
+            "<RequestCount>2</RequestCount>\n"
+            "<WriteRatio>0</WriteRatio>\n"
+            "<Throughput>0</Throughput>\n"
+            "<ThreadsPerFile>1</ThreadsPerFile>\n"
+            "<IOPriority>3</IOPriority>\n"
+            "<Weight>1</Weight>\n"
+            "</Target>\n");
+    }
+
+    void TargetUnitTests::Test_TargetGetXmlMemoryMappedIoFlushModeNonVolatileMemoryNoDrain()
+    {
+        Target target;
+        target.SetMemoryMappedIoMode(MemoryMappedIoMode::On);
+        target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain);
+        string sXml = target.GetXml();
+        VERIFY_IS_TRUE(sXml == "<Target>\n"
+            "<Path></Path>\n"
+            "<BlockSize>65536</BlockSize>\n"
+            "<BaseFileOffset>0</BaseFileOffset>\n"
+            "<SequentialScan>false</SequentialScan>\n"
+            "<RandomAccess>false</RandomAccess>\n"
+            "<TemporaryFile>false</TemporaryFile>\n"
+            "<UseLargePages>false</UseLargePages>\n"
+            "<MemoryMappedIo>true</MemoryMappedIo>\n"
+            "<FlushType>NonVolatileMemoryNoDrain</FlushType>\n"
+            "<WriteBufferContent>\n"
+            "<Pattern>sequential</Pattern>\n"
+            "</WriteBufferContent>\n"
+            "<ParallelAsyncIO>false</ParallelAsyncIO>\n"
+            "<StrideSize>65536</StrideSize>\n"
+            "<InterlockedSequential>false</InterlockedSequential>\n"
+            "<ThreadStride>0</ThreadStride>\n"
+            "<MaxFileSize>0</MaxFileSize>\n"
+            "<RequestCount>2</RequestCount>\n"
+            "<WriteRatio>0</WriteRatio>\n"
+            "<Throughput>0</Throughput>\n"
+            "<ThreadsPerFile>1</ThreadsPerFile>\n"
+            "<IOPriority>3</IOPriority>\n"
+            "<Weight>1</Weight>\n"
+            "</Target>\n");
+    }
+
     void TargetUnitTests::Test_TargetGetXmlRandomAccessHint()
     {
         Target target;

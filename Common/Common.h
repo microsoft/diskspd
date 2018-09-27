@@ -54,7 +54,7 @@ using namespace std;
 
 #define DISKSPD_MAJOR       2
 #define DISKSPD_MINOR       0
-#define DISKSPD_BUILD       20
+#define DISKSPD_BUILD       21
 #define DISKSPD_QFE         0
 
 #define DISKSPD_MAJORMINOR_VER_STR(x,y,z) #x "." #y "." #z
@@ -62,7 +62,7 @@ using namespace std;
 #define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
 
 #define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2018/2/28"
+#define DISKSPD_DATE_VERSION_STRING "2018/9/21"
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -791,6 +791,25 @@ enum class WriteThroughMode {
     On,
 };
 
+// memory mapped IO modes
+// off -> default
+// on -> (-Sm or -Smw)
+enum class MemoryMappedIoMode {
+    Undefined = 0,
+    Off,
+    On,
+};
+
+// memory mapped IO flush modes
+// off / Undefined -> default
+// on -> (-Sm or -Smw)
+enum class MemoryMappedIoFlushMode {
+    Undefined = 0,
+    ViewOfFile,
+    NonVolatileMemory,
+    NonVolatileMemoryNoDrain,
+};
+
 class ThreadTarget
 {
 public:
@@ -829,6 +848,9 @@ public:
         _fInterlockedSequential(false),
         _cacheMode(TargetCacheMode::Cached),
         _writeThroughMode(WriteThroughMode::Off),
+        _memoryMappedIoMode(MemoryMappedIoMode::Off),
+        _memoryMappedIoNvToken(nullptr),
+        _memoryMappedIoFlushMode(MemoryMappedIoFlushMode::Undefined),
         _fZeroWriteBuffers(false),
         _dwThreadsPerFile(1),
         _ullThreadStride(0),
@@ -845,6 +867,8 @@ public:
         _fRandomAccessHint(false),
         _fTemporaryFileHint(false),
         _fUseLargePages(false),
+        _mappedViewFileHandle(INVALID_HANDLE_VALUE),
+        _mappedView(NULL),
         _ioPriorityHint(IoPriorityHintNormal),
         _ulWeight(1),
         _dwThroughputBytesPerMillisecond(0),
@@ -899,6 +923,15 @@ public:
     void SetWriteThroughMode(WriteThroughMode writeThroughMode ) { _writeThroughMode = writeThroughMode; }
     WriteThroughMode GetWriteThroughMode( ) const { return _writeThroughMode; }
 
+    void SetMemoryMappedIoMode(MemoryMappedIoMode memoryMappedIoMode ) { _memoryMappedIoMode = memoryMappedIoMode; }
+    MemoryMappedIoMode GetMemoryMappedIoMode( ) const { return _memoryMappedIoMode; }
+
+    void SetMemoryMappedIoNvToken(PVOID memoryMappedIoNvToken) { _memoryMappedIoNvToken = memoryMappedIoNvToken; }
+    PVOID GetMemoryMappedIoNvToken() const { return _memoryMappedIoNvToken; }
+
+    void SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode memoryMappedIoFlushMode) { _memoryMappedIoFlushMode = memoryMappedIoFlushMode; }
+    MemoryMappedIoFlushMode GetMemoryMappedIoFlushMode() const { return _memoryMappedIoFlushMode; }
+
     void SetZeroWriteBuffers(bool fBool) { _fZeroWriteBuffers = fBool; }
     bool GetZeroWriteBuffers() const { return _fZeroWriteBuffers; }
 
@@ -943,6 +976,12 @@ public:
 
     void SetThreadStrideInBytes(UINT64 ullThreadStride) { _ullThreadStride = ullThreadStride; }
     UINT64 GetThreadStrideInBytes() const { return _ullThreadStride; }
+
+    void SetMappedViewFileHandle(HANDLE FileHandle) { _mappedViewFileHandle = FileHandle; }
+    HANDLE GetMappedViewFileHandle() const { return _mappedViewFileHandle; }
+
+    void SetMappedView(BYTE *MappedView) { _mappedView = MappedView; }
+    BYTE* GetMappedView() const { return _mappedView; }
 
     void SetIOPriorityHint(PRIORITY_HINT _hint)
     {
@@ -1024,6 +1063,9 @@ private:
 
     TargetCacheMode _cacheMode;
     WriteThroughMode _writeThroughMode;
+    MemoryMappedIoMode _memoryMappedIoMode;
+    MemoryMappedIoFlushMode _memoryMappedIoFlushMode;
+    PVOID _memoryMappedIoNvToken;
     bool _fZeroWriteBuffers;
     DWORD _dwThreadsPerFile;
     UINT64 _ullThreadStride;
@@ -1049,6 +1091,9 @@ private:
     UINT64 _cbRandomDataWriteBuffer;            // if > 0, then the write buffer should be filled with random data
     string _sRandomDataWriteBufferSourcePath;   // file that should be used for filling the write buffer (if the path is not available, use a crypto provider)
     BYTE *_pRandomDataWriteBuffer;              // a buffer used for write data when _cbWriteBuffer > 0; it's shared by all the threads working on this target
+
+    HANDLE _mappedViewFileHandle;
+    BYTE *_mappedView;
 
     PRIORITY_HINT _ioPriorityHint;
 
@@ -1439,6 +1484,7 @@ public:
     BYTE* GetReadBuffer(size_t iTarget, size_t iRequest);
     BYTE* GetWriteBuffer(size_t iTarget, size_t iRequest);
     DWORD GetTotalRequestCount() const;
+    bool  InitializeMappedViewForTarget(Target& target, DWORD DesiredAccess);
 
 private:
     ThreadParameters(const ThreadParameters& T);

@@ -65,6 +65,20 @@
                                 <!-- BOOL WriteThrough -->
                                 <xs:element name="WriteThrough" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
+                                <!-- BOOL MemoryMappedIo -->
+                                <xs:element name="MemoryMappedIo" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
+
+                                <!-- enum FlushType, only has effect with memory mapped writes -->
+                                <xs:element name="FlushType" minOccurs="0" maxOccurs="1">
+                                  <xs:simpleType>
+                                    <xs:restriction base="xs:string">
+                                      <xs:enumeration value="ViewOfFile"></xs:enumeration>
+                                      <xs:enumeration value="NonVolatileMemory"></xs:enumeration>
+                                      <xs:enumeration value="NonVolatileMemoryNoDrain"></xs:enumeration>
+                                    </xs:restriction>
+                                  </xs:simpleType>
+                                </xs:element>
+
                                 <xs:element name="WriteBufferContent" minOccurs="0" maxOccurs="1">
                                   <xs:complexType>
                                     <xs:all>

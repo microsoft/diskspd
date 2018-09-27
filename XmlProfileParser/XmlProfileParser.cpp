@@ -779,6 +779,16 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
     if (SUCCEEDED(hr))
     {
         bool fBool;
+        hr = _GetBool(pXmlNode, "MemoryMappedIo", &fBool);
+        if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
+        {
+            pTarget->SetMemoryMappedIoMode(MemoryMappedIoMode::On);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        bool fBool;
         hr = _GetBool(pXmlNode, "DisableAllCache", &fBool);
         if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
@@ -804,6 +814,31 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
         if (SUCCEEDED(hr) && (hr != S_FALSE) && fBool)
         {
             pTarget->SetWriteThroughMode(WriteThroughMode::On);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        string sFlushType;
+        hr = _GetString(pXmlNode, "FlushType", &sFlushType);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            if (sFlushType == "ViewOfFile")
+            {
+                pTarget->SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::ViewOfFile);
+            }
+            else if (sFlushType == "NonVolatileMemory")
+            {
+                pTarget->SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::NonVolatileMemory);
+            }
+            else if (sFlushType == "NonVolatileMemoryNoDrain")
+            {
+                pTarget->SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain);
+            }
+            else
+            {
+                hr = E_INVALIDARG;
+            }
         }
     }
 

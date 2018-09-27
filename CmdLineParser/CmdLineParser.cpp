@@ -176,6 +176,11 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("  -l                    Use large pages for IO buffers\n");
     printf("  -L                    measure latency statistics\n");
     printf("  -n                    disable default affinity (-a)\n");
+    printf("  -N<vni>               specify the flush mode for memory mapped I/O\n");
+    printf("                          v : uses the FlushViewOfFile API\n");
+    printf("                          n : uses the RtlFlushNonVolatileMemory API\n");
+    printf("                          i : uses RtlFlushNonVolatileMemory without waiting for the flush to drain\n");
+    printf("                          [default: none]\n");
     printf("  -o<count>             number of outstanding I/O requests per target per thread\n");
     printf("                          (1=synchronous I/O, unless more than 1 thread is specified with -F)\n");
     printf("                          [default=2]\n");
@@ -194,14 +199,16 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("                          manipulate a shared offset with InterlockedIncrement, which may reduce throughput,\n");
     printf("                          but promotes a more sequential pattern.\n");
     printf("                          (ignored if -r specified, -si conflicts with -T and -p)\n");
-    printf("  -S[bhruw]             control caching behavior [default: caching is enabled, no writethrough]\n");
+    printf("  -S[bhmruw]            control caching behavior [default: caching is enabled, no writethrough]\n");
     printf("                          non-conflicting flags may be combined in any order; ex: -Sbw, -Suw, -Swu\n");
     printf("  -S                    equivalent to -Su\n");
     printf("  -Sb                   enable caching (default, explicitly stated)\n");
     printf("  -Sh                   equivalent -Suw\n");
+    printf("  -Sm                   enable memory mapped I/O\n");
     printf("  -Su                   disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n");
     printf("  -Sr                   disable local caching, with remote sw caching enabled; only valid for remote filesystems\n");
-    printf("  -Sw                   enable writethrough (no hardware write caching), equivalent to FILE_FLAG_WRITE_THROUGH\n");
+    printf("  -Sw                   enable writethrough (no hardware write caching), equivalent to FILE_FLAG_WRITE_THROUGH or\n");
+    printf("                          non-temporal writes for memory mapped I/O (-Sm)\n");
     printf("  -t<count>             number of threads per target (conflicts with -F)\n");
     printf("  -T<offs>[K|M|G|b]     starting stride between I/O operations performed on the same target by different threads\n");
     printf("                          [default=0] (starting offset = base file offset + (thread number * <offs>)\n");
@@ -480,6 +487,39 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
     return fOk;
 }
 
+bool CmdLineParser::_ParseFlushParameter(const char *arg, MemoryMappedIoFlushMode *FlushMode)
+{
+    assert(nullptr != arg);
+    assert(0 != *arg);
+
+    bool fOk = true;
+    if (*(arg + 1) != '\0')
+    {
+        const char *c = arg + 1;
+        if (_stricmp(c, "v") == 0)
+        {
+            *FlushMode = MemoryMappedIoFlushMode::ViewOfFile;
+        }
+        else if (_stricmp(c, "n") == 0)
+        {
+            *FlushMode = MemoryMappedIoFlushMode::NonVolatileMemory;
+        }
+        else if (_stricmp(c, "i") == 0)
+        {
+            *FlushMode = MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain;
+        }
+        else
+        {
+            fOk = false;
+        }
+    }
+    else
+    {
+        fOk = false;
+    }
+    return fOk;
+}
+
 bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch)
 {
     /* Process any command-line options */
@@ -530,6 +570,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
     // this allows for conflicts to be thrown for mixed -h/-S as needed.
     TargetCacheMode t = TargetCacheMode::Undefined;
     WriteThroughMode w = WriteThroughMode::Undefined;
+    MemoryMappedIoMode m = MemoryMappedIoMode::Undefined;
+    MemoryMappedIoFlushMode f = MemoryMappedIoFlushMode::Undefined;
 
     TimeSpan timeSpan;
     bool bExit = false;
@@ -837,6 +879,13 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             timeSpan.SetDisableAffinity(true);
             break;
 
+        case 'N':
+            if (!_ParseFlushParameter(arg, &f))
+            {
+                fError = true;
+            }
+            break;
+
         case 'o':    //request count (1==synchronous)
             {
                 int c = atoi(arg + 1);
@@ -989,14 +1038,27 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                         break; 
                     case 'h':
                         if (t == TargetCacheMode::Undefined &&
-                            w == WriteThroughMode::Undefined)
+                            w == WriteThroughMode::Undefined &&
+                            m == MemoryMappedIoMode::Undefined)
                         {
                             t = TargetCacheMode::DisableOSCache;
                             w = WriteThroughMode::On;
                         }
                         else
                         {
-                            fprintf(stderr, "-Sh conflicts with earlier specification of cache/writethrough\n");
+                            fprintf(stderr, "-Sh conflicts with earlier specification of cache/writethrough/memory mapped\n");
+                            fError = true;
+                        }
+                        break;
+                    case 'm':
+                        if (m == MemoryMappedIoMode::Undefined &&
+                            t != TargetCacheMode::DisableOSCache)
+                        {
+                            m = MemoryMappedIoMode::On;
+                        }
+                        else
+                        {
+                            fprintf(stderr, "-Sm conflicts with earlier specification of memory mapped IO/unbuffered IO\n");
                             fError = true;
                         }
                         break;
@@ -1012,13 +1074,14 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                         }
                         break;
                     case 'u':
-                        if (t == TargetCacheMode::Undefined)
+                        if (t == TargetCacheMode::Undefined &&
+                            m == MemoryMappedIoMode::Undefined)
                         {
                             t = TargetCacheMode::DisableOSCache;
                         }
                         else
                         {
-                            fprintf(stderr, "-Su conflicts with earlier specification of cache mode\n");
+                            fprintf(stderr, "-Su conflicts with earlier specification of cache mode/memory mapped IO\n");
                             fError = true;
                         }
                         break;
@@ -1043,7 +1106,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 // bare -S, parse loop did not advance
                 if (!fError && idx == 1)
                 {
-                    if (t == TargetCacheMode::Undefined)
+                    if (t == TargetCacheMode::Undefined &&
+                        m == MemoryMappedIoMode::Undefined)
                     {
                         t = TargetCacheMode::DisableOSCache;
                     }
@@ -1283,7 +1347,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         return false;
     }
 
-    // apply resultant cache/writethrough modes to the targets
+    // apply resultant cache/writethrough/memory mapped io modes to the targets
     for (auto i = vTargets.begin(); i != vTargets.end(); i++)
     {
         if (t != TargetCacheMode::Undefined)
@@ -1293,6 +1357,14 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         if (w != WriteThroughMode::Undefined)
         {
             i->SetWriteThroughMode(w);
+        }
+        if (m != MemoryMappedIoMode::Undefined)
+        {
+            i->SetMemoryMappedIoMode(m);
+        }
+        if (f != MemoryMappedIoFlushMode::Undefined)
+        {
+            i->SetMemoryMappedIoFlushMode(f);
         }
     }
 
