@@ -29,6 +29,10 @@ SOFTWARE.
 
 #include "Common.h"
 
+TRACELOGGING_DEFINE_PROVIDER(g_hEtwProvider,
+                             "Microsoft-Windows-DiskSpd", // {CA13DB84-D0A9-5145-FCA4-468DA92FDC2D}
+                             (0xca13db84, 0xd0a9, 0x5145, 0xfc, 0xa4, 0x46, 0x8d, 0xa9, 0x2f, 0xdc, 0x2d));
+
 SystemInformation g_SystemInformation;
 
 UINT64 PerfTimer::GetTime()
@@ -1057,4 +1061,48 @@ DWORD ThreadParameters::GetTotalRequestCount() const
     }
 
     return cRequests;
+}
+
+void EtwResultParser::ParseResults(vector<Results> vResults)
+{
+    if (TraceLoggingProviderEnabled(g_hEtwProvider,
+                                    TRACE_LEVEL_NONE,
+                                    DISKSPD_TRACE_INFO))
+    {
+        for (size_t ullResults = 0; ullResults < vResults.size(); ullResults++)
+        {
+            const Results& results = vResults[ullResults];
+            for (size_t ullThread = 0; ullThread < results.vThreadResults.size(); ullThread++)
+            {
+                const ThreadResults& threadResults = results.vThreadResults[ullThread];
+                for (const auto& targetResults : threadResults.vTargetResults)
+                {
+                    if (targetResults.ullReadIOCount)
+                    {
+                        _WriteResults(IOOperation::ReadIO, targetResults, ullThread);
+                    }
+                    if (targetResults.ullWriteIOCount)
+                    {
+                        _WriteResults(IOOperation::WriteIO, targetResults, ullThread);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void EtwResultParser::_WriteResults(IOOperation type, const TargetResults& targetResults, size_t ullThread)
+{
+    UINT64 ullIOCount = (type == IOOperation::ReadIO) ? targetResults.ullReadIOCount : targetResults.ullWriteIOCount;
+    UINT64 ullBytesCount = (type == IOOperation::ReadIO) ? targetResults.ullReadBytesCount : targetResults.ullWriteBytesCount;
+
+    TraceLoggingWrite(g_hEtwProvider,
+                      "Statistics",
+                      TraceLoggingLevel((TRACE_LEVEL_NONE)),
+                      TraceLoggingString((type == IOOperation::ReadIO) ? "Read" : "Write", "IO Type"),
+                      TraceLoggingUInt64(ullThread, "Thread"),
+                      TraceLoggingUInt64(ullBytesCount, "Bytes"),
+                      TraceLoggingUInt64(ullIOCount, "IO Count"),
+                      TraceLoggingString(targetResults.sPath.c_str(), "Path"),
+                      TraceLoggingUInt64(targetResults.ullFileSize, "File Size"));
 }

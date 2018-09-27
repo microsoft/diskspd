@@ -152,6 +152,8 @@ int __cdecl main(int argc, const char* argv[])
         return 1;
     }
 
+    TraceLoggingRegister(g_hEtwProvider);
+
     //
     // call IO request generator
     //
@@ -178,6 +180,8 @@ int __cdecl main(int argc, const char* argv[])
         fprintf(stderr, "Error generating I/O requests\n");
         return 1;
     }
+
+    TraceLoggingUnregister(g_hEtwProvider);
 
     if( NULL != synch.hStartEvent )
     {

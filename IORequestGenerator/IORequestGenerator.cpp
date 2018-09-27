@@ -748,15 +748,30 @@ static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBy
     pOverlapped->Offset = li.LowPart;
     pOverlapped->OffsetHigh = li.HighPart;
     
-    printfv(p->pProfile->GetVerbose(), "t[%u:%u] new I/O op at %I64u (starting in block: %I64u)\n",
-        p->ulThreadNo,
-        iTarget,
-        li.QuadPart,
-        li.QuadPart / pTarget->GetBlockSizeInBytes());
-    
     IOOperation readOrWrite = DecideIo(p->pRand, pTarget->GetWriteRatio());
     pIORequest->SetIoType(readOrWrite);
     
+    if (TraceLoggingProviderEnabled(g_hEtwProvider,
+                                    TRACE_LEVEL_VERBOSE,
+                                    DISKSPD_TRACE_IO))
+    {
+        GUID ActivityId = p->NextActivityId();
+        pIORequest->SetActivityId(ActivityId);
+        
+        TraceLoggingWriteActivity(g_hEtwProvider,
+                                  "DiskSpd IO",
+                                  &ActivityId,
+                                  NULL,
+                                  TraceLoggingKeyword(DISKSPD_TRACE_IO),
+                                  TraceLoggingOpcode(EVENT_TRACE_TYPE_START),
+                                  TraceLoggingLevel(TRACE_LEVEL_VERBOSE),
+                                  TraceLoggingUInt32(p->ulThreadNo, "Thread"),
+                                  TraceLoggingString(readOrWrite == IOOperation::ReadIO ? "Read" : "Write", "IO Type"),
+                                  TraceLoggingUInt64(iTarget, "Target"),
+                                  TraceLoggingInt32(pTarget->GetBlockSizeInBytes(), "Block Size"),
+                                  TraceLoggingInt64(li.QuadPart, "Offset"));
+    }
+
     if (p->pTimeSpan->GetMeasureLatency())
     {
         pIORequest->SetStartTime(PerfTimer::GetTime());
@@ -840,6 +855,21 @@ static void completeIO(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytes
 {
     Target *pTarget = pIORequest->GetCurrentTarget();
     size_t iTarget = pTarget - &p->vTargets[0];
+
+    if (TraceLoggingProviderEnabled(g_hEtwProvider,
+                                    TRACE_LEVEL_VERBOSE,
+                                    DISKSPD_TRACE_IO))
+    {
+        GUID ActivityId = pIORequest->GetActivityId();
+
+        TraceLoggingWriteActivity(g_hEtwProvider,
+                                  "DiskSpd IO",
+                                  &ActivityId,
+                                  NULL,
+                                  TraceLoggingKeyword(DISKSPD_TRACE_IO),
+                                  TraceLoggingOpcode(EVENT_TRACE_TYPE_STOP),
+                                  TraceLoggingLevel(TRACE_LEVEL_VERBOSE));
+    }
 
     //check if I/O transferred all of the requested bytes
     if (dwBytesTransferred != pTarget->GetBlockSizeInBytes())
@@ -2086,6 +2116,7 @@ bool IORequestGenerator::GenerateRequests(Profile& profile, IResultParser& resul
 
         // TODO: show results only for timespans that succeeded
         SystemInformation system;
+        EtwResultParser::ParseResults(vResults);
         string sResults = resultParser.ParseResults(profile, system, vResults);
         print("%s", sResults.c_str());
     }
@@ -2417,6 +2448,9 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //
     if (timeSpan.GetWarmup() > 0)
     {
+        TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> WarmActivity;
+        TraceLoggingWriteStart(WarmActivity, "Warm Up");
+
         if (bSynchStop)
         {
             assert(NULL != pSynch->hStopEvent);
@@ -2433,6 +2467,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         {
             Sleep(1000 * timeSpan.GetWarmup());
         }
+
+        TraceLoggingWriteStop(WarmActivity, "Warm Up");
     }
 
     if (!bBreak) // proceed only if user didn't break the test
@@ -2486,6 +2522,9 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             return false;
         }
 
+        TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> RunActivity;
+        TraceLoggingWriteStart(RunActivity, "Run Time");
+
         //get cycle count (it will be used to calculate actual work time)
         ullStartTime = PerfTimer::GetTime();
 
@@ -2517,6 +2556,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 
         //get cycle count and perf counters
         ullTimeDiff = PerfTimer::GetTime() - ullStartTime;
+
+        TraceLoggingWriteStop(RunActivity, "Run Time");
 
         if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
         {
@@ -2557,6 +2598,9 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     printfv(profile.GetVerbose(), "starting cool down...\n");
     if ((timeSpan.GetCooldown() > 0) && !bBreak)
     {
+        TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> CoolActivity;
+        TraceLoggingWriteStart(CoolActivity, "Cool Down");
+
         if (bSynchStop)
         {
             assert(NULL != pSynch->hStopEvent);
@@ -2573,6 +2617,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         {
             Sleep(1000 * timeSpan.GetCooldown());
         }
+
+        TraceLoggingWriteStop(CoolActivity, "Cool Down");
     }
     printfv(profile.GetVerbose(), "finished test...\n");
 

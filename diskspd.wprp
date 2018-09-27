@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder Author="Microsoft Corporation" Copyright="Microsoft Corporation. All rights reserved." Version="1.0">
+    <Profiles>
+        <EventCollector Id="EventCollectorDiskSpd" Name="WPR Event Collector">
+            <BufferSize Value="4"/>
+            <Buffers Value="1"/>
+        </EventCollector>
+        <EventCollector Id="EventCollectorDiskSpdIO" Name="WPR Event Collector">
+            <BufferSize Value="1024"/>
+            <Buffers Value="1000"/>
+        </EventCollector>
+        <EventProvider Id="EventProvider.Microsoft-Windows-DiskSpd" Name="CA13DB84-D0A9-5145-FCA4-468DA92FDC2D">
+            <Keywords>
+                <Keyword Value="0x1"/>
+            </Keywords>
+        </EventProvider>
+        <EventProvider Id="EventProvider.Microsoft-Windows-DiskSpd.Verbose" Name="CA13DB84-D0A9-5145-FCA4-468DA92FDC2D"/>
+        <Profile Id="DiskSpd.Light.Memory" Name="DiskSpd" Description="DiskSpd Storage Performance Tool" LoggingMode="Memory" DetailLevel="Light">
+            <Collectors>
+                <EventCollectorId Value="EventCollectorDiskSpd">
+                    <EventProviders>
+                        <EventProviderId Value="EventProvider.Microsoft-Windows-DiskSpd"/>
+                    </EventProviders>
+                </EventCollectorId>
+            </Collectors>
+        </Profile>
+        <Profile Id="DiskSpd.Light.File" Name="DiskSpd" Description="DiskSpd Storage Performance Tool" LoggingMode="File" DetailLevel="Light" Base="DiskSpd.Light.Memory"/>
+        <Profile Id="DiskSpd.Verbose.Memory" Name="DiskSpd" Description="DiskSpd Storage Performance Tool" LoggingMode="Memory" DetailLevel="Verbose">
+            <Collectors>
+                <EventCollectorId Value="EventCollectorDiskSpdIO">
+                    <EventProviders>
+                        <EventProviderId Value="EventProvider.Microsoft-Windows-DiskSpd.Verbose"/>
+                    </EventProviders>
+                </EventCollectorId>
+            </Collectors>
+        </Profile>
+        <Profile Id="DiskSpd.Verbose.File" Name="DiskSpd" Description="DiskSpd Storage Performance Tool" LoggingMode="File" DetailLevel="Verbose" Base="DiskSpd.Verbose.Memory"/>
+    </Profiles>
+</WindowsPerformanceRecorder>

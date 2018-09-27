@@ -30,6 +30,9 @@ SOFTWARE.
 #pragma once
 
 #include <windows.h>
+#include <TraceLoggingProvider.h>
+#include <TraceLoggingActivity.h>
+#include <evntrace.h>
 #include <ctime>
 #include <vector>
 #include <Winternl.h>   //ntdll.dll
@@ -39,6 +42,8 @@ SOFTWARE.
 #include "ThroughputMeter.h"
 
 using namespace std;
+
+TRACELOGGING_DECLARE_PROVIDER(g_hEtwProvider);
 
 // versioning material. for simplicity in consumption, please ensure that the date string
 // parses via the System.Datetime constructor as follows (in Powershell):
@@ -63,6 +68,10 @@ using namespace std;
 
 #define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
 #define DISKSPD_DATE_VERSION_STRING "2018/9/21"
+
+#define DISKSPD_TRACE_INFO      0x00000000
+#define DISKSPD_TRACE_RESERVED  0x00000001
+#define DISKSPD_TRACE_IO        0x00000100
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -1350,7 +1359,8 @@ public:
         _ullStartTime(0),
         _ulRequestIndex(0xFFFFFFFF),
         _ullTotalWeight(0),
-        _fEqualWeights(true)
+        _fEqualWeights(true),
+        _ActivityId()
     {
         memset(&_overlapped, 0, sizeof(OVERLAPPED));
         _overlapped.Offset = 0xFFFFFFFF;
@@ -1412,6 +1422,9 @@ public:
     void SetRequestIndex(UINT32 ulRequestIndex) { _ulRequestIndex = ulRequestIndex; }
     UINT32 GetRequestIndex() const { return _ulRequestIndex; }
 
+    void SetActivityId(GUID ActivityId) { _ActivityId = ActivityId; }
+    GUID GetActivityId() const { return _ActivityId; }
+
 private:
     OVERLAPPED _overlapped;
     vector<Target*> _vTargets;
@@ -1423,7 +1436,16 @@ private:
     IOOperation _ioType;
     UINT64 _ullStartTime;
     UINT32 _ulRequestIndex;
+    GUID _ActivityId;
 };
+
+typedef struct _ACTIVITY_ID {
+    UINT32 Thread;
+    UINT32 Reserved;
+    UINT64 Count;
+} ACTIVITY_ID;
+
+C_ASSERT(sizeof(ACTIVITY_ID) == sizeof(GUID));
 
 class ThreadParameters
 {
@@ -1486,12 +1508,35 @@ public:
     DWORD GetTotalRequestCount() const;
     bool  InitializeMappedViewForTarget(Target& target, DWORD DesiredAccess);
 
+    GUID NextActivityId()
+    {
+        GUID ActivityId;
+        ACTIVITY_ID* ActivityGuid = (ACTIVITY_ID*)&ActivityId;
+
+        ActivityGuid->Thread = ulThreadNo;
+        ActivityGuid->Reserved = 0;
+        // The count is byte swapped so it's understandable in a trace.
+        ActivityGuid->Count = _byteswap_uint64(++_ullActivityCount);
+
+        return ActivityId;
+    }
+
 private:
     ThreadParameters(const ThreadParameters& T);
+    UINT64 _ullActivityCount;
 };
 
 class IResultParser
 {
 public:
     virtual string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults) = 0;
+};
+
+class EtwResultParser
+{
+public:
+    static void ParseResults(vector<Results> vResults);
+
+private:
+    static void _WriteResults(IOOperation type, const TargetResults& targetResults, size_t uThread);
 };
