@@ -13,6 +13,15 @@ What's New?
 
 ## DISKSPD ##
 
+DISKSPD 2.0.21a 9/21/2018
+
+* Added support for memory mapped I/O:
+  * New `-Sm` option to enable memory mapped I/O
+  * New `-N<vni>` option to specify flush options for memory mapped I/O
+* Added support for providing Event Tracing for Windows (ETW) events
+* Included a Windows Performance Recorder (WPR) profile to enable ETW tracing
+* Added system information to the ResultParser output
+
 DISKSPD 2.0.20a 2/28/2018
 
 * Changes that may require rebaselining of results:
