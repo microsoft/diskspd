@@ -46,6 +46,7 @@ private:
     void _DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters);
     void _Print(const char *format, ...);
     void _PrintProfile(const Profile& profile);
+    void _PrintSystemInfo(const SystemInformation& system);
     void _PrintCpuUtilization(const Results& results, const SystemInformation& system);
     enum class _SectionEnum {TOTAL, READ, WRITE};
     void _PrintSectionFieldNames(const TimeSpan& timeSpan);

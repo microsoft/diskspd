@@ -50,6 +50,11 @@ SOFTWARE.
 #include "ThroughputMeter.h"
 #include "OverlappedQueue.h"
 
+// Flags for RtlFlushNonVolatileMemory
+#ifndef FLUSH_NV_MEMORY_IN_FLAG_NO_DRAIN
+#define FLUSH_NV_MEMORY_IN_FLAG_NO_DRAIN    (0x00000001)
+#endif
+
 /*****************************************************************************/
 // gets size of a dynamic volume, return zero on failure
 //
@@ -412,6 +417,18 @@ static BOOL volatile g_bRun;                    //used for letting threads know 
 typedef NTSTATUS (__stdcall *NtQuerySysInfo)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 static NtQuerySysInfo g_pfnNtQuerySysInfo;
 
+typedef VOID (__stdcall *RtlCopyMemNonTemporal)(VOID UNALIGNED *, VOID UNALIGNED *, SIZE_T);
+static RtlCopyMemNonTemporal g_pfnRtlCopyMemoryNonTemporal;
+
+typedef NTSTATUS (__stdcall *RtlFlushNvMemory)(PVOID, PVOID, SIZE_T, ULONG);
+static RtlFlushNvMemory g_pfnRtlFlushNonVolatileMemory;
+
+typedef NTSTATUS(__stdcall *RtlGetNvToken)(PVOID, SIZE_T, PVOID *);
+static RtlGetNvToken g_pfnRtlGetNonVolatileToken;
+
+typedef NTSTATUS(__stdcall *RtlFreeNvToken)(PVOID);
+static RtlFreeNvToken g_pfnRtlFreeNonVolatileToken;
+
 static PRINTF g_pfnPrintOut = nullptr;
 static PRINTF g_pfnPrintError = nullptr;
 static PRINTF g_pfnPrintVerbose = nullptr;
@@ -549,6 +566,11 @@ bool IORequestGenerator::_LoadDLLs()
     {
         return false;
     }
+
+    g_pfnRtlCopyMemoryNonTemporal = (RtlCopyMemNonTemporal)GetProcAddress(_hNTDLL, "RtlCopyMemoryNonTemporal");
+    g_pfnRtlFlushNonVolatileMemory = (RtlFlushNvMemory)GetProcAddress(_hNTDLL, "RtlFlushNonVolatileMemory");
+    g_pfnRtlGetNonVolatileToken = (RtlGetNvToken)GetProcAddress(_hNTDLL, "RtlGetNonVolatileToken");
+    g_pfnRtlFreeNonVolatileToken = (RtlFreeNvToken)GetProcAddress(_hNTDLL, "RtlFreeNonVolatileToken");
 
     return true;
 }
@@ -716,7 +738,7 @@ static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBy
     size_t iTarget = pTarget - &p->vTargets[0];
     UINT32 iRequest = pIORequest->GetRequestIndex();
     LARGE_INTEGER li;
-    bool rslt;
+    BOOL rslt = true;
 
     li.LowPart = pOverlapped->Offset;
     li.HighPart = pOverlapped->OffsetHigh;
@@ -726,15 +748,30 @@ static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBy
     pOverlapped->Offset = li.LowPart;
     pOverlapped->OffsetHigh = li.HighPart;
     
-    printfv(p->pProfile->GetVerbose(), "t[%u:%u] new I/O op at %I64u (starting in block: %I64u)\n",
-        p->ulThreadNo,
-        iTarget,
-        li.QuadPart,
-        li.QuadPart / pTarget->GetBlockSizeInBytes());
-    
     IOOperation readOrWrite = DecideIo(p->pRand, pTarget->GetWriteRatio());
     pIORequest->SetIoType(readOrWrite);
     
+    if (TraceLoggingProviderEnabled(g_hEtwProvider,
+                                    TRACE_LEVEL_VERBOSE,
+                                    DISKSPD_TRACE_IO))
+    {
+        GUID ActivityId = p->NextActivityId();
+        pIORequest->SetActivityId(ActivityId);
+        
+        TraceLoggingWriteActivity(g_hEtwProvider,
+                                  "DiskSpd IO",
+                                  &ActivityId,
+                                  NULL,
+                                  TraceLoggingKeyword(DISKSPD_TRACE_IO),
+                                  TraceLoggingOpcode(EVENT_TRACE_TYPE_START),
+                                  TraceLoggingLevel(TRACE_LEVEL_VERBOSE),
+                                  TraceLoggingUInt32(p->ulThreadNo, "Thread"),
+                                  TraceLoggingString(readOrWrite == IOOperation::ReadIO ? "Read" : "Write", "IO Type"),
+                                  TraceLoggingUInt64(iTarget, "Target"),
+                                  TraceLoggingInt32(pTarget->GetBlockSizeInBytes(), "Block Size"),
+                                  TraceLoggingInt64(li.QuadPart, "Offset"));
+    }
+
     if (p->pTimeSpan->GetMeasureLatency())
     {
         pIORequest->SetStartTime(PerfTimer::GetTime());
@@ -742,24 +779,67 @@ static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBy
     
     if (readOrWrite == IOOperation::ReadIO)
     {
-        if (useCompletionRoutines)
+        if (pTarget->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
         {
-            rslt = ReadFileEx(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pOverlapped, fileIOCompletionRoutine);
+            if (pTarget->GetWriteThroughMode() == WriteThroughMode::On )
+            {
+                g_pfnRtlCopyMemoryNonTemporal(p->GetReadBuffer(iTarget, iRequest), pTarget->GetMappedView() + li.QuadPart, pTarget->GetBlockSizeInBytes());
+            }
+            else
+            {
+                memcpy(p->GetReadBuffer(iTarget, iRequest), pTarget->GetMappedView() + li.QuadPart, pTarget->GetBlockSizeInBytes());
+            }
+            *pdwBytesTransferred = pTarget->GetBlockSizeInBytes();
         }
         else
         {
-            rslt = ReadFile(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pdwBytesTransferred, pOverlapped);
+            if (useCompletionRoutines)
+            {
+                rslt = ReadFileEx(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pOverlapped, fileIOCompletionRoutine);
+            }
+            else
+            {
+                rslt = ReadFile(p->vhTargets[iTarget], p->GetReadBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pdwBytesTransferred, pOverlapped);
+            }
         }
     }
     else
     {
-        if (useCompletionRoutines)
+        if (pTarget->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
         {
-            rslt = WriteFileEx(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pOverlapped, fileIOCompletionRoutine);
+            if (pTarget->GetWriteThroughMode() == WriteThroughMode::On)
+            {
+                g_pfnRtlCopyMemoryNonTemporal(pTarget->GetMappedView() + li.QuadPart, p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes());
+            }
+            else
+            {
+                memcpy(pTarget->GetMappedView() + li.QuadPart, p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes());
+
+                switch (pTarget->GetMemoryMappedIoFlushMode())
+                {
+                    case MemoryMappedIoFlushMode::ViewOfFile:
+                        FlushViewOfFile(pTarget->GetMappedView() + li.QuadPart, pTarget->GetBlockSizeInBytes());
+                        break;
+                    case MemoryMappedIoFlushMode::NonVolatileMemory:
+                        g_pfnRtlFlushNonVolatileMemory(pTarget->GetMemoryMappedIoNvToken(), pTarget->GetMappedView() + li.QuadPart, pTarget->GetBlockSizeInBytes(), 0);
+                        break;
+                    case MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain:
+                        g_pfnRtlFlushNonVolatileMemory(pTarget->GetMemoryMappedIoNvToken(), pTarget->GetMappedView() + li.QuadPart, pTarget->GetBlockSizeInBytes(), FLUSH_NV_MEMORY_IN_FLAG_NO_DRAIN);
+                        break;
+                }
+            }
+            *pdwBytesTransferred = pTarget->GetBlockSizeInBytes();
         }
         else
         {
-            rslt = WriteFile(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pdwBytesTransferred, pOverlapped);
+            if (useCompletionRoutines)
+            {
+                rslt = WriteFileEx(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pOverlapped, fileIOCompletionRoutine);
+            }
+            else
+            {
+                rslt = WriteFile(p->vhTargets[iTarget], p->GetWriteBuffer(iTarget, iRequest), pTarget->GetBlockSizeInBytes(), pdwBytesTransferred, pOverlapped);
+            }
         }
     }
 
@@ -768,13 +848,28 @@ static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBy
         p->vThroughputMeters[iTarget].Adjust(pTarget->GetBlockSizeInBytes());
     }
 
-    return rslt;
+    return (rslt) ? true : false;
 }
 
 static void completeIO(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytesTransferred)
 {
     Target *pTarget = pIORequest->GetCurrentTarget();
     size_t iTarget = pTarget - &p->vTargets[0];
+
+    if (TraceLoggingProviderEnabled(g_hEtwProvider,
+                                    TRACE_LEVEL_VERBOSE,
+                                    DISKSPD_TRACE_IO))
+    {
+        GUID ActivityId = pIORequest->GetActivityId();
+
+        TraceLoggingWriteActivity(g_hEtwProvider,
+                                  "DiskSpd IO",
+                                  &ActivityId,
+                                  NULL,
+                                  TraceLoggingKeyword(DISKSPD_TRACE_IO),
+                                  TraceLoggingOpcode(EVENT_TRACE_TYPE_STOP),
+                                  TraceLoggingLevel(TRACE_LEVEL_VERBOSE));
+    }
 
     //check if I/O transferred all of the requested bytes
     if (dwBytesTransferred != pTarget->GetBlockSizeInBytes())
@@ -815,34 +910,46 @@ static bool doWorkUsingSynchronousIO(ThreadParameters *p)
     bool fOk = true;
     BOOL rslt = FALSE;
     DWORD dwBytesTransferred;
-    IORequest *pIORequest = &p->vIORequest[0];
+    size_t cIORequests = p->vIORequest.size();
 
     while(g_bRun && !g_bThreadError)
     {
-        Target *pTarget = pIORequest->GetNextTarget();
-
-        if (p->vThroughputMeters.size() != 0)
+        DWORD dwMinSleepTime = ~((DWORD)0);
+        for (size_t i = 0; i < cIORequests; i++)
         {
-            size_t iTarget = pTarget - &p->vTargets[0];
-            ThroughputMeter *pThroughputMeter = &p->vThroughputMeters[iTarget];
-            DWORD dwSleepTime = pThroughputMeter->GetSleepTime();
-            if (pThroughputMeter->IsRunning() && dwSleepTime > 0)
+            IORequest *pIORequest = &p->vIORequest[i];
+            Target *pTarget = pIORequest->GetNextTarget();
+
+            if (p->vThroughputMeters.size() != 0)
             {
-                Sleep(dwSleepTime);
-                continue;
+                size_t iTarget = pTarget - &p->vTargets[0];
+                ThroughputMeter *pThroughputMeter = &p->vThroughputMeters[iTarget];
+
+                DWORD dwSleepTime = pThroughputMeter->GetSleepTime();
+                dwMinSleepTime = min(dwMinSleepTime, dwSleepTime);
+                if (pThroughputMeter->IsRunning() && dwSleepTime > 0)
+                {
+                    continue;
+                }
             }
+
+            rslt = issueNextIO(p, pIORequest, &dwBytesTransferred, false);
+
+            if (!rslt)
+            {
+                PrintError("t[%u] error during %s error code: %u)\n", (UINT32)i, (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
+                fOk = false;
+                goto cleanup;
+            }
+
+            completeIO(p, pIORequest, dwBytesTransferred);
         }
 
-        rslt = issueNextIO(p, pIORequest, &dwBytesTransferred, false);
-        
-        if (!rslt)
+        // if no IOs were issued, wait for the next scheduling time
+        if (dwMinSleepTime != ~((DWORD)0) && dwMinSleepTime != 0)
         {
-            PrintError("t[%u] error during %s error code: %u)\n", 0, (pIORequest->GetIoType()== IOOperation::ReadIO ? "read" : "write"), GetLastError());
-            fOk = false;
-            goto cleanup;
+            Sleep(dwMinSleepTime);
         }
-
-        completeIO(p, pIORequest, dwBytesTransferred);
 
         assert(!g_bError);  // at this point we shouldn't be seeing initialization error
     }
@@ -900,7 +1007,7 @@ static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletion
                 }
             }
 
-            rslt = issueNextIO(p, pIORequest, NULL, false);
+            rslt = issueNextIO(p, pIORequest, &dwBytesTransferred, false);
 
             if (!rslt && GetLastError() != ERROR_IO_PENDING)
             {
@@ -908,6 +1015,12 @@ static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletion
                 PrintError("t[%u] error during %s error code: %u)\n", iIORequest, (pIORequest->GetIoType()== IOOperation::ReadIO ? "read" : "write"), GetLastError());
                 fOk = false;
                 goto cleanup;
+            }
+
+            if (rslt && pTarget->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+            {
+                completeIO(p, pIORequest, dwBytesTransferred);
+                overlappedQueue.Add(pReadyOverlapped);
             }
         }
 
@@ -1082,6 +1195,8 @@ struct UniqueTarget {
 DWORD WINAPI threadFunc(LPVOID cookie)
 {
     bool fOk = true;
+    bool fAnyMappedIo = false;
+    bool fAllMappedIo = true;
     ThreadParameters *p = reinterpret_cast<ThreadParameters *>(cookie);
     HANDLE hCompletionPort = nullptr;
 
@@ -1159,6 +1274,12 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         //check if it is a physical drive
         if ('#' == *filename && NULL != *(filename + 1))
         {
+            if (pTarget->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+            {
+                PrintError("Memory mapped I/O is not supported on physical drives\n");
+                fOk = false;
+                goto cleanup;
+            }
             UINT32 nDriveNo = (UINT32)atoi(filename + 1);
             fPhysical = true;
             sprintf_s(physFN, 32, "\\\\.\\PhysicalDrive%u", nDriveNo);
@@ -1168,6 +1289,12 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         //check if it is a partition
         if (!fPhysical && NULL != *(filename + 1) && NULL == *(filename + 2) && isalpha((unsigned char)filename[0]) && ':' == filename[1])
         {
+            if (pTarget->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+            {
+                PrintError("Memory mapped I/O is not supported on partitions\n");
+                fOk = false;
+                goto cleanup;
+            }
             fPartition = true;
 
             sprintf_s(physFN, 32, "\\\\.\\%c:", filename[0]);
@@ -1194,6 +1321,16 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         else
         {
             dwDesiredAccess = GENERIC_READ | GENERIC_WRITE;
+        }
+
+        if (pTarget->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+        {
+            dwDesiredAccess = GENERIC_READ | GENERIC_WRITE;
+            fAnyMappedIo = true;
+        }
+        else
+        {
+            fAllMappedIo = false;
         }
 
         HANDLE hFile;
@@ -1347,10 +1484,55 @@ DWORD WINAPI threadFunc(LPVOID cookie)
         // allocate memory for a data buffer
         if (!p->AllocateAndFillBufferForTarget(*pTarget))
         {
-            PrintError("FATAL ERROR: Could not allocate a buffer bytes for target '%s'. Error code: 0x%x\n", pTarget->GetPath().c_str(), GetLastError());
+            PrintError("ERROR: Could not allocate a buffer for target '%s'. Error code: 0x%x\n", pTarget->GetPath().c_str(), GetLastError());
             fOk = false;
             goto cleanup;
         }
+
+        // initialize memory mapped views of files
+        if (pTarget->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+        {
+            NTSTATUS status;
+            PVOID nvToken;
+
+            pTarget->SetMappedViewFileHandle(hFile);
+            if (!p->InitializeMappedViewForTarget(*pTarget, dwDesiredAccess))
+            {
+                PrintError("ERROR: Could not map view for target '%s'. Error code: 0x%x\n", pTarget->GetPath().c_str(), GetLastError());
+                fOk = false;
+                goto cleanup;
+            }
+
+            if (pTarget->GetWriteThroughMode() == WriteThroughMode::On && nullptr == g_pfnRtlCopyMemoryNonTemporal)
+            {
+                PrintError("ERROR: Windows runtime environment does not support the non-temporal memory copy API for target '%s'.\n", pTarget->GetPath().c_str());
+                fOk = false;
+                goto cleanup;
+            }
+
+            if ((pTarget->GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::NonVolatileMemory) || (pTarget->GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain))
+            {
+                // RtlGetNonVolatileToken() works only on DAX enabled PMEM devices.
+                if (g_pfnRtlGetNonVolatileToken != nullptr && g_pfnRtlFreeNonVolatileToken != nullptr)
+                {
+                    status = g_pfnRtlGetNonVolatileToken(pTarget->GetMappedView(), (SIZE_T) pTarget->GetFileSize(), &nvToken);
+                    if (!NT_SUCCESS(status))
+                    {
+                        PrintError("ERROR: Could not get non-volatile token for target '%s'. Error code: 0x%x\n", pTarget->GetPath().c_str(), GetLastError());
+                        fOk = false;
+                        goto cleanup;
+                    }
+                    pTarget->SetMemoryMappedIoNvToken(nvToken);
+                }
+                else
+                {
+                    PrintError("ERROR: Windows runtime environment does not support the non-volatile memory flushing APIs for target '%s'.\n", pTarget->GetPath().c_str());
+                    fOk = false;
+                    goto cleanup;
+                }
+            }
+        }
+
         iTarget++;
     }
  
@@ -1469,11 +1651,11 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     }
     
     //FUTURE EXTENSION: enable asynchronous I/O even if only 1 outstanding I/O per file (requires another parameter)
-    if (cIORequests == 1)
+    if (cIORequests == 1 || fAllMappedIo)
     {
         //synchronous IO - no setup needed
     }
-    else if (p->pTimeSpan->GetCompletionRoutines())
+    else if (p->pTimeSpan->GetCompletionRoutines() && !fAnyMappedIo)
     {
         //in case of completion routines hEvent field is not used,
         //so we can use it to pass a pointer to the thread parameters
@@ -1521,7 +1703,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     }
 
     //error handling and memory freeing is done in doWorkUsingIOCompletionPorts and doWorkUsingCompletionRoutines
-    if (cIORequests == 1)
+    if (cIORequests == 1 || fAllMappedIo)
     {
         // use synchronous IO (it will also clse the event)
         if (!doWorkUsingSynchronousIO(p))
@@ -1530,7 +1712,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
             goto cleanup;
         }
     }
-    else if (!p->pTimeSpan->GetCompletionRoutines())
+    else if (!p->pTimeSpan->GetCompletionRoutines() || fAnyMappedIo)
     {
         // use IO Completion Ports (it will also close the I/O completion port)
         if (!doWorkUsingIOCompletionPorts(p, hCompletionPort))
@@ -1566,6 +1748,16 @@ cleanup:
         {
 #pragma prefast(suppress:6001, "Prefast does not understand this vector will only contain validly allocated buffer pointers")
             VirtualFree(*i, 0, MEM_RELEASE);
+        }
+    }
+
+    // free NV tokens
+    for (auto i = p->vTargets.begin(); i != p->vTargets.end(); i++)
+    {
+        if (i->GetMemoryMappedIoNvToken() != nullptr && g_pfnRtlFreeNonVolatileToken != nullptr)
+        {
+            g_pfnRtlFreeNonVolatileToken(i->GetMemoryMappedIoNvToken());
+            i->SetMemoryMappedIoNvToken(nullptr);
         }
     }
 
@@ -1924,6 +2116,7 @@ bool IORequestGenerator::GenerateRequests(Profile& profile, IResultParser& resul
 
         // TODO: show results only for timespans that succeeded
         SystemInformation system;
+        EtwResultParser::ParseResults(vResults);
         string sResults = resultParser.ParseResults(profile, system, vResults);
         print("%s", sResults.c_str());
     }
@@ -2255,6 +2448,9 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //
     if (timeSpan.GetWarmup() > 0)
     {
+        TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> WarmActivity;
+        TraceLoggingWriteStart(WarmActivity, "Warm Up");
+
         if (bSynchStop)
         {
             assert(NULL != pSynch->hStopEvent);
@@ -2271,6 +2467,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         {
             Sleep(1000 * timeSpan.GetWarmup());
         }
+
+        TraceLoggingWriteStop(WarmActivity, "Warm Up");
     }
 
     if (!bBreak) // proceed only if user didn't break the test
@@ -2324,6 +2522,9 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             return false;
         }
 
+        TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> RunActivity;
+        TraceLoggingWriteStart(RunActivity, "Run Time");
+
         //get cycle count (it will be used to calculate actual work time)
         ullStartTime = PerfTimer::GetTime();
 
@@ -2355,6 +2556,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 
         //get cycle count and perf counters
         ullTimeDiff = PerfTimer::GetTime() - ullStartTime;
+
+        TraceLoggingWriteStop(RunActivity, "Run Time");
 
         if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
         {
@@ -2395,6 +2598,9 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     printfv(profile.GetVerbose(), "starting cool down...\n");
     if ((timeSpan.GetCooldown() > 0) && !bBreak)
     {
+        TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> CoolActivity;
+        TraceLoggingWriteStart(CoolActivity, "Cool Down");
+
         if (bSynchStop)
         {
             assert(NULL != pSynch->hStopEvent);
@@ -2411,6 +2617,8 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         {
             Sleep(1000 * timeSpan.GetCooldown());
         }
+
+        TraceLoggingWriteStop(CoolActivity, "Cool Down");
     }
     printfv(profile.GetVerbose(), "finished test...\n");
 

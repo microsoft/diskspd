@@ -254,6 +254,23 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
         _Print("\t\tusing hardware write cache, writethrough off\n");
     }
 
+    if (target.GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+    {
+        _Print("\t\tmemory mapped I/O enabled");
+        switch(target.GetMemoryMappedIoFlushMode())
+        {
+        case MemoryMappedIoFlushMode::ViewOfFile:
+            _Print(", flush mode: FlushViewOfFile");
+            break;
+        case MemoryMappedIoFlushMode::NonVolatileMemory:
+            _Print(", flush mode: FlushNonVolatileMemory");
+            break;
+        case MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain:
+            _Print(", flush mode: FlushNonVolatileMemory with no drain");
+            break;
+        }
+        _Print("\n");
+    }
 
     if (target.GetZeroWriteBuffers())
     {
@@ -438,6 +455,11 @@ void ResultParser::_PrintProfile(const Profile& profile)
         _PrintTimeSpan(*i);
         _Print("\n");
     }
+}
+
+void ResultParser::_PrintSystemInfo(const SystemInformation& system)
+{
+    _Print(system.GetText().c_str());
 }
 
 void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInformation& system)
@@ -824,12 +846,10 @@ void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogr
 
 string ResultParser::ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults)
 {
-    // TODO: print text representation of system information (see xml parser)
-    UNREFERENCED_PARAMETER(system);
-
     _sResult.clear();
 
     _PrintProfile(profile);
+    _PrintSystemInfo(system);
 
     for (size_t iResult = 0; iResult < vResults.size(); iResult++)
     {

@@ -438,6 +438,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
         VERIFY_IS_TRUE(t.GetCreateFile() == false);
@@ -465,6 +467,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -543,6 +547,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -616,6 +622,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -720,6 +728,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -811,6 +821,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -854,6 +866,13 @@ namespace UnitTests
             VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
         }
 
+        // conflict mu
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Smu", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
         // conflict with -h/-Sb, either order
         {
             Profile profile;
@@ -864,6 +883,13 @@ namespace UnitTests
         {
             Profile profile;
             const char *argv[] = { "foo", "-h", "-Sb", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // conflict with -h/-Sm
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Sm", "-h", "testfile.dat" };
             VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
         }
 
@@ -891,6 +917,13 @@ namespace UnitTests
         {
             Profile profile;
             const char *argv[] = { "foo", "-Sb", "-Sb", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // multiple with -Sm/-Sm
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Sm", "-Sm", "testfile.dat" };
             VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
         }
 
@@ -956,6 +989,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1039,6 +1074,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1111,6 +1148,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1183,6 +1222,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableLocalCache);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1255,6 +1296,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1271,6 +1314,118 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
         VERIFY_IS_TRUE(t.GetUseLargePages() == false);
         VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+    }
+
+    void CmdLineParserUnitTests::VerifyParseCmdLineMappedIO(Profile &profile, MemoryMappedIoFlushMode FlushMode)
+    {
+        VERIFY_IS_TRUE(profile.GetVerbose() == false);
+        VERIFY_IS_TRUE(profile.GetProgress() == 0);
+
+        VERIFY_IS_TRUE(profile.GetEtwEnabled() == false);
+        VERIFY_IS_TRUE(profile.GetEtwProcess() == false);
+        VERIFY_IS_TRUE(profile.GetEtwThread() == false);
+        VERIFY_IS_TRUE(profile.GetEtwImageLoad() == false);
+        VERIFY_IS_TRUE(profile.GetEtwDiskIO() == false);
+        VERIFY_IS_TRUE(profile.GetEtwMemoryPageFaults() == false);
+        VERIFY_IS_TRUE(profile.GetEtwMemoryHardFaults() == false);
+        VERIFY_IS_TRUE(profile.GetEtwNetwork() == false);
+        VERIFY_IS_TRUE(profile.GetEtwRegistry() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUsePagedMemory() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUsePerfTimer() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUseSystemTimer() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUseCyclesCounter() == false);
+
+        vector<TimeSpan> vSpans(profile.GetTimeSpans());
+        VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
+        VERIFY_ARE_EQUAL(vSpans[0].GetDuration(), (UINT32)10);
+        VERIFY_ARE_EQUAL(vSpans[0].GetWarmup(), (UINT32)5);
+        VERIFY_ARE_EQUAL(vSpans[0].GetCooldown(), (UINT32)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetRandSeed(), (UINT32)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetThreadCount(), (DWORD)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetRequestCount(), (DWORD)0);
+        VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+
+        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
+        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+
+        vector<Target> vTargets(vSpans[0].GetTargets());
+        VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
+        Target t(vTargets[0]);
+
+        VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
+        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(128 * 1024));
+        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
+        VERIFY_IS_TRUE(t.GetUseRandomAccessPattern() == false);
+        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
+        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), t.GetBlockSizeInBytes());
+        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
+        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
+        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
+        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == FlushMode);
+        VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
+        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
+        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
+        VERIFY_IS_TRUE(t.GetCreateFile() == false);
+        VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
+        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
+        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+        VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
+        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
+        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
+        VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
+        VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
+        VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
+        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
+        VERIFY_IS_TRUE(t.GetUseLargePages() == false);
+        VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+    }
+
+    void CmdLineParserUnitTests::TestParseCmdLineMappedIO()
+    {
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-Sm", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -Sm testfile.dat") == 0);
+            VerifyParseCmdLineMappedIO(profile, MemoryMappedIoFlushMode::Undefined);
+        }
+
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-Sm", "-Nv", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -Sm -Nv testfile.dat") == 0);
+            VerifyParseCmdLineMappedIO(profile, MemoryMappedIoFlushMode::ViewOfFile);
+        }
+
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-Sm", "-Nn", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -Sm -Nn testfile.dat") == 0);
+            VerifyParseCmdLineMappedIO(profile, MemoryMappedIoFlushMode::NonVolatileMemory);
+        }
+        
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-Sm", "-Ni", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -Sm -Ni testfile.dat") == 0);
+            VerifyParseCmdLineMappedIO(profile, MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain);
+        }
     }
 
     void CmdLineParserUnitTests::TestParseCmdLineUseCompletionRoutines()
@@ -1327,6 +1482,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1399,6 +1556,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1471,6 +1630,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1543,6 +1704,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1615,6 +1778,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1687,6 +1852,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == true);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1759,6 +1926,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1831,6 +2000,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1903,6 +2074,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1975,6 +2148,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2047,6 +2222,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2119,6 +2296,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2191,6 +2370,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2263,6 +2444,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)23);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), (567 * 1024));
@@ -2335,6 +2518,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2407,6 +2592,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2479,6 +2666,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2551,6 +2740,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2623,6 +2814,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2695,6 +2888,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2767,6 +2962,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2839,6 +3036,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2911,6 +3110,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2983,6 +3184,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3055,6 +3258,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3127,6 +3332,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3199,6 +3406,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3272,6 +3481,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3344,6 +3555,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == true);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3418,6 +3631,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3566,6 +3781,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3638,6 +3855,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3710,6 +3929,8 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);

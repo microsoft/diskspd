@@ -29,6 +29,10 @@ SOFTWARE.
 
 #include "Common.h"
 
+TRACELOGGING_DEFINE_PROVIDER(g_hEtwProvider,
+                             "Microsoft-Windows-DiskSpd", // {CA13DB84-D0A9-5145-FCA4-468DA92FDC2D}
+                             (0xca13db84, 0xd0a9, 0x5145, 0xfc, 0xa4, 0x46, 0x8d, 0xa9, 0x2f, 0xdc, 0x2d));
+
 SystemInformation g_SystemInformation;
 
 UINT64 PerfTimer::GetTime()
@@ -288,6 +292,28 @@ string Target::GetXml() const
         break;
     }
     
+    // MemoryMappedIoMode::Off is implied default
+    switch (_memoryMappedIoMode)
+    {
+    case MemoryMappedIoMode::On:
+        sXml += "<MemoryMappedIo>true</MemoryMappedIo>\n";
+        break;
+    }
+
+    // MemoryMappedIoFlushMode::Undefined is implied default
+    switch (_memoryMappedIoFlushMode)
+    {
+    case MemoryMappedIoFlushMode::ViewOfFile:
+        sXml += "<FlushType>ViewOfFile</FlushType>\n";
+        break;
+    case MemoryMappedIoFlushMode::NonVolatileMemory:
+        sXml += "<FlushType>NonVolatileMemory</FlushType>\n";
+        break;
+    case MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain:
+        sXml += "<FlushType>NonVolatileMemoryNoDrain</FlushType>\n";
+        break;
+    }
+
     sXml += "<WriteBufferContent>\n";
     if (_fZeroWriteBuffers)
     {
@@ -854,6 +880,26 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     }
                 }
 
+                if (target.GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+                {
+                    if (timeSpan.GetCompletionRoutines())
+                    {
+                        fprintf(stderr, "ERROR: completion routines (-x) can't be used with memory mapped IO (-Sm)\n");
+                        fOk = false;
+                    }
+                    if (target.GetCacheMode() == TargetCacheMode::DisableOSCache)
+                    {
+                        fprintf(stderr, "ERROR: unbuffered IO (-Su or -Sh) can't be used with memory mapped IO (-Sm)\n");
+                        fOk = false;
+                    }
+                }
+
+                if (target.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off &&
+                    target.GetMemoryMappedIoFlushMode() != MemoryMappedIoFlushMode::Undefined)
+                {
+                    fprintf(stderr, "ERROR: memory mapped flush mode (-N) can only be specified with memory mapped IO (-Sm)\n");
+                }
+
                 // in the cases where there is only a single configuration specified for each target (e.g., cmdline),
                 // currently there are no validations specific to individual targets (e.g., pre-existing files)
                 // so we can stop validation now. this allows us to only warn/error once, as opposed to repeating
@@ -960,6 +1006,45 @@ BYTE* ThreadParameters::GetWriteBuffer(size_t iTarget, size_t iRequest)
     return pBuffer;
 }
 
+bool ThreadParameters::InitializeMappedViewForTarget(Target& target, DWORD DesiredAccess)
+{
+    bool fOk = true;
+    DWORD dwProtect = PAGE_READWRITE;
+
+    if (DesiredAccess == GENERIC_READ)
+    {
+        dwProtect = PAGE_READONLY;
+    }
+
+    HANDLE hFile = CreateFileMapping(target.GetMappedViewFileHandle(), NULL, dwProtect, 0, 0, NULL);
+    fOk = (hFile != NULL);
+    if (fOk)
+    {
+        DWORD dwDesiredAccess = FILE_MAP_WRITE;
+
+        if (DesiredAccess == GENERIC_READ)
+        {
+            dwDesiredAccess = FILE_MAP_READ;
+        }
+
+        BYTE *mapView = (BYTE*) MapViewOfFile(hFile, dwDesiredAccess, 0, 0, 0);
+        fOk = (mapView != NULL);
+        if (fOk)
+        {
+            target.SetMappedView(mapView);
+        }
+        else
+        {
+            fprintf(stderr, "FATAL ERROR: Could not map view for target '%s'. Error code: 0x%x\n", target.GetPath().c_str(), GetLastError());
+        }
+    }
+    else
+    {
+        fprintf(stderr, "FATAL ERROR: Could not create a file mapping for target '%s'. Error code: 0x%x\n", target.GetPath().c_str(), GetLastError());
+    }
+    return fOk;
+}
+
 DWORD ThreadParameters::GetTotalRequestCount() const
 {
     DWORD cRequests = 0;
@@ -976,4 +1061,48 @@ DWORD ThreadParameters::GetTotalRequestCount() const
     }
 
     return cRequests;
+}
+
+void EtwResultParser::ParseResults(vector<Results> vResults)
+{
+    if (TraceLoggingProviderEnabled(g_hEtwProvider,
+                                    TRACE_LEVEL_NONE,
+                                    DISKSPD_TRACE_INFO))
+    {
+        for (size_t ullResults = 0; ullResults < vResults.size(); ullResults++)
+        {
+            const Results& results = vResults[ullResults];
+            for (size_t ullThread = 0; ullThread < results.vThreadResults.size(); ullThread++)
+            {
+                const ThreadResults& threadResults = results.vThreadResults[ullThread];
+                for (const auto& targetResults : threadResults.vTargetResults)
+                {
+                    if (targetResults.ullReadIOCount)
+                    {
+                        _WriteResults(IOOperation::ReadIO, targetResults, ullThread);
+                    }
+                    if (targetResults.ullWriteIOCount)
+                    {
+                        _WriteResults(IOOperation::WriteIO, targetResults, ullThread);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void EtwResultParser::_WriteResults(IOOperation type, const TargetResults& targetResults, size_t ullThread)
+{
+    UINT64 ullIOCount = (type == IOOperation::ReadIO) ? targetResults.ullReadIOCount : targetResults.ullWriteIOCount;
+    UINT64 ullBytesCount = (type == IOOperation::ReadIO) ? targetResults.ullReadBytesCount : targetResults.ullWriteBytesCount;
+
+    TraceLoggingWrite(g_hEtwProvider,
+                      "Statistics",
+                      TraceLoggingLevel((TRACE_LEVEL_NONE)),
+                      TraceLoggingString((type == IOOperation::ReadIO) ? "Read" : "Write", "IO Type"),
+                      TraceLoggingUInt64(ullThread, "Thread"),
+                      TraceLoggingUInt64(ullBytesCount, "Bytes"),
+                      TraceLoggingUInt64(ullIOCount, "IO Count"),
+                      TraceLoggingString(targetResults.sPath.c_str(), "Path"),
+                      TraceLoggingUInt64(targetResults.ullFileSize, "File Size"));
 }

@@ -91,6 +91,7 @@ namespace UnitTests
         // to verify a static null as anything else.
         SystemInformation system;
         system.sComputerName.clear();
+        system.ResetTime();
         system.processorTopology._ulProcCount = 1;
         system.processorTopology._ulActiveProcCount = 1;
         system.processorTopology._vProcessorGroupInformation[0]._maximumProcessorCount = 1;
@@ -117,7 +118,9 @@ namespace UnitTests
             "\tgathering IOPS at intervals of 1000ms\n"
             "\trandom seed: 0\n"
             "\n"
-            "\n"
+            "System information:\n\n"
+            "\tcomputer name: \n"
+            "\tstart time: \n"
             "\n"
             "Results for timespan 1:\n"
             "*******************************************************************************\n"
@@ -306,6 +309,86 @@ namespace UnitTests
         VERIFY_IS_TRUE(parser._sResult == pszExpectedResult);
 
         parser._sResult = "";
+        target.SetCacheMode(TargetCacheMode::Cached);
+        target.SetMemoryMappedIoMode(MemoryMappedIoMode::On);
+        parser._PrintTarget(target, false, true, false);
+        pszExpectedResult = "\tpath: ''\n" \
+            "\t\tthink time: 0ms\n"
+            "\t\tburst size: 0\n"
+            "\t\tusing software cache\n"
+            "\t\tusing hardware write cache, writethrough off\n"
+            "\t\tmemory mapped I/O enabled\n"
+            "\t\twrite buffer size: 12341234\n"
+            "\t\twrite buffer source: 'x:\\foo\\bar.dat'\n"
+            "\t\tperforming read test\n"
+            "\t\tblock size: 65536\n"
+            "\t\tusing random I/O (alignment: 65536)\n"
+            "\t\tnumber of outstanding I/O operations: 2\n"
+            "\t\tthread stride size: 0\n"
+            "\t\tIO priority: normal\n";
+        VERIFY_IS_TRUE(parser._sResult == pszExpectedResult);
+
+        parser._sResult = "";
+        target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::ViewOfFile);
+        parser._PrintTarget(target, false, true, false);
+        pszExpectedResult = "\tpath: ''\n" \
+            "\t\tthink time: 0ms\n"
+            "\t\tburst size: 0\n"
+            "\t\tusing software cache\n"
+            "\t\tusing hardware write cache, writethrough off\n"
+            "\t\tmemory mapped I/O enabled, flush mode: FlushViewOfFile\n"
+            "\t\twrite buffer size: 12341234\n"
+            "\t\twrite buffer source: 'x:\\foo\\bar.dat'\n"
+            "\t\tperforming read test\n"
+            "\t\tblock size: 65536\n"
+            "\t\tusing random I/O (alignment: 65536)\n"
+            "\t\tnumber of outstanding I/O operations: 2\n"
+            "\t\tthread stride size: 0\n"
+            "\t\tIO priority: normal\n";
+        VERIFY_IS_TRUE(parser._sResult == pszExpectedResult);
+
+        parser._sResult = "";
+        target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::NonVolatileMemory);
+        parser._PrintTarget(target, false, true, false);
+        pszExpectedResult = "\tpath: ''\n" \
+            "\t\tthink time: 0ms\n"
+            "\t\tburst size: 0\n"
+            "\t\tusing software cache\n"
+            "\t\tusing hardware write cache, writethrough off\n"
+            "\t\tmemory mapped I/O enabled, flush mode: FlushNonVolatileMemory\n"
+            "\t\twrite buffer size: 12341234\n"
+            "\t\twrite buffer source: 'x:\\foo\\bar.dat'\n"
+            "\t\tperforming read test\n"
+            "\t\tblock size: 65536\n"
+            "\t\tusing random I/O (alignment: 65536)\n"
+            "\t\tnumber of outstanding I/O operations: 2\n"
+            "\t\tthread stride size: 0\n"
+            "\t\tIO priority: normal\n";
+        VERIFY_IS_TRUE(parser._sResult == pszExpectedResult);
+
+        parser._sResult = "";
+        target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain);
+        parser._PrintTarget(target, false, true, false);
+        pszExpectedResult = "\tpath: ''\n" \
+            "\t\tthink time: 0ms\n"
+            "\t\tburst size: 0\n"
+            "\t\tusing software cache\n"
+            "\t\tusing hardware write cache, writethrough off\n"
+            "\t\tmemory mapped I/O enabled, flush mode: FlushNonVolatileMemory with no drain\n"
+            "\t\twrite buffer size: 12341234\n"
+            "\t\twrite buffer source: 'x:\\foo\\bar.dat'\n"
+            "\t\tperforming read test\n"
+            "\t\tblock size: 65536\n"
+            "\t\tusing random I/O (alignment: 65536)\n"
+            "\t\tnumber of outstanding I/O operations: 2\n"
+            "\t\tthread stride size: 0\n"
+            "\t\tIO priority: normal\n";
+        VERIFY_IS_TRUE(parser._sResult == pszExpectedResult);
+
+        parser._sResult = "";
+        target.SetMemoryMappedIoMode(MemoryMappedIoMode::Off);
+        target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::Undefined);
+        target.SetCacheMode(TargetCacheMode::DisableLocalCache);
         target.SetTemporaryFileHint(true);
         parser._PrintTarget(target, false, true, false);
         pszExpectedResult = "\tpath: ''\n" \

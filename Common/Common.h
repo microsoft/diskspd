@@ -30,6 +30,9 @@ SOFTWARE.
 #pragma once
 
 #include <windows.h>
+#include <TraceLoggingProvider.h>
+#include <TraceLoggingActivity.h>
+#include <evntrace.h>
 #include <ctime>
 #include <vector>
 #include <Winternl.h>   //ntdll.dll
@@ -39,6 +42,8 @@ SOFTWARE.
 #include "ThroughputMeter.h"
 
 using namespace std;
+
+TRACELOGGING_DECLARE_PROVIDER(g_hEtwProvider);
 
 // versioning material. for simplicity in consumption, please ensure that the date string
 // parses via the System.Datetime constructor as follows (in Powershell):
@@ -54,7 +59,7 @@ using namespace std;
 
 #define DISKSPD_MAJOR       2
 #define DISKSPD_MINOR       0
-#define DISKSPD_BUILD       20
+#define DISKSPD_BUILD       21
 #define DISKSPD_QFE         0
 
 #define DISKSPD_MAJORMINOR_VER_STR(x,y,z) #x "." #y "." #z
@@ -62,7 +67,11 @@ using namespace std;
 #define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
 
 #define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2018/2/28"
+#define DISKSPD_DATE_VERSION_STRING "2018/9/21"
+
+#define DISKSPD_TRACE_INFO      0x00000000
+#define DISKSPD_TRACE_RESERVED  0x00000001
+#define DISKSPD_TRACE_IO        0x00000100
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
@@ -660,6 +669,35 @@ public:
         StartTime = { 0 };
     }
 
+    string SystemInformation::GetText() const
+    {
+        char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
+        int nWritten;
+        string sText("System information:\n\n");
+
+        // identify computer which ran the test
+        sText += "\tcomputer name: ";
+        sText += sComputerName;
+        sText += "\n";
+
+        sText += "\tstart time: ";
+        if (StartTime.wYear) {
+
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer),
+                "%u/%02u/%02u %02u:%02u:%02u UTC",
+                StartTime.wYear,
+                StartTime.wMonth,
+                StartTime.wDay,
+                StartTime.wHour,
+                StartTime.wMinute,
+                StartTime.wSecond);
+            assert(nWritten && nWritten < _countof(szBuffer));
+            sText += szBuffer;
+        }
+
+        return sText;
+    }
+
     string SystemInformation::GetXml() const
     {
         char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
@@ -791,6 +829,25 @@ enum class WriteThroughMode {
     On,
 };
 
+// memory mapped IO modes
+// off -> default
+// on -> (-Sm or -Smw)
+enum class MemoryMappedIoMode {
+    Undefined = 0,
+    Off,
+    On,
+};
+
+// memory mapped IO flush modes
+// off / Undefined -> default
+// on -> (-Sm or -Smw)
+enum class MemoryMappedIoFlushMode {
+    Undefined = 0,
+    ViewOfFile,
+    NonVolatileMemory,
+    NonVolatileMemoryNoDrain,
+};
+
 class ThreadTarget
 {
 public:
@@ -829,6 +886,9 @@ public:
         _fInterlockedSequential(false),
         _cacheMode(TargetCacheMode::Cached),
         _writeThroughMode(WriteThroughMode::Off),
+        _memoryMappedIoMode(MemoryMappedIoMode::Off),
+        _memoryMappedIoNvToken(nullptr),
+        _memoryMappedIoFlushMode(MemoryMappedIoFlushMode::Undefined),
         _fZeroWriteBuffers(false),
         _dwThreadsPerFile(1),
         _ullThreadStride(0),
@@ -845,6 +905,8 @@ public:
         _fRandomAccessHint(false),
         _fTemporaryFileHint(false),
         _fUseLargePages(false),
+        _mappedViewFileHandle(INVALID_HANDLE_VALUE),
+        _mappedView(NULL),
         _ioPriorityHint(IoPriorityHintNormal),
         _ulWeight(1),
         _dwThroughputBytesPerMillisecond(0),
@@ -899,6 +961,15 @@ public:
     void SetWriteThroughMode(WriteThroughMode writeThroughMode ) { _writeThroughMode = writeThroughMode; }
     WriteThroughMode GetWriteThroughMode( ) const { return _writeThroughMode; }
 
+    void SetMemoryMappedIoMode(MemoryMappedIoMode memoryMappedIoMode ) { _memoryMappedIoMode = memoryMappedIoMode; }
+    MemoryMappedIoMode GetMemoryMappedIoMode( ) const { return _memoryMappedIoMode; }
+
+    void SetMemoryMappedIoNvToken(PVOID memoryMappedIoNvToken) { _memoryMappedIoNvToken = memoryMappedIoNvToken; }
+    PVOID GetMemoryMappedIoNvToken() const { return _memoryMappedIoNvToken; }
+
+    void SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode memoryMappedIoFlushMode) { _memoryMappedIoFlushMode = memoryMappedIoFlushMode; }
+    MemoryMappedIoFlushMode GetMemoryMappedIoFlushMode() const { return _memoryMappedIoFlushMode; }
+
     void SetZeroWriteBuffers(bool fBool) { _fZeroWriteBuffers = fBool; }
     bool GetZeroWriteBuffers() const { return _fZeroWriteBuffers; }
 
@@ -943,6 +1014,12 @@ public:
 
     void SetThreadStrideInBytes(UINT64 ullThreadStride) { _ullThreadStride = ullThreadStride; }
     UINT64 GetThreadStrideInBytes() const { return _ullThreadStride; }
+
+    void SetMappedViewFileHandle(HANDLE FileHandle) { _mappedViewFileHandle = FileHandle; }
+    HANDLE GetMappedViewFileHandle() const { return _mappedViewFileHandle; }
+
+    void SetMappedView(BYTE *MappedView) { _mappedView = MappedView; }
+    BYTE* GetMappedView() const { return _mappedView; }
 
     void SetIOPriorityHint(PRIORITY_HINT _hint)
     {
@@ -1024,6 +1101,9 @@ private:
 
     TargetCacheMode _cacheMode;
     WriteThroughMode _writeThroughMode;
+    MemoryMappedIoMode _memoryMappedIoMode;
+    MemoryMappedIoFlushMode _memoryMappedIoFlushMode;
+    PVOID _memoryMappedIoNvToken;
     bool _fZeroWriteBuffers;
     DWORD _dwThreadsPerFile;
     UINT64 _ullThreadStride;
@@ -1049,6 +1129,9 @@ private:
     UINT64 _cbRandomDataWriteBuffer;            // if > 0, then the write buffer should be filled with random data
     string _sRandomDataWriteBufferSourcePath;   // file that should be used for filling the write buffer (if the path is not available, use a crypto provider)
     BYTE *_pRandomDataWriteBuffer;              // a buffer used for write data when _cbWriteBuffer > 0; it's shared by all the threads working on this target
+
+    HANDLE _mappedViewFileHandle;
+    BYTE *_mappedView;
 
     PRIORITY_HINT _ioPriorityHint;
 
@@ -1305,7 +1388,8 @@ public:
         _ullStartTime(0),
         _ulRequestIndex(0xFFFFFFFF),
         _ullTotalWeight(0),
-        _fEqualWeights(true)
+        _fEqualWeights(true),
+        _ActivityId()
     {
         memset(&_overlapped, 0, sizeof(OVERLAPPED));
         _overlapped.Offset = 0xFFFFFFFF;
@@ -1367,6 +1451,9 @@ public:
     void SetRequestIndex(UINT32 ulRequestIndex) { _ulRequestIndex = ulRequestIndex; }
     UINT32 GetRequestIndex() const { return _ulRequestIndex; }
 
+    void SetActivityId(GUID ActivityId) { _ActivityId = ActivityId; }
+    GUID GetActivityId() const { return _ActivityId; }
+
 private:
     OVERLAPPED _overlapped;
     vector<Target*> _vTargets;
@@ -1378,7 +1465,16 @@ private:
     IOOperation _ioType;
     UINT64 _ullStartTime;
     UINT32 _ulRequestIndex;
+    GUID _ActivityId;
 };
+
+typedef struct _ACTIVITY_ID {
+    UINT32 Thread;
+    UINT32 Reserved;
+    UINT64 Count;
+} ACTIVITY_ID;
+
+C_ASSERT(sizeof(ACTIVITY_ID) == sizeof(GUID));
 
 class ThreadParameters
 {
@@ -1439,13 +1535,37 @@ public:
     BYTE* GetReadBuffer(size_t iTarget, size_t iRequest);
     BYTE* GetWriteBuffer(size_t iTarget, size_t iRequest);
     DWORD GetTotalRequestCount() const;
+    bool  InitializeMappedViewForTarget(Target& target, DWORD DesiredAccess);
+
+    GUID NextActivityId()
+    {
+        GUID ActivityId;
+        ACTIVITY_ID* ActivityGuid = (ACTIVITY_ID*)&ActivityId;
+
+        ActivityGuid->Thread = ulThreadNo;
+        ActivityGuid->Reserved = 0;
+        // The count is byte swapped so it's understandable in a trace.
+        ActivityGuid->Count = _byteswap_uint64(++_ullActivityCount);
+
+        return ActivityId;
+    }
 
 private:
     ThreadParameters(const ThreadParameters& T);
+    UINT64 _ullActivityCount;
 };
 
 class IResultParser
 {
 public:
     virtual string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults) = 0;
+};
+
+class EtwResultParser
+{
+public:
+    static void ParseResults(vector<Results> vResults);
+
+private:
+    static void _WriteResults(IOOperation type, const TargetResults& targetResults, size_t uThread);
 };

@@ -155,6 +155,44 @@ namespace UnitTests
                         "                </Target>\n"
                         "            </Targets>\n"
                         "        </TimeSpan>\n"
+                        "        <TimeSpan>\n"
+                        "            <Duration>10</Duration>\n"
+                        "            <Warmup>20</Warmup>\n"
+                        "            <Cooldown>30</Cooldown>\n"
+                        "            <RandSeed>40</RandSeed>\n"
+                        "            <ThreadCount>50</ThreadCount>\n"
+                        "            <DisableAffinity>true</DisableAffinity>\n"
+                        "            <MeasureLatency>true</MeasureLatency>\n"
+                        "            <Targets>\n"
+                        "                <Target>\n"
+                        "                    <Path>testfile.dat</Path>\n"
+                        "                    <BlockSize>100</BlockSize>\n"
+                        "                    <WriteRatio>84</WriteRatio>\n"
+                        "                    <MemoryMappedIo>true</MemoryMappedIo>\n"
+                        "                </Target>\n"
+                        "                <Target>\n"
+                        "                    <Path>testfile1.dat</Path>\n"
+                        "                    <BlockSize>100</BlockSize>\n"
+                        "                    <WriteRatio>84</WriteRatio>\n"
+                        "                    <MemoryMappedIo>true</MemoryMappedIo>\n"
+                        "                    <FlushType>ViewOfFile</FlushType>"
+                        "                </Target>\n"
+                        "                <Target>\n"
+                        "                    <Path>testfile2.dat</Path>\n"
+                        "                    <BlockSize>100</BlockSize>\n"
+                        "                    <WriteRatio>84</WriteRatio>\n"
+                        "                    <MemoryMappedIo>true</MemoryMappedIo>\n"
+                        "                    <FlushType>NonVolatileMemory</FlushType>"
+                        "                </Target>\n"
+                        "                <Target>\n"
+                        "                    <Path>testfile3.dat</Path>\n"
+                        "                    <BlockSize>100</BlockSize>\n"
+                        "                    <WriteRatio>84</WriteRatio>\n"
+                        "                    <MemoryMappedIo>true</MemoryMappedIo>\n"
+                        "                    <FlushType>NonVolatileMemoryNoDrain</FlushType>"
+                        "                </Target>\n"
+                        "            </Targets>\n"
+                        "        </TimeSpan>\n"
                         "    </TimeSpans>\n"
                         "</Profile>\n");
 /*
@@ -184,7 +222,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(profile.GetEtwUseCyclesCounter() == false);
 
         vector<TimeSpan> vSpans(profile.GetTimeSpans());
-        VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
+        VERIFY_ARE_EQUAL(vSpans.size(), (size_t)2);
         VERIFY_ARE_EQUAL(vSpans[0].GetDuration(), (UINT32)10);
         VERIFY_ARE_EQUAL(vSpans[0].GetWarmup(), (UINT32)20);
         VERIFY_ARE_EQUAL(vSpans[0].GetCooldown(), (UINT32)30);
@@ -208,6 +246,7 @@ namespace UnitTests
         VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 333);
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == true);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)3344);
@@ -237,6 +276,7 @@ namespace UnitTests
         VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
@@ -267,7 +307,8 @@ namespace UnitTests
         VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableLocalCache);
-        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off); 
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -297,6 +338,7 @@ namespace UnitTests
         VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
         VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
         VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
@@ -315,6 +357,48 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetUseLargePages() == false);
         VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintLow);
         VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::None);
+
+        VERIFY_ARE_EQUAL(vSpans[1].GetDuration(), (UINT32)10);
+        VERIFY_ARE_EQUAL(vSpans[1].GetWarmup(), (UINT32)20);
+        VERIFY_ARE_EQUAL(vSpans[1].GetCooldown(), (UINT32)30);
+        VERIFY_ARE_EQUAL(vSpans[1].GetRandSeed(), (UINT32)40);
+        VERIFY_ARE_EQUAL(vSpans[1].GetThreadCount(), (DWORD)50);
+        VERIFY_ARE_EQUAL(vSpans[1].GetRequestCount(), (DWORD)0);
+        VERIFY_IS_TRUE(vSpans[1].GetDisableAffinity() == true);
+        VERIFY_IS_TRUE(vSpans[1].GetMeasureLatency() == true);
+
+        vTargets = vSpans[1].GetTargets();
+        VERIFY_ARE_EQUAL(vTargets.size(), (size_t)4);
+
+        t = vTargets[0];
+        VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
+        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+
+        // verify FlushViewOfFile
+        t = vTargets[1];
+        VERIFY_IS_TRUE(t.GetPath().compare("testfile1.dat") == 0);
+        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::ViewOfFile);
+
+        // verify RtlFlushNonVolatileMemory
+        t = vTargets[2];
+        VERIFY_IS_TRUE(t.GetPath().compare("testfile2.dat") == 0);
+        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::NonVolatileMemory);
+
+        // verify RtlFlushNonVolatileMemoryNoDrain
+        t = vTargets[3];
+        VERIFY_IS_TRUE(t.GetPath().compare("testfile3.dat") == 0);
+        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain);
     }
 
     void XmlProfileParserUnitTests::Test_ParseFilePrecreateFilesUseMaxSize()
