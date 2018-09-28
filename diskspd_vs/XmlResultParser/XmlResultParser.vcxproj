@@ -150,10 +150,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\XmlResultParser\xmlresultparser.cpp" />
+    <ClCompile Include="..\..\XmlResultParser\XmlResultParser.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\Common\xmlresultparser.h" />
+    <ClInclude Include="..\..\Common\XmlResultParser.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
