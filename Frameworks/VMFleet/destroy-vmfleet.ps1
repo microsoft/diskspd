@@ -29,9 +29,10 @@ SOFTWARE.
 Get-ClusterGroup |? GroupType -eq VirtualMachine | Stop-ClusterGroup
 Get-ClusterGroup |? GroupType -eq VirtualMachine | Remove-ClusterGroup -RemoveResources -Force
 
-# remove all vms
+# remove all vms and the internal vm switch
 icm (Get-ClusterNode) {
     Get-VM | Remove-VM -Confirm:$false -Force
+    Get-VMSwitch -SwitchType Internal | Remove-VMSwitch -Confirm:$False -Force
 }
 
 # delete all vm content from csv
