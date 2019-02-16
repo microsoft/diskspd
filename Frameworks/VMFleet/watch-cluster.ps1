@@ -27,7 +27,7 @@ SOFTWARE.
 
 param(
     $SampleInterval = 2,
-    [ValidateSet("CSV FS","SSB Cache","SBL","S2D BW","Hyper-V LCPU","*")]
+    [ValidateSet("CSV FS","SSB Cache","SBL","S2D BW","Hyper-V LCPU","SMB SRV","*")]
     [string[]] $sets = "CSV FS",
     $log = $null
 )
@@ -275,11 +275,15 @@ $c.Add([CounterColumn]::new("Miss/Sec", "Cluster Storage Hybrid Disks", @("Cache
 $c.Add([CounterColumn]::new("Remap/Sec" ,"Cluster Storage Cache Stores", @("Page ReMap/sec"), 12, '#,#', 1, 'Sum', $false))
 
 $c.Add([CounterColumn]::new("Cache (MB/s)", "Cluster Storage Hybrid Disks", @("Cache Populate Bytes/sec","Cache Write Bytes/sec"), 13, '#,#', 0.000001, 'Sum', $true))
-$c.Add([CounterColumn]::new("Read", "Cluster Storage Hybrid Disks", @("Cache Populate Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
-$c.Add([CounterColumn]::new("Write", "Cluster Storage Hybrid Disks", @("Cache Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("RdPop", "Cluster Storage Hybrid Disks", @("Cache Populate Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("WrPop", "Cluster Storage Hybrid Disks", @("Cache Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
 
 $c.Add([CounterColumn]::new("Destage (MB/s)", "Cluster Storage Cache Stores", @("Destage Bytes/sec"), 15, '#,#', 0.000001, 'Sum', $true))
-$c.Add([CounterColumn]::new("Update (MB/s)", "Cluster Storage Cache Stores", @("Update Bytes/sec"), 11, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Update", "Cluster Storage Cache Stores", @("Update Bytes/sec"), 7, '#,#', 0.000001, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Total (Pgs)", "Cluster Storage Cache Stores", @("Cache Pages"), 11, '0.00E+0', 1, 'Sum', $true))
+$c.Add([CounterColumn]::new("Standby", "Cluster Storage Cache Stores", @("Cache Pages StandBy"), 9, '0.00E+0', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Dirty", "Cluster Storage Cache Stores", @("Cache Pages Dirty"), 9, '0.00E+0', 1, 'Sum', $false))
 
 $c.Seal()
 $allctrs += $c
@@ -297,6 +301,24 @@ $c.Add([CounterColumn]::new("Write", "Cluster Disk Counters", @("Write - Bytes/s
 
 $c.Add([CounterColumn]::new("Read Lat (ms)", "Cluster Disk Counters", @("Read Latency"), 15, '0.000', 1000, 'Average', $true))
 $c.Add([CounterColumn]::new("Write Lat", "Cluster Disk Counters", @("Write Latency"), 15, '0.000', 1000, 'Average', $false))
+
+$c.Seal()
+$allctrs += $c
+
+###
+$c = [CounterColumnSet]::new("SMB SRV")
+
+$c.Add([CounterColumn]::new("IOPS", "SMB Server Shares", @("Data Requests/sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Reads", "SMB Server Shares", @("Read Requests/sec"), 12, '#,#', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("Writes", "SMB Server Shares", @("Write Requests/sec"), 12, '#,#', 1, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Data BW (MB/s)", "SMB Server Shares", @("Data Bytes/sec"), 13, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Read", "SMB Server Shares", @("Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Write", "SMB Server Shares", @("Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+
+$c.Add([CounterColumn]::new("Total BW (MB/s)", "SMB Server Shares", @("Transferred Bytes/sec"), 13, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Rcv", "SMB Server Shares", @("Received Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Snd", "SMB Server Shares", @("Sent Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
 
 $c.Seal()
 $allctrs += $c
@@ -438,7 +460,7 @@ while ($true) {
             $psamples[$node] = $nsamples
         }
     }
-    
+
     # post-process the samples into the counterset, then clear and dump
     $ctrs.DisplayPre($samples, $psamples)
     cls
@@ -449,6 +471,6 @@ while ($true) {
         }
         $drawsep = $true
         $_.Display()
-        
+
     }
 }

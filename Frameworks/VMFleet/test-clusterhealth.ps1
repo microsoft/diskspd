@@ -139,7 +139,7 @@ $fns = {
             # this is always failure.
             if ($nodeg -ne $null -and ($nodeg | group -Property Count | measure).count -ne 1) {
                 write-host -ForegroundColor Red Fail
-                $nodeg | sort -Property Count,Name | ft -autosize
+                $nodeg | sort -Property Name,Count | ft -autosize
             } else {
                 if ($nodeg -ne $null) {
                     # if no enforced count or count is correct, pass
@@ -148,7 +148,7 @@ $fns = {
                     } else {
                         # enforced count not correct
                         write-host -ForegroundColor Red Fail - required count of $f.mustbe not consistent on each node
-                        $nodeg | sort -Property Count,Name | ft -autosize
+                        $nodeg | sort -Property Name,Count | ft -autosize
                     }
                 } elseif ($f.nullpass) {
                     write-host -ForegroundColor Green Pass with none on any node
@@ -346,11 +346,13 @@ $j += start-job -name 'Operational Issues and Storage Jobs' -ArgumentList $Clean
 
 # SMB Connectivity Error Check
 
-$j += start-job -name 'SMB Connectivity Error Check' -InitializationScript $evfns {
+$fltblk = {
 
-    $r = icm (get-clusternode |? State -eq Up) -ArgumentList (get-command get-fltevents) {
+    param( $ev, $warncol, $warn )
 
-        param($fn)
+    $r = icm (get-clusternode |? State -eq Up) -ArgumentList @((get-command get-fltevents), $ev) {
+
+        param($fn, $ev)
 
         set-item -path function:\$($fn.name) -value $fn.definition
 
@@ -371,12 +373,12 @@ $j += start-job -name 'SMB Connectivity Error Check' -InitializationScript $evfn
         $lastday = (1000*60*60*24)
 
         new-object psobject -Property @{
-            'RDMA Last5Min' = (get-fltevents -flt $fltrdma -timedeltams $last5 -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
-            'RDMA LastHour' = (get-fltevents -flt $fltrdma -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
-            'RDMA LastDay' = (get-fltevents -flt $fltrdma -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
-            'TCP Last5Min' = (get-fltevents -flt $flttcp -timedeltams $last5 -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
-            'TCP LastHour' = (get-fltevents -flt $flttcp -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
-            'TCP LastDay' = (get-fltevents -flt $flttcp -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid 30803,30804).count;
+            'RDMA Last5Min' = (get-fltevents -flt $fltrdma -timedeltams $last5 -provider "Microsoft-Windows-SmbClient/Connectivity" -evid $ev).count;
+            'RDMA LastHour' = (get-fltevents -flt $fltrdma -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid $ev).count;
+            'RDMA LastDay' = (get-fltevents -flt $fltrdma -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid $ev).count;
+            'TCP Last5Min' = (get-fltevents -flt $flttcp -timedeltams $last5 -provider "Microsoft-Windows-SmbClient/Connectivity" -evid $ev).count;
+            'TCP LastHour' = (get-fltevents -flt $flttcp -timedeltams $lasthour -provider "Microsoft-Windows-SmbClient/Connectivity" -evid $ev).count;
+            'TCP LastDay' = (get-fltevents -flt $flttcp -timedeltams $lastday -provider "Microsoft-Windows-SmbClient/Connectivity" -evid $ev).count;
         }
     }
 
@@ -384,14 +386,28 @@ $j += start-job -name 'SMB Connectivity Error Check' -InitializationScript $evfn
     $rdmafail = ($r |% { $row = $_; $hdr |? {$_ -like 'RDMA*' } |% { $row.$_ }} | measure -sum).sum -ne 0
 
     if ($rdmafail) {
-        write-host -ForegroundColor Red "WARNING: the SMB Client is receiving RDMA disconnects. This is an error whose root"
-        write-host -ForegroundColor Red "`t cause may be PFC/CoS misconfiguration (RoCE) on hosts or switches, physical"
-        write-host -ForegroundColor Red "`t issues (ex: bad cable), switch or NIC firmware issues, and will lead to severely"
-        write-host -ForegroundColor Red "`t degraded performance. Additional triage is included in other tests."
+        write-host -ForegroundColor $warncol $warn
     }
 
     $r | sort -Property PsComputerName | ft -Property (@('PsComputerName') + $hdr)
 }
+
+$w = @"
+WARNING: the SMB Client is receiving RDMA disconnects. This is an error whose root"
+`t cause may be PFC/CoS misconfiguration (RoCE) on hosts or switches, physical"
+`t issues (ex: bad cable), switch or NIC firmware issues, and will lead to severely"
+`t degraded performance. Additional triage is included in other tests."
+"@
+
+$j += start-job -name 'SMB Connectivity Error Check - Disconnect Failures' -ArgumentList 30804,([ConsoleColor]'Red'),$w -InitializationScript $evfns $fltblk
+
+$w = @"
+WARNING: the SMB Client is receiving RDMA connect errors. This is an error whose root
+`t cause may be actual lack of connectivity or fundamental problems with the RDMA
+`t network fabric. Please inspect especially if in the Last5 bucket.
+"@
+
+$j += start-job -name 'SMB Connectivity Error Check - Connect Failures' -ArgumentList 30803,([ConsoleColor]'Yellow'),$w -InitializationScript $evfns $fltblk
 
 if ($roce) {
 

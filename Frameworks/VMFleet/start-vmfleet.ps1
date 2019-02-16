@@ -25,15 +25,28 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-param([string[]]$group = "*")
+param(
+    [string[]] $group = "*",
+    [int] $number = 0
+    )
 
-icm (get-clusternode |? State -eq Up) -arg $group {
-    param([string[]]$group)
+icm (get-clusternode |? State -eq Up) {
+
+    $n = $using:number
 
     # failed is an unclean offline tbd root causes (can usually be recovered)
 
-    $group |% {
-        Get-ClusterGroup |? OwnerNode -eq $env:COMPUTERNAME |? GroupType -eq VirtualMachine |? Name -like "vm-$_-*" |? {
+    $using:group |% {
+
+        # sorted list of vms by vm number
+        $vms = @(Get-ClusterGroup |? OwnerNode -eq $env:COMPUTERNAME |? GroupType -eq VirtualMachine |? Name -like "vm-$_-*" | sort -Property @{ Expression = { $null = $_.Name -match '-(\d+)$'; [int] $matches[1] }})
+
+        # start limited number, if specified, else all
+        $(if ($n -gt 0 -and $vms.Count -gt $n) {
+            $vms[0..($n - 1)]
+          } else {
+            $vms
+          }) |? {
             $_.State -eq 'Offline' -or $_.State -eq 'Failed'
         } | Start-ClusterGroup
     }

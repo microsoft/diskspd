@@ -25,35 +25,78 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
-# stop and remove clustered vm roles
-Get-ClusterGroup |? GroupType -eq VirtualMachine | Stop-ClusterGroup
-Get-ClusterGroup |? GroupType -eq VirtualMachine | Remove-ClusterGroup -RemoveResources -Force
+param(
+    [string[]] $vms = $null
+    )
 
-# remove all vms and the internal vm switch
-icm (Get-ClusterNode) {
-    Get-VM | Remove-VM -Confirm:$false -Force
-    Get-VMSwitch -SwitchType Internal | Remove-VMSwitch -Confirm:$False -Force
+if ($vms) {
+    write-host -ForegroundColor Yellow "Destroying VM Fleet content for: $vms"
+} else {
+    write-host -ForegroundColor Yellow "Destroying VM Fleet"
 }
 
-# delete all vm content from csv
-$csv = Get-ClusterSharedVolume
+# stop and remove clustered vm roles
+write-host -ForegroundColor Green "Removing VM ClusterGroups"
+Get-ClusterGroup |? GroupType -eq VirtualMachine |? {
+    if ($vms) {
+        $_.Name -in $vms
+    } else {
+        $_.Name -like 'vm-*'
+    }
+} |% {
+    write-host "Removing ClusterGroup for $($_.Name)"
+    $_ | Stop-ClusterGroup
+    $_ | Remove-ClusterGroup -RemoveResources -Force
+}
+
+# remove all vms
+write-host -ForegroundColor Green "Removing VMs"
+icm (Get-ClusterNode) {
+    Get-VM |? {
+        if ($using:vms) {
+            $_.Name -in $using:vms
+        } else {
+            $_.Name -like 'vm-*'
+        }
+    } |% {
+        write-host "Removing VM for $($_.Name) @ $($env:COMPUTERNAME)"
+        $_ | Remove-VM -Confirm:$false -Force
+    }
+
+    # do not remove the internal switch if teardown is partial
+    if ($using:vms -eq $null) {
+        write-host -ForegroundColor Green "Removing Internal VMSwitch"
+        Get-VMSwitch -SwitchType Internal | Remove-VMSwitch -Confirm:$False -Force
+    }
+}
 
 # handle restore cases by mapping the csv to the friendly name of the volume
 # don't rely on the csv name to contain this data
+$csv = Get-ClusterSharedVolume
 
 $vh = @{}
 Get-Volume |? FileSystem -eq CSVFS |% { $vh[$_.Path] = $_ }
 
 $csv |% {
-    $v = $vh[$_.SharedVolumeInfo.Partition.Name] 
+    $v = $vh[$_.SharedVolumeInfo.Partition.Name]
     if ($v -ne $null) {
         $_ | Add-Member -NotePropertyName VDName -NotePropertyValue $v.FileSystemLabel
     }
 }
 
+# now delete content from csvs corresponding to the cluster nodes
+write-host -ForegroundColor Green "Removing CSV content for VMs"
 Get-ClusterNode |% {
     $csv |? VDName -match "$($_.Name)(-.+)?"
 } |% {
-
-    del -Recurse -Force "$($_.sharedvolumeinfo.friendlyvolumename)\vm*"
+    dir -Directory $_.sharedvolumeinfo.friendlyvolumename |? {
+        if ($vms) {
+            $_.Name -in $vms
+        } else {
+            $_.Name -like 'vm-*'
+        }
+    } |% {
+        write-host "Removing CSV content for $($_.BaseName) @ $($_.FullName)"
+        del -Recurse -Force $_.FullName
+    }
 }

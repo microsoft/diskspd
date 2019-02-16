@@ -54,7 +54,7 @@ $h = @{}
 
 dir $pause-* |% {
 
-    $thispause = gc $pause -ErrorAction SilentlyContinue
+    $thispause = gc $_ -ErrorAction SilentlyContinue
     if ($thispause -eq $pauseepoch) {
         $pausetype = 'Current'
     } else {
