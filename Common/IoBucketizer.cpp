@@ -27,6 +27,7 @@ SOFTWARE.
 
 */
 
+#include <stdexcept>
 #include "IoBucketizer.h"
 
 /*
