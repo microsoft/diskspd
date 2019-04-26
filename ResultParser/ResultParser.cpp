@@ -842,6 +842,9 @@ void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogr
            fHasReads ? readMax.c_str() : "N/A",
            fHasWrites ? writeMax.c_str() : "N/A",
            totalLatencyHistogram.GetMax()/1000);
+
+	_Print("\nRead latency histogram bins:  %d", readLatencyHistogram.GetBucketCount());
+	_Print("\nWrite latency histogram bins: %d", writeLatencyHistogram.GetBucketCount());
 }
 
 string ResultParser::ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults)

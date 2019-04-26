@@ -52,9 +52,20 @@ class Histogram
 #ifdef USE_HASH_TABLE
     std::unordered_map<T,unsigned> _data;
 
-    std::map<T,unsigned> _GetSortedData() const
+	using SortedDataCache = std::map<T, unsigned>;
+	using SortedDataCachePtr = std::shared_ptr<SortedDataCache>;
+
+	mutable SortedDataCachePtr _sortedDataCache;
+
+	SortedDataCachePtr _GetSortedData() const
     {
-        return std::map<T,unsigned>(_data.begin(), _data.end());
+		//	Initialize the sorted data cache if this is the first time through, or it was reset by Touch().
+		if (!_sortedDataCache)
+		{
+			_sortedDataCache = std::make_shared<SortedDataCache>(_data.begin(), _data.end());
+		}
+
+        return _sortedDataCache;
     }
 #else
     std::map<T,unsigned> _data;
@@ -64,23 +75,36 @@ class Histogram
         return _data; 
     }
 #endif
-    public: 
+
+	void Touch()
+	{
+		if (_sortedDataCache)
+		{
+			_sortedDataCache.reset();
+		}
+	}
+
+	public:
 
     Histogram()
-        : _samples(0)
+        : _samples(0), _sortedDataCache(nullptr)
     {}
 
     void Clear()
     {
         _data.clear();
         _samples = 0;
+
+		Touch();
     }
 
     void Add(T v)
     { 
         _data[ v ]++;
         _samples++;
-    }
+
+		Touch();
+	}
 
     void Merge(const Histogram<T> &other)
     {
@@ -90,7 +114,9 @@ class Histogram
         }
 
         _samples += other._samples;
-    }
+	
+		Touch();
+	}
 
     T GetMin() const
     { 
@@ -126,7 +152,12 @@ class Histogram
     {
         return _samples;
     }
-    
+
+	unsigned GetBucketCount() const
+	{
+		return _data.size();
+	}
+
     T GetPercentile(double p) const 
     {
         // ISSUE-REVIEW
@@ -139,7 +170,7 @@ class Histogram
         const double target = GetSampleSize() * p;
 
         unsigned cur = 0;
-        for (auto i : _GetSortedData()) 
+        for (auto i : *_GetSortedData()) 
         {
             cur += i.second;
             if (cur >= target)
@@ -219,7 +250,7 @@ class Histogram
         std::ostringstream os;
         os.precision(std::numeric_limits<T>::digits10);
 
-        std::map<T,unsigned> sortedData = _GetSortedData();
+        auto sortedData = _GetSortedData();
 
         auto pos = sortedData.begin(); 
 
@@ -250,7 +281,7 @@ class Histogram
         std::ostringstream os;
         os.precision(std::numeric_limits<T>::digits10);
 
-        for (auto i : _GetSortedData()) 
+        for (auto i : *_GetSortedData()) 
         {
             os << i.first << "," << i.second << std::endl;
         }
@@ -262,7 +293,7 @@ class Histogram
     {
         std::ostringstream os;
 
-        for (auto i : _GetSortedData()) 
+        for (auto i : *_GetSortedData()) 
         {
             os << i.second << " " << i.first << std::endl;
         }

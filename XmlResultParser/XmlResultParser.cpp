@@ -442,6 +442,10 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
         _Print("<TotalMilliseconds>%.3f</TotalMilliseconds>\n", totalLatencyHistogram.GetMax() / 1000);
     }
     _Print("</Bucket>\n");
+
+	_Print("<ReadLatencyHistogramBins>%d</ReadLatencyHistogramBins>\n", readLatencyHistogram.GetBucketCount());
+	_Print("<WriteLatencyHistogramBins>%d</WriteLatencyHistogramBins>\n", writeLatencyHistogram.GetBucketCount());
+
     _Print("</Latency>\n");
 }
 
