@@ -56,7 +56,14 @@ private:
     void _PrintLatencyChart(const Histogram<float>& readLatencyHistogram,
         const Histogram<float>& writeLatencyHistogram,
         const Histogram<float>& totalLatencyHistogram);
-    void _PrintTimeSpan(const TimeSpan &timeSpan);
+
+	void _PrintLatencyBuckets(const Results& results, ConstHistogramBucketListPtr histogramBucketList);
+	void _PrintLatencyBucketsChart(const Histogram<float>& readLatencyHistogram,
+		const Histogram<float>& writeLatencyHistogram,
+		const Histogram<float>& totalLatencyHistogram,
+		ConstHistogramBucketListPtr histogramBucketList);
+		
+	void _PrintTimeSpan(const TimeSpan &timeSpan);
     void _PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fUseRequestsPerFile, bool fCompletionRoutines);
 
     string _sResult;

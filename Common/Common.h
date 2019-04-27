@@ -221,7 +221,9 @@ class Util
 {
 public:
     static string DoubleToStringHelper(const double);
-    template<typename T> static T QuotientCeiling(T dividend, T divisor)
+	static string DoubleToStringHelper(const double d, const char* fmt);
+	static string UnsignedToStringHelper(unsigned d);
+	template<typename T> static T QuotientCeiling(T dividend, T divisor)
     {
         return (dividend + divisor - 1) / divisor;
     }
@@ -1037,7 +1039,7 @@ public:
     }
     vector<ThreadTarget> GetThreadTargets() const { return _vThreadTargets; }
 
-    void SetPrecreated(bool fBool) { _fPrecreated = fBool; }
+	void SetPrecreated(bool fBool) { _fPrecreated = fBool; }
     bool GetPrecreated() const { return _fPrecreated; }
 
     void SetThroughput(DWORD dwThroughputBytesPerMillisecond) { _dwThroughputBytesPerMillisecond = dwThroughputBytesPerMillisecond; }
@@ -1233,6 +1235,9 @@ public:
     string GetXml() const;
     void MarkFilesAsPrecreated(const vector<string> vFiles);
 
+	void SetHistogramBucketList(HistogramBucketListPtr vHistogramBucketList);
+	ConstHistogramBucketListPtr GetHistogramBucketList() const;
+
 private:
     vector<Target> _vTargets;
     UINT32 _ulDuration;
@@ -1248,6 +1253,7 @@ private:
     bool _fMeasureLatency;
     bool _fCalculateIopsStdDev;
     UINT32 _ulIoBucketDurationInMilliseconds;
+	HistogramBucketListPtr _vHistogramBucketList;
 
     friend class UnitTests::ProfileUnitTests;
 };

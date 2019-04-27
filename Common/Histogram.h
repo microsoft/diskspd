@@ -41,6 +41,10 @@ SOFTWARE.
 #undef min
 #undef max
 
+using HistogramBucketList = std::vector<float>;
+using HistogramBucketListPtr = std::shared_ptr<HistogramBucketList>;
+using ConstHistogramBucketListPtr = std::shared_ptr<const HistogramBucketList>;
+
 template<typename T>
 class Histogram
 {
@@ -189,7 +193,29 @@ class Histogram
         return GetPercentile(static_cast<double>(p)/100);
     }
 
-    T GetMedian() const 
+	unsigned GetHitCount(T rangeMin, T rangeMax) const
+	{
+		unsigned hitCount = 0;
+
+		for (auto value : *_GetSortedData())
+		{
+			if (value.first > rangeMin)
+			{
+				if (value.first <= rangeMax)
+				{
+					hitCount += value.second;
+				}
+				else
+				{
+					break;
+				}
+			}
+		}
+
+		return hitCount;
+	}
+
+	T GetMedian() const 
     { 
         return GetPercentile(0.5); 
     }

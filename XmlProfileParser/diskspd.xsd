@@ -222,6 +222,15 @@
 
                     <xs:element name="MeasureLatency" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
 
+                    <!-- float *pfFixedHistogramBuckets -->
+                    <xs:element name="FixedHistogramBuckets" minOccurs="0" maxOccurs="1">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="Bucket" type="xs:float" minOccurs="1" maxOccurs="unbounded"></xs:element>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+
                     <xs:element name="CalculateIopsStdDev" type="xs:boolean" minOccurs="0" maxOccurs="1"></xs:element>
                     <xs:element name="IoBucketDuration" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"></xs:element>
                   </xs:all>

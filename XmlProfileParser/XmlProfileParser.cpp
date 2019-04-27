@@ -33,6 +33,11 @@ SOFTWARE.
 #include <atlbase.h>
 #include <assert.h>
 
+#pragma push_macro("min")
+#pragma push_macro("max")
+#undef min
+#undef max
+
 HRESULT ReportXmlError(
 	const char *pszName,
 	IXMLDOMParseError *pXMLError
@@ -550,7 +555,12 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeS
     {
         hr = _ParseTargets(pXmlNode, pTimeSpan);
     }
-    return hr;
+
+	if (SUCCEEDED(hr))
+	{
+		hr = _ParseFixedHistogramBuckets(pXmlNode, pTimeSpan);
+	}
+	return hr;
 }
 
 HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
@@ -1106,6 +1116,45 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, T
     return hr;
 }
 
+HRESULT XmlProfileParser::_ParseFixedHistogramBuckets(IXMLDOMNode* pXmlNode, TimeSpan* pTimeSpan)
+{
+	CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+	CComVariant query("FixedHistogramBuckets/Bucket");
+	HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
+	if (SUCCEEDED(hr))
+	{
+		long cNodes;
+		hr = spNodeList->get_length(&cNodes);
+		if (SUCCEEDED(hr))
+		{
+			HistogramBucketListPtr histogramBucketList = std::make_shared<HistogramBucketList>();
+			histogramBucketList->push_back(0);
+
+			for (int i = 0; i < cNodes; i++)
+			{
+				CComPtr<IXMLDOMNode> spNode = nullptr;
+				hr = spNodeList->get_item(i, &spNode);
+				if (SUCCEEDED(hr))
+				{
+					BSTR bstrText;
+					hr = spNode->get_text(&bstrText);
+					if (SUCCEEDED(hr))
+					{
+						float nextBucketValue = _wtof((wchar_t*) bstrText);
+						histogramBucketList->push_back(nextBucketValue);
+						SysFreeString(bstrText);
+					}
+				}
+			}
+
+			histogramBucketList->push_back(std::numeric_limits<float>::max());
+
+			pTimeSpan->SetHistogramBucketList(histogramBucketList);
+		}
+	}
+	return hr;
+}
+
 HRESULT XmlProfileParser::_GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT32 *pulValue) const
 {
     CComPtr<IXMLDOMNode> spNode = nullptr;
@@ -1225,3 +1274,6 @@ HRESULT XmlProfileParser::_GetProgress(IXMLDOMDocument2 *pXmlDoc, DWORD *pdwProg
 {
     return _GetDWORD(pXmlDoc, "//Profile/Progress", pdwProgress);
 }
+
+#pragma pop_macro("min")
+#pragma pop_macro("max")

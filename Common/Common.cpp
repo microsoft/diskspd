@@ -231,10 +231,22 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
 
 string Util::DoubleToStringHelper(const double d)
 {
-    char szFloatBuffer[100];
-    sprintf_s(szFloatBuffer, _countof(szFloatBuffer), "%10.3lf", d);
+	return DoubleToStringHelper( d, "%10.3lf");
+}
 
-    return string(szFloatBuffer);
+string Util::DoubleToStringHelper(const double d, const char* fmt)
+{
+	char szFloatBuffer[100];
+	sprintf_s(szFloatBuffer, _countof(szFloatBuffer), fmt, d);
+
+	return string(szFloatBuffer);
+}
+
+string Util::UnsignedToStringHelper(unsigned d)
+{
+	char szBuffer[100];
+	sprintf_s(szBuffer, _countof(szBuffer), "%d", d);
+	return string(szBuffer);
 }
 
 string ThreadTarget::GetXml() const
@@ -601,6 +613,16 @@ void TimeSpan::MarkFilesAsPrecreated(const vector<string> vFiles)
             }
         }
     }
+}
+
+void TimeSpan::SetHistogramBucketList(HistogramBucketListPtr vHistogramBucketList)
+{
+	_vHistogramBucketList = vHistogramBucketList;
+}
+
+ConstHistogramBucketListPtr TimeSpan::GetHistogramBucketList() const
+{
+	return _vHistogramBucketList;
 }
 
 string Profile::GetXml() const

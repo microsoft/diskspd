@@ -48,6 +48,7 @@ private:
     HRESULT _ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget *pThreadTarget);
     HRESULT _ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
     HRESULT _ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
+	HRESULT _ParseFixedHistogramBuckets(IXMLDOMNode* pXmlNode, TimeSpan* pTimeSpan);
 
     HRESULT _GetString(IXMLDOMNode *pXmlNode, const char *pszQuery, string *psValue) const;
     HRESULT _GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT32 *pulValue) const;

@@ -47,6 +47,7 @@ private:
     bool _ParseETWParameter(const char *arg, Profile *pProfile);
     bool _ParseFlushParameter(const char *arg, MemoryMappedIoFlushMode *FlushMode );
     bool _ParseAffinity(const char *arg, TimeSpan *pTimeSpan);
+	bool _ParseHistogramBucketList(const char* arg, TimeSpan* pTimeSpan);
 
     void _DisplayUsageInfo(const char *pszFilename) const;
     bool _GetSizeInBytes(const char *pszSize, UINT64& ullSize) const;

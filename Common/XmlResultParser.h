@@ -40,7 +40,8 @@ private:
     void _PrintETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters);
     void _PrintETWSessionInfo(struct ETWSessionInfo sessionInfo);
     void _PrintLatencyPercentiles(const Results& results);
-    void _PrintTargetResults(const TargetResults& results);
+	void _PrintLatencyBuckets(const Results& results, ConstHistogramBucketListPtr histogramBucketList);
+	void _PrintTargetResults(const TargetResults& results);
     void _PrintTargetLatency(const TargetResults& results);
     void _PrintTargetIops(const IoBucketizer& readBucketizer, const IoBucketizer& writeBucketizer, UINT32 bucketTimeInMs);
     void _PrintOverallIops(const Results& results, UINT32 bucketTimeInMs);

@@ -29,6 +29,11 @@ SOFTWARE.
 
 #include "xmlresultparser.h"
 
+#pragma push_macro("min")
+#pragma push_macro("max")
+#undef min
+#undef max
+
 // TODO: refactor to a single function shared with the ResultParser
 void XmlResultParser::_Print(const char *format, ...)
 {
@@ -449,6 +454,74 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
     _Print("</Latency>\n");
 }
 
+void XmlResultParser::_PrintLatencyBuckets(const Results& results, ConstHistogramBucketListPtr histogramBucketList)
+{
+	Histogram<float> readLatencyHistogram;
+	Histogram<float> writeLatencyHistogram;
+	Histogram<float> totalLatencyHistogram;
+
+	for (const auto& thread : results.vThreadResults)
+	{
+		for (const auto& target : thread.vTargetResults)
+		{
+			readLatencyHistogram.Merge(target.readLatencyHistogram);
+
+			writeLatencyHistogram.Merge(target.writeLatencyHistogram);
+
+			totalLatencyHistogram.Merge(target.writeLatencyHistogram);
+			totalLatencyHistogram.Merge(target.readLatencyHistogram);
+		}
+	}
+
+	_Print("<FixedBucketLatency>\n");
+
+	float rangeMinUsec = 0.0;
+	for (auto rangeMaxMilliSeconds : *histogramBucketList)
+	{
+		//	Histogram data is stored in microseconds but histogramBucketList is in milliseconds, so convert it here.
+		float rangeMinMilliSeconds = rangeMinUsec / 1000.0f;
+		float rangeMaxUsec = rangeMaxMilliSeconds * 1000.0f;
+
+		unsigned readBucketCount = readLatencyHistogram.GetHitCount(rangeMinUsec, rangeMaxUsec);
+		unsigned writeBucketCount = writeLatencyHistogram.GetHitCount(rangeMinUsec, rangeMaxUsec);
+		unsigned totalReadWriteBucketCount = totalLatencyHistogram.GetHitCount(rangeMinUsec, rangeMaxUsec);
+
+		if ((readBucketCount > 0) || (writeBucketCount > 0) || (totalReadWriteBucketCount > 0))
+		{
+			_Print("<Bucket>\n");
+
+			std::string stringBucketTime = (rangeMaxMilliSeconds == std::numeric_limits<float>::max()) ?
+				"Max" : Util::DoubleToStringHelper(rangeMaxMilliSeconds, "%.1lf");
+
+			_Print("<Time>%s</Time>\n", stringBucketTime.c_str());
+
+			if (readBucketCount > 0)
+			{
+				_Print("<ReadCount>%d</ReadCount>\n", readBucketCount);
+			}
+
+			if (writeBucketCount > 0)
+			{
+				_Print("<WriteCount>%d</WriteCount>\n", writeBucketCount);
+			}
+
+			if (totalReadWriteBucketCount > 0)
+			{
+				_Print("<TotalCount>%d</TotalCount>\n", totalReadWriteBucketCount);
+			}
+
+			_Print("</Bucket>\n");
+		}
+
+		rangeMinUsec = rangeMaxUsec;
+	}
+
+	_Print("<ReadLatencyHistogramBins>%d</ReadLatencyHistogramBins>\n", readLatencyHistogram.GetBucketCount());
+	_Print("<WriteLatencyHistogramBins>%d</WriteLatencyHistogramBins>\n", writeLatencyHistogram.GetBucketCount());
+
+	_Print("</FixedBucketLatency>\n");
+}
+
 string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults)
 {
     _sResult.clear();
@@ -480,7 +553,13 @@ string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& 
             if (timeSpan.GetMeasureLatency())
             {
                 _PrintLatencyPercentiles(results);
-            }
+				
+				ConstHistogramBucketListPtr histogramBucketList = timeSpan.GetHistogramBucketList();
+				if (histogramBucketList)
+				{
+					_PrintLatencyBuckets(results, histogramBucketList);
+				}
+			}
 
             if (timeSpan.GetCalculateIopsStdDev())
             {
@@ -524,3 +603,6 @@ string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& 
     _Print("</Results>");
     return _sResult;
 }
+
+#pragma pop_macro("min")
+#pragma pop_macro("max")
