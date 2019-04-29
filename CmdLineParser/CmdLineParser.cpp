@@ -155,12 +155,9 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("                                    -ag0,0,1,2 -ag1,0,1,2 is equivalent.\n");
     printf("  -b<size>[K|M|G]       block size in bytes or KiB/MiB/GiB [default=64K]\n");
     printf("  -B<offs>[K|M|G|b]     base target offset in bytes or KiB/MiB/GiB/blocks [default=0]\n");
-
+	printf("                          (offset from the beginning of the file)\n");
 	printf("  -BL#,#[,#,...]        List of fixed histogram bucket latencies\n");
 	printf("                          Example: -BL0.1,0.2,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,...,120000.0,600000.0\n");
-
-
-	printf("                          (offset from the beginning of the file)\n");
     printf("  -c<size>[K|M|G|b]     create files of the given size.\n");
     printf("                          Size can be stated in bytes or KiB/MiB/GiB/blocks\n");
     printf("  -C<seconds>           cool down time - duration of the test after measurements finished [default=0s].\n");
