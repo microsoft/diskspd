@@ -165,7 +165,8 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
     printf("                          per-target: text output provides IOPs standard deviation, XML provides the full\n");
     printf("                          IOPs time series in addition. [default=1000, 1 second].\n");
     printf("  -d<seconds>           duration (in seconds) to run test [default=10s]\n");
-    printf("  -f<size>[K|M|G|b]     target size - use only the first <size> bytes or KiB/MiB/GiB/blocks of the file/disk/partition,\n");
+	printf("  -dbg                  Output to Windows Debug Console\n");
+	printf("  -f<size>[K|M|G|b]     target size - use only the first <size> bytes or KiB/MiB/GiB/blocks of the file/disk/partition,\n");
     printf("                          for example to test only the first sectors of a disk\n");
     printf("  -f<rst>               open file with one or more additional access hints\n");
     printf("                          r : the FILE_FLAG_RANDOM_ACCESS hint\n");
@@ -727,15 +728,22 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'd':    //duration
             {
-                int x = atoi(arg + 1);
-                if (x > 0)
-                {
-                    timeSpan.SetDuration(x);
-                }
-                else
-                {
-                    fError = true;
-                }
+				if ((*(arg + 1) == 'b') && (*(arg + 2) == 'g'))
+				{
+					pProfile->SetDbgOutput(true);
+				}
+				else
+				{
+					int x = atoi(arg + 1);
+					if (x > 0)
+					{
+						timeSpan.SetDuration(x);
+					}
+					else
+					{
+						fError = true;
+					}
+				}
             }
             break;
 

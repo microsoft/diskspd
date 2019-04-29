@@ -201,6 +201,16 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, HMODULE
                 }
             }
 
+			if (SUCCEEDED(hr))
+			{
+				bool fDbgOutput;
+				hr = _GetDbgOutput(spXmlDoc, &fDbgOutput);
+				if (SUCCEEDED(hr) && (hr != S_FALSE))
+				{
+					pProfile->SetDbgOutput(fDbgOutput);
+				}
+			}
+
             if (SUCCEEDED(hr))
             {
                 string sResultFormat;
@@ -1140,7 +1150,7 @@ HRESULT XmlProfileParser::_ParseFixedHistogramBuckets(IXMLDOMNode* pXmlNode, Tim
 					hr = spNode->get_text(&bstrText);
 					if (SUCCEEDED(hr))
 					{
-						float nextBucketValue = _wtof((wchar_t*) bstrText);
+						float nextBucketValue = static_cast<float>(_wtof((wchar_t*)bstrText));
 						histogramBucketList->push_back(nextBucketValue);
 						SysFreeString(bstrText);
 					}
@@ -1273,6 +1283,11 @@ HRESULT XmlProfileParser::_GetVerbose(IXMLDOMDocument2 *pXmlDoc, bool *pfVerbose
 HRESULT XmlProfileParser::_GetProgress(IXMLDOMDocument2 *pXmlDoc, DWORD *pdwProgress)
 {
     return _GetDWORD(pXmlDoc, "//Profile/Progress", pdwProgress);
+}
+
+HRESULT XmlProfileParser::_GetDbgOutput(IXMLDOMDocument2* pXmlDoc, bool* pfDbgOutput)
+{
+	return _GetBool(pXmlDoc, "//Profile/DbgOutput", pfDbgOutput);
 }
 
 #pragma pop_macro("min")

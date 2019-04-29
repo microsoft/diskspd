@@ -34,6 +34,7 @@ SOFTWARE.
 #include <windows.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <algorithm>
 #include "common.h"
 #include "errors.h"
 #include "CmdLineParser.h"
@@ -41,6 +42,11 @@ SOFTWARE.
 #include "IORequestGenerator.h"
 #include "ResultParser.h"
 #include "XmlResultParser.h"
+
+#pragma push_macro("min")
+#pragma push_macro("max")
+#undef min
+#undef max
 
 /*****************************************************************************/
 // global variables
@@ -56,6 +62,41 @@ static HANDLE g_hEventFinished = NULL;  // event signalled to notify that the ac
 void WINAPI PrintOut(const char *format, va_list args)
 {
     vprintf(format, args);
+}
+
+static const size_t PRINTDBGOUT_BUFFER_SIZE = 4096;
+
+void WINAPI PrintDbgOut(const char* format, va_list args)
+{
+	char staticBuffer[PRINTDBGOUT_BUFFER_SIZE];
+	char* pBuffer = staticBuffer;
+	size_t bufferSize = vsnprintf_s(pBuffer, _countof(staticBuffer), _TRUNCATE, format, args);
+	if (bufferSize == -1)
+	{
+		bufferSize = _vscprintf(format, args) + sizeof('\0');
+		pBuffer = static_cast<char*>(_malloca(bufferSize));
+		if (vsnprintf_s(pBuffer, bufferSize, _TRUNCATE, format, args) == -1)
+		{
+			fprintf(stderr, "Warning: Unable to create PrintDbgOut buffer\n");
+		}
+	}
+	
+	size_t offset = 0;
+	while (offset < bufferSize)
+	{
+		size_t outputSize = std::min((bufferSize - offset), PRINTDBGOUT_BUFFER_SIZE);
+		uint8_t ch = pBuffer[offset + outputSize];
+		pBuffer[offset + outputSize] = '\0';
+		OutputDebugString(pBuffer + offset);
+		pBuffer[offset + outputSize] = ch;
+
+		offset += PRINTDBGOUT_BUFFER_SIZE;
+	}
+
+	if (pBuffer != staticBuffer)
+	{
+		_freea(pBuffer);
+	}
 }
 
 /*****************************************************************************/
@@ -169,8 +210,18 @@ int __cdecl main(int argc, const char* argv[])
         pResultParser = &resultParser;
     }
 
+	PRINTF pPrintOut;
+	if (profile.GetDbgOutput())
+	{
+		pPrintOut = (PRINTF)PrintDbgOut;
+	}
+	else
+	{
+		pPrintOut = (PRINTF)PrintOut;
+	}
+
     IORequestGenerator ioGenerator;
-    if (!ioGenerator.GenerateRequests(profile, *pResultParser, (PRINTF)PrintOut, (PRINTF)PrintError, (PRINTF)PrintOut, &synch))
+    if (!ioGenerator.GenerateRequests(profile, *pResultParser, (PRINTF)pPrintOut, (PRINTF)PrintError, (PRINTF)PrintOut, &synch))
     {
         if (profile.GetResultsFormat() == ResultsFormat::Xml)
         {
@@ -202,3 +253,6 @@ int __cdecl main(int argc, const char* argv[])
 
     return 0;
 }
+
+#pragma pop_macro("min")
+#pragma pop_macro("max")

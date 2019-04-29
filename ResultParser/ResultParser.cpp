@@ -848,8 +848,8 @@ void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogr
            fHasWrites ? writeMax.c_str() : "N/A",
            totalLatencyHistogram.GetMax()/1000);
 
-	_Print("\nRead latency histogram bins:  %d", readLatencyHistogram.GetBucketCount());
-	_Print("\nWrite latency histogram bins: %d", writeLatencyHistogram.GetBucketCount());
+	_Print("Read latency histogram bins:  %d\n", readLatencyHistogram.GetBucketCount());
+	_Print("Write latency histogram bins: %d\n", writeLatencyHistogram.GetBucketCount());
 }
 
 void ResultParser::_PrintLatencyBuckets(const Results& results, ConstHistogramBucketListPtr histogramBucketList)
@@ -880,9 +880,10 @@ void ResultParser::_PrintLatencyBuckets(const Results& results, ConstHistogramBu
 		{
 			std::string path = i.first;
 			_Print("\n%s\n", path.c_str());
-			_PrintLatencyChart(perTargetReadHistogram[path],
+			_PrintLatencyBucketsChart(perTargetReadHistogram[path],
 				perTargetWriteHistogram[path],
-				perTargetTotalHistogram[path]);
+				perTargetTotalHistogram[path],
+				histogramBucketList);
 		}
 	}
 
