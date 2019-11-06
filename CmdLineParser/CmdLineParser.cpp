@@ -534,9 +534,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         if (argv[i][0] != '-' && argv[i][0] != '/')
         {
             iFirstFile = i;
-            Target target;
-            target.SetPath(argv[i]);
-            vTargets.push_back(target);
+			Target target;
+			target.SetPath(argv[i]);
+			vTargets.push_back(target);
         }
     }
 

@@ -181,3 +181,10 @@ UpgradeLog*.htm
 
 # Microsoft Fakes
 FakesAssemblies/
+/.vs/VSWorkspaceState.json
+/.vs/slnx.sqlite
+/.vs/ProjectSettings.json
+/diskspd_CLRclassLibrary/.vs/diskspd_CLRclassLibrary/v15/Solution.VC.db
+/diskspd_CLRclassLibrary/.vs/diskspd_CLRclassLibrary/v15/Browse.VC.db
+/diskspd_vs/.vs/diskspd/v15/Browse.VC.db
+/diskspd_CLRclassLibrary/.gitignore

@@ -795,7 +795,7 @@ public:
 
 extern SystemInformation g_SystemInformation;
 
-struct Synchronization
+struct Synchronization	
 {
     ULONG ulStructSize;     //size of the structure that the caller is aware of (to easier achieve backward compatibility in a future)
     HANDLE hStopEvent;      //an event to be signalled if the scenario is to be stop before time ellapses

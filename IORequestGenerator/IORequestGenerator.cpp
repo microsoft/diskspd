@@ -2097,6 +2097,32 @@ bool IORequestGenerator::_PrecreateFiles(Profile& profile) const
     return fOk;
 }
 
+string IORequestGenerator::GenerateRequests(Profile& profile, IResultParser& resultParser, struct Synchronization *pSynch)
+{
+	bool fOk = _PrecreateFiles(profile);
+	if (fOk)
+	{
+		SystemInformation system;
+		if (profile.Validate(true, &system))
+		{
+			const vector<TimeSpan>& vTimeSpans = profile.GetTimeSpans();
+			vector<Results> vResults(vTimeSpans.size());
+			for (size_t i = 0; fOk && (i < vTimeSpans.size()); i++)
+			{
+				printfv(profile.GetVerbose(), "Generating requests for timespan %u.\n", i + 1);
+				fOk = _GenerateRequestsForTimeSpan(profile, vTimeSpans[i], vResults[i], pSynch);
+			}
+
+			// TODO: show results only for timespans that succeeded
+
+			EtwResultParser::ParseResults(vResults);
+			return resultParser.ParseResults(profile, system, vResults);
+		}
+	}
+
+	return "";
+}
+
 bool IORequestGenerator::GenerateRequests(Profile& profile, IResultParser& resultParser, PRINTF pPrintOut, PRINTF pPrintError, PRINTF pPrintVerbose, struct Synchronization *pSynch)
 {
     g_pfnPrintOut = pPrintOut;
