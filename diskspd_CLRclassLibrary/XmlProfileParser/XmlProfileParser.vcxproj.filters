@@ -28,5 +28,8 @@
     <ClInclude Include="..\..\Common\XmlProfileParser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="diskspd.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
