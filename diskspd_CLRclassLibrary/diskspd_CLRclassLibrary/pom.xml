@@ -18,34 +18,8 @@
 	</repositories>
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.enmotus</groupId>
-	<artifactId>BuildEnvironment</artifactId>
-	<version>1.0.1-SNAPSHOT</version>
-	<name>BuildEnvironment</name>
-	<packaging>pom</packaging>
-	<dependencies>
-		<dependency>
-			<groupId>com.microsoft</groupId>
-			<artifactId>Visual-Studio-Build-Tools</artifactId>
-			<version>16.3.295.19.87</version>
-			<type>exe</type>
-		</dependency>
-		<dependency>
-			<groupId>com.microsoft</groupId>
-			<artifactId>Microsoft-.Net-Framework</artifactId>
-			<version>4.7.1</version>
-			<type>exe</type>
-		</dependency>
-		<dependency>
-			<groupId>com.microsoft</groupId>
-			<artifactId>Microsoft-.Net-Framework-Developer-Pack</artifactId>
-			<version>4.7.1</version>
-			<type>exe</type>
-		</dependency>
-    <dependency>
-      <groupId>com.microsoft</groupId>
-      <artifactId>Windows-Software-Development-Kit</artifactId>
-      <version>10.1.18362.1</version>
-      <type>exe</type>
-    </dependency>
-	</dependencies>
+	<artifactId>diskspd_CLRclassLibrary</artifactId>
+	<version>2.0.21a</version>
+	<name>DiskSPD_CLRclassLibrary</name>
+	<packaging>dll</packaging>
 </project>
