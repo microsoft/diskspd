@@ -1,0 +1,25 @@
+<project>
+	<repositories>
+		<repository>
+			<releases>
+				<enabled>true</enabled>
+				<updatePolicy>always</updatePolicy>
+				<checksumPolicy>warn</checksumPolicy>
+			</releases>
+			<snapshots>
+				<enabled>true</enabled>
+				<updatePolicy>never</updatePolicy>
+				<checksumPolicy>fail</checksumPolicy>
+			</snapshots>
+			<id>enmotus-nexus</id>
+			<name>Enmotus Nexus Repository</name>
+			<url>http://23.99.9.34:8081/repository/maven-releases</url>
+		</repository>
+	</repositories>
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>com.enmotus</groupId>
+	<artifactId>diskspd_CLRclassLibrary</artifactId>
+	<version>2.0.21a</version>
+	<name>DiskSPD_CLRclassLibrary</name>
+	<packaging>dll</packaging>
+</project>
