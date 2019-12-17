@@ -8,7 +8,7 @@ pipeline {
   stages {
     stage('Build DiskSpd Class Library') {
       steps {
-        build(job: '../WindowsBuilder', propagate: true)
+        build '../WindowsBuilder'
         sleep(time: 1, unit: 'HOURS')
         bat(script: 'PATH = %PATH%;"C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\v10.0A\\bin\\NETFX 4.8 Tools"', label: 'Set path for xsd.exe')
         bat(script: 'setx /m Path "%Path%;C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\v10.0A\\bin\\NETFX 4.8 Tools"', label: 'Setting Path')
