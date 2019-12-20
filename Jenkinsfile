@@ -2,15 +2,9 @@ pipeline {
   agent {
     node {
       label 'windows_builder'
-    }
-
-  }
-  stages {
-	stage('build VM'){
-		steps {
-		build 'WindowsBuilder/master'
 		}
 	}
+  stages {
     stage('Build DiskSpd Class Library') {
       steps {
         bat(script: 'PATH = %PATH%;"C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\v10.0A\\bin\\NETFX 4.8 Tools"', label: 'Set path for xsd.exe')
