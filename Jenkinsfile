@@ -7,7 +7,9 @@ pipeline {
   }
   stages {
 	stage('build VM'){
+		steps {
 		build 'WindowsBuilder/master'
+		}
 	}
     stage('Build DiskSpd Class Library') {
       steps {
