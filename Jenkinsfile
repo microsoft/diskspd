@@ -1,3 +1,4 @@
+library identifier: 'EnmotusBuildTools@master', retriever: modernSCM([$class: 'GitSCMSource', credentialsId: 'enmotusdavecohen', gitTool: 'master_git', remote: 'https://github.com/Enmotus-Dave-Cohen/EnmotusBuildTools.git', traits: [[$class: 'jenkins.plugins.git.traits.BranchDiscoveryTrait'], [$class: 'GitToolSCMSourceTrait', gitTool: 'master_git']]])
 pipeline {
   agent {
     node {
@@ -5,6 +6,26 @@ pipeline {
 		}
 	}
   stages {
+    stage('Call Library') {
+		steps {
+			checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], gitTool: 'default', submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'enmotusdavecohen', url: 'https://github.com/Enmotus-Dave-Cohen/WindowsBuilder.git']]]
+			script {
+			InstallWindowsBuilderDependencies.call()
+			}
+                    
+		}
+	stage('Update Version'){
+		steps {
+			script {
+                    if(currentBuild.changeSets.size() > 0) {
+                        echo "version number needs to be updated"
+                    }
+                    else {
+                        echo "there are no changes in this build"
+                    }
+			}
+		}
+	}
     stage('Build DiskSpd Class Library') {
       steps {
         bat(script: 'PATH = %PATH%;"C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\v10.0A\\bin\\NETFX 4.8 Tools"', label: 'Set path for xsd.exe')
