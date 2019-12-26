@@ -12,13 +12,15 @@ pipeline {
 			script {
 			InstallWindowsBuilderDependencies.call()
 			}
-                    
+          }       
 		}
 	stage('Update Version'){
 		steps {
 			script {
                     if(currentBuild.changeSets.size() > 0) {
                         echo "version number needs to be updated"
+						System.setProperty("VERSION_STAMP", versionstamp.get(""))	
+						echo "%VERSION_STAMP%"
                     }
                     else {
                         echo "there are no changes in this build"
