@@ -462,6 +462,17 @@ if ($roce) {
                     '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Errors' = 'Outbnd Err';
                 }
             }
+            "Mellanox ConnectX-5 Adapter" {
+                $pc = @{
+                    '\Mellanox WinOF-2 Diagnostics(_Total)\Responder out of order sequence received' = 'Out Of Order';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Bad CRC Error' = 'Rec BadCRC';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Frame Length Error' = 'Rec FrmLenErr';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Symbol Error' = 'Rec SymlErr';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Received Discarded' = 'Rec Discard';
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Discarded' = 'Outbnd Discard'
+                    '\Mellanox WinOF-2 Port Traffic(_Total)\Packets Outbound Errors' = 'Outbnd Err';
+                }
+            }            
             default {
                 write-host -ForegroundColor Red "Unknown adapter type: $($using:drvdesc)"
             }
