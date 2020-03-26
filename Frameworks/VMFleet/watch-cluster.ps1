@@ -391,16 +391,14 @@ $c.Seal()
 $allctrs += $c
 
 ##
-if ($sets -contains '*') {
-    $ctrs = $allctr1
+if ($Sets.Count -eq 1 -and $Sets[0] -eq '*') {
+    $ctrs = $allctrs
 } else {
-    $ctrs = $sets |% {
+    $ctrs = $Sets |% {
         $s = $_
         $allctrs |? { $_.name -like $s } # allows the SBL* wildcard
     }
 }
-
-# $ctrs = $allctrs |? { $sets[0] -eq '*' -or $sets -contains $_.name }
 
 function start-sample(
     [CounterColumnSet[]] $ctrs,
