@@ -132,6 +132,20 @@ cls
 # this should evenly divide 100%
 $m = [array]::CreateInstance([int],$width)
 
+# which processor counterset should we use?
+# pi is only the root partition if hv is active
+# hvlp is the host physical processors when hv is active
+# via ctrs, hv is active iff hvlp is present and has multiple instances
+$cset = get-counter -ComputerName $ComputerName -ListSet 'Hyper-V Hypervisor Logical Processor' -ErrorAction SilentlyContinue
+if ($cs -ne $null -and $cs.CounterSetType -eq [Diagnostics.PerformanceCounterCategoryType]::MultiInstance) {
+    $cpuset = '\Hyper-V Hypervisor Logical Processor(*)\% Total Run Time'
+} else {
+    $cpuset = '\Processor Information(*)\% Processor Time'
+}
+
+# processor performance counter (turbo/speedstep)
+$ppset = '\Processor Information(_Total)\% Processor Performance'
+
 while ($true) {
 
     # reset measurements & the lines to output
@@ -140,14 +154,21 @@ while ($true) {
         $m[$i] = 0
     }
 
+    # avoid remoting for the local case
+    if ($ComputerName -eq $env:COMPUTERNAME) {
+        $samp = (get-counter -SampleInterval $SampleInterval -Counter $cpuset,$ppset).Countersamples
+    } else {
+        $samp = (get-counter -SampleInterval $SampleInterval -Counter $cpuset,$ppset -ComputerName $ComputerName).Countersamples
+    }
+
     # get all specific instances and count them into appropriate measurement bucket
-    (get-counter -ComputerName $ComputerName -SampleInterval $SampleInterval '\Hyper-V Hypervisor Logical Processor(*)\% Total Run Time','\Processor Information(_Total)\% Processor Performance').Countersamples |% {
+    $samp |% {
     
-        if ($_.Path -match 'Processor Information') {
+        if ($_.Path -like "*$ppset") { # scaling factor for total utility
             $pperf = $_.CookedValue/100
-        } elseif ($_.InstanceName -ne '_Total') {
+        } elseif ($_.InstanceName -notlike '*_Total') { # per cpu: ignore total and per-numa total
             $m[[math]::Floor($_.CookedValue/$div)] += 1
-        } else {
+        } elseif ($_.InstanceName -eq '_Total') { # get total
             $total = $_.CookedValue
         }
     }
@@ -185,4 +206,5 @@ while ($true) {
     # move the cursor to indicate average utilization
     # column number is zero based, width is 1-based
     [console]::SetCursorPosition([math]::Floor(($width - 1)*$total/100),[console]::CursorTop-$legend.Count)
+
 }
