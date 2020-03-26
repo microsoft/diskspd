@@ -275,20 +275,38 @@ icm $nodes -ArgumentList $stopafter,(Get-Command Stop-After) {
                             Write-Host -ForegroundColor Yellow "create vm $name @ metadata path $path with vhd $vhd"
 
                             # create vm if not already done
-                            $o = get-vm -Name $name -ErrorAction SilentlyContinue
+                            # note that when restarting interrupted creation, the vm could have moved elsewhere
+                            # under cluster control.
+
+                            $o = Get-ClusterGroup |? GroupType -eq VirtualMachine |? Name -eq $name
 
                             if (-not $o) {
 
+                                # force re-specialization
                                 $newvm = $true
 
-                                # scrub and re-create the vm metadata path and vhd
-                                rmdir -ErrorAction SilentlyContinue -Recurse $path
-                                $null = mkdir -ErrorAction SilentlyContinue $path
+                                # if the cluster group doesn't exist, we're on the canonical node to create the vm
+                                # if the vm exists, tear it down and refresh
 
-                                if (-not (gi $vhd -ErrorAction SilentlyContinue)) {
-                                    cp $using:basevhd $vhd
+                                $o = get-vm -Name $name -ErrorAction SilentlyContinue
+
+                                if ($o) {
+
+                                    # interrupted between vm creation and role creation; redo it
+                                    write-host "REMOVING vm $name for re-creation"
+
+                                    if ($o.State -ne 'Off') {
+                                        Stop-VM -Name $name -Force -Confirm:$false
+                                    }
+                                    Remove-VM -Name $name -Force -Confirm:$false
+
                                 } else {
-                                    write-host "vm vhd $vhd already exists"
+
+                                    # scrub and re-create the vm metadata path and vhd
+                                    rmdir -ErrorAction SilentlyContinue -Recurse $path
+                                    $null = mkdir -ErrorAction SilentlyContinue $path
+
+                                    cp $using:basevhd $vhd
                                 }
 
                                 #### STOPAFTER
@@ -297,10 +315,10 @@ icm $nodes -ArgumentList $stopafter,(Get-Command Stop-After) {
                                 }
 
                                 if (-not $stop) {
-                                    $o = new-vm -VHDPath $vhd -Generation 2 -SwitchName Internal -Path $path -Name $name
+                                    $o = New-VM -VHDPath $vhd -Generation 2 -SwitchName Internal -Path $path -Name $name
 
                                     # create A1 VM. use set-vmfleet to alter fleet sizing post-creation.
-                                    $o | set-vm -ProcessorCount 1 -MemoryStartupBytes 1.75GB -StaticMemory
+                                    $o | Set-VM -ProcessorCount 1 -MemoryStartupBytes 1.75GB -StaticMemory
 
                                     # do not monitor the internal switch connection; this allows live migration
                                     $o | Get-VMNetworkAdapter| Set-VMNetworkAdapter -NotMonitoredInCluster $true

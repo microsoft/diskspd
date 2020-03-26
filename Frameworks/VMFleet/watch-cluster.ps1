@@ -26,13 +26,14 @@ SOFTWARE.
 #>
 
 param(
+    $Cluster = ".",
     $SampleInterval = 2,
-    [ValidateSet("CSV FS","SSB Cache","SBL","S2D BW","Hyper-V LCPU","SMB SRV","*")]
-    [string[]] $sets = "CSV FS",
-    $log = $null
+    [ValidateSet("CSV FS","SSB Cache","SBL","SBL Local","SBL Remote","SBL*","S2D BW","Hyper-V LCPU","SMB SRV","SMB Transport","*")]
+    [string[]] $Sets = "CSV FS",
+    $Log = $null
 )
 
-if ($log -ne $null) {
+if ($null -ne $log) {
     del -Force $log -ErrorAction SilentlyContinue
 }
 
@@ -40,7 +41,7 @@ function write-log(
     [string[]] $str
     )
 {
-    if ($log -ne $null) {
+    if ($null -ne $log) {
         $str |% {
             "$(get-date) $_" | Out-File -Append -FilePath $log -Width 9999 -Encoding ascii
         }
@@ -171,7 +172,7 @@ class CounterColumnSet {
                     $node
                     foreach ($col in $this.columns) {
                         $s = get-samples $psamples $node $col
-                        if ($s -ne $null) {
+                        if ($null -ne $s) {
                             $a = $s | get-aggregate $col
                             $a
                         } else {
@@ -262,7 +263,10 @@ $c.Add([CounterColumn]::new("Read", "Cluster CSVFS", @("Read Bytes/sec"), 8, '#,
 $c.Add([CounterColumn]::new("Write", "Cluster CSVFS", @("Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
 
 $c.Add([CounterColumn]::new("Read Lat (ms)", "Cluster CSVFS", @("Avg. sec/Read"), 15, '0.000', 1000, 'Average', $true))
-$c.Add([CounterColumn]::new("Write Lat", "Cluster CSVFS", @("Avg. sec/Write"), 15, '0.000', 1000, 'Average', $false))
+$c.Add([CounterColumn]::new("Write", "Cluster CSVFS", @("Avg. sec/Write"), 8, '0.000', 1000, 'Average', $false))
+
+$c.Add([CounterColumn]::new("Read QAvg", "Cluster CSVFS", @("Avg. Read Queue Length"), 11, '0.000', 1, 'Average', $true))
+$c.Add([CounterColumn]::new("Write", "Cluster CSVFS", @("Avg. Write Queue Length"), 8, '0.000', 1, 'Average', $false))
 
 $c.Seal()
 $allctrs += $c
@@ -283,27 +287,43 @@ $c.Add([CounterColumn]::new("Update", "Cluster Storage Cache Stores", @("Update 
 
 $c.Add([CounterColumn]::new("Total (Pgs)", "Cluster Storage Cache Stores", @("Cache Pages"), 11, '0.00E+0', 1, 'Sum', $true))
 $c.Add([CounterColumn]::new("Standby", "Cluster Storage Cache Stores", @("Cache Pages StandBy"), 9, '0.00E+0', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("L0", "Cluster Storage Cache Stores", @("Cache Pages StandBy L0"), 9, '0.00E+0', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("L1", "Cluster Storage Cache Stores", @("Cache Pages StandBy L1"), 9, '0.00E+0', 1, 'Sum', $false))
+$c.Add([CounterColumn]::new("L2", "Cluster Storage Cache Stores", @("Cache Pages StandBy L2"), 9, '0.00E+0', 1, 'Sum', $false))
 $c.Add([CounterColumn]::new("Dirty", "Cluster Storage Cache Stores", @("Cache Pages Dirty"), 9, '0.00E+0', 1, 'Sum', $false))
 
 $c.Seal()
 $allctrs += $c
 
 ###
-$c = [CounterColumnSet]::new("SBL")
 
-$c.Add([CounterColumn]::new("IOPS", "Cluster Disk Counters", @("Read/sec","Writes/sec"), 12, '#,#', 1, 'Sum', $false))
-$c.Add([CounterColumn]::new("Reads", "Cluster Disk Counters", @("Read/sec"), 12, '#,#', 1, 'Sum', $false))
-$c.Add([CounterColumn]::new("Writes", "Cluster Disk Counters", @("Writes/sec"), 12, '#,#', 1, 'Sum', $false))
+foreach ($subset in '','Local','Remote') {
+    $name = 'SBL'
+    $prefix = ''
+    if ($subset.Length) {
+        $name += " $subset"
+        $prefix = "$($subset): "
+    }
 
-$c.Add([CounterColumn]::new("BW (MB/s)", "Cluster Disk Counters", @("Read - Bytes/sec","Write - Bytes/sec"), 13, '#,#', 0.000001, 'Sum', $true))
-$c.Add([CounterColumn]::new("Read", "Cluster Disk Counters", @("Read - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
-$c.Add([CounterColumn]::new("Write", "Cluster Disk Counters", @("Write - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+    $c = [CounterColumnSet]::new($name)
 
-$c.Add([CounterColumn]::new("Read Lat (ms)", "Cluster Disk Counters", @("Read Latency"), 15, '0.000', 1000, 'Average', $true))
-$c.Add([CounterColumn]::new("Write Lat", "Cluster Disk Counters", @("Write Latency"), 15, '0.000', 1000, 'Average', $false))
+    $c.Add([CounterColumn]::new("IOPS", "Cluster Disk Counters", @(($prefix + "Read/sec"),($prefix + "Writes/sec")), 12, '#,#', 1, 'Sum', $false))
+    $c.Add([CounterColumn]::new("Reads", "Cluster Disk Counters", @($prefix + "Read/sec"), 12, '#,#', 1, 'Sum', $false))
+    $c.Add([CounterColumn]::new("Writes", "Cluster Disk Counters", @($prefix + "Writes/sec"), 12, '#,#', 1, 'Sum', $false))
 
-$c.Seal()
-$allctrs += $c
+    $c.Add([CounterColumn]::new("BW (MB/s)", "Cluster Disk Counters", @(($prefix + "Read - Bytes/sec"),($prefix + "Write - Bytes/sec")), 13, '#,#', 0.000001, 'Sum', $true))
+    $c.Add([CounterColumn]::new("Read", "Cluster Disk Counters", @($prefix + "Read - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+    $c.Add([CounterColumn]::new("Write", "Cluster Disk Counters", @($prefix + "Write - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+
+    $c.Add([CounterColumn]::new("Read Lat (ms)", "Cluster Disk Counters", @($prefix + "Read Latency"), 15, '0.000', 1000, 'Average', $true))
+    $c.Add([CounterColumn]::new("Write", "Cluster Disk Counters", @($prefix + "Write Latency"), 8, '0.000', 1000, 'Average', $false))
+
+    $c.Add([CounterColumn]::new("Read QAvg", "Cluster Disk Counters", @($prefix + "Read Avg. Queue Length"), 11, '0.000', 1, 'Average', $true))
+    $c.Add([CounterColumn]::new("Write", "Cluster Disk Counters", @($prefix + "Write Avg. Queue Length"), 8, '0.000', 1, 'Average', $false))
+
+    $c.Seal()
+    $allctrs += $c
+}
 
 ###
 $c = [CounterColumnSet]::new("SMB SRV")
@@ -326,21 +346,21 @@ $allctrs += $c
 ##
 $c = [CounterColumnSet]::new("S2D BW")
 
-$c.Add([CounterColumn]::new("CSV(MB/s)", "Cluster CSVFS", @("Read Bytes/sec","Write Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
-$c.Add([CounterColumn]::new("CSVRead", "Cluster CSVFS", @("Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
-$c.Add([CounterColumn]::new("CSVWrite", "Cluster CSVFS", @("Write Bytes/sec"), 8 ,'#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("CSV (MB/s)", "Cluster CSVFS", @("Read Bytes/sec","Write Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Read", "Cluster CSVFS", @("Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Write", "Cluster CSVFS", @("Write Bytes/sec"), 8 ,'#,#', 0.000001, 'Sum', $false))
 
-$c.Add([CounterColumn]::new("SBL(MB/s)", "Cluster Disk Counters", @("Read - Bytes/sec","Write - Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $true))
-$c.Add([CounterColumn]::new("SBLRead", "Cluster Disk Counters", @("Read - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
-$c.Add([CounterColumn]::new("SBLWrite", "Cluster Disk Counters", @("Write - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("SBL (MB/s)", "Cluster Disk Counters", @("Read - Bytes/sec","Write - Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Read", "Cluster Disk Counters", @("Read - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Write", "Cluster Disk Counters", @("Write - Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
 
-$c.Add([CounterColumn]::new("Disk(MB/s)", "Cluster Storage Hybrid Disks", @("Disk Read Bytes/sec","Disk Write Bytes/sec"), 11, '#,#', 0.000001, 'Sum', $true))
-$c.Add([CounterColumn]::new("DiskRead", "Cluster Storage Hybrid Disks", @("Disk Read Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
-$c.Add([CounterColumn]::new("DiskWrite", "Cluster Storage Hybrid Disks", @("Disk Write Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Cache (MB/s)", "Cluster Storage Hybrid Disks", @("Cache Hit Read Bytes/sec","Cache Write Bytes/sec"), 12, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Read", "Cluster Storage Hybrid Disks", @("Cache Hit Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Write", "Cluster Storage Hybrid Disks", @("Cache Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
 
-$c.Add([CounterColumn]::new("Cache(MB/s)", "Cluster Storage Hybrid Disks", @("Cache Hit Read Bytes/sec","Cache Write Bytes/sec"), 12, '#,#', 0.000001, 'Sum', $true))
-$c.Add([CounterColumn]::new("CacheRead", "Cluster Storage Hybrid Disks", @("Cache Hit Read Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
-$c.Add([CounterColumn]::new("CacheWrite", "Cluster Storage Hybrid Disks", @("Cache Write Bytes/sec"), 10, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Disk (MB/s)", "Cluster Storage Hybrid Disks", @("Disk Read Bytes/sec","Disk Write Bytes/sec"), 11, '#,#', 0.000001, 'Sum', $true))
+$c.Add([CounterColumn]::new("Read", "Cluster Storage Hybrid Disks", @("Disk Read Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
+$c.Add([CounterColumn]::new("Write", "Cluster Storage Hybrid Disks", @("Disk Write Bytes/sec"), 8, '#,#', 0.000001, 'Sum', $false))
 
 $c.Seal()
 $allctrs += $c
@@ -360,7 +380,27 @@ $c.Seal()
 $allctrs += $c
 
 ##
-$ctrs = $allctrs |? { $sets[0] -eq '*' -or $sets -contains $_.name }
+$c = [CounterColumnSet]::new("SMB Transport")
+$c.add([CounterColumn]::new("Read IOPS", "SMB Client Shares", @("Read Requests/sec"), 11, "#,#", 1, 'Sum', $false))
+$c.add([CounterColumn]::new("Write", "SMB Client Shares", @("Write Requests/sec"), 8, "#,#", 1, 'Sum', $false))
+
+$c.add([CounterColumn]::new("RDMA Read", "SMB Client Shares", @("Read Requests transmitted via SMB Direct/sec"), 11, "#,#", 1, 'Sum', $true))
+$c.add([CounterColumn]::new("Write", "SMB Client Shares", @("Write Requests transmitted via SMB Direct/sec"), 8, "#,#", 1, 'Sum', $false))
+
+$c.Seal()
+$allctrs += $c
+
+##
+if ($sets -contains '*') {
+    $ctrs = $allctr1
+} else {
+    $ctrs = $sets |% {
+        $s = $_
+        $allctrs |? { $_.name -like $s } # allows the SBL* wildcard
+    }
+}
+
+# $ctrs = $allctrs |? { $sets[0] -eq '*' -or $sets -contains $_.name }
 
 function start-sample(
     [CounterColumnSet[]] $ctrs,
@@ -375,7 +415,7 @@ function start-sample(
     # some display counter sets may repeat specific values (which is fine)
     $counters = ($ctrs.counters |% { $_ |% { $_ }} | group -NoElement).Name
 
-    icm -AsJob -JobName watch-cluster (Get-ClusterNode) {
+    icm -AsJob -JobName watch-cluster (Get-ClusterNode -Cluster $Cluster) {
 
         # extract countersamples, the object does not survive transfer between powershell sessions
         # extract as a list, not as the individual counters
@@ -389,50 +429,60 @@ function start-sample(
 $j = start-sample $ctrs $SampleInterval
 $downtime = $null
 $skipone = $false
+$loops = 0
+$restart = $false
 
 # hash of most recent samples/node
 $samples = @{}
-Get-ClusterNode |% { $samples[$_.Name] = $null }
+Get-ClusterNode -Cluster $Cluster |% { $samples[$_.Name] = $null }
 
 while ($true) {
 
-    sleep -Seconds $SampleInterval
+    if (-not $restart) {
+        Start-Sleep -Seconds $SampleInterval
 
-    # sleep again if needed to prime the sample pipeline;
-    # there are no samples if we just restarted the sampling jobs
-    if ($skipone) {
-        $skipone = $false
-        continue
+        # sleep again if needed to prime the sample pipeline;
+        # there are no samples if we just restarted the sampling jobs
+        if ($skipone) {
+            $skipone = $false
+            continue
+        }
+
+        # receive updates into the per-node hash
+        foreach ($child in $j.ChildJobs) {
+            $samples[$child.Location] = $child | receive-job -ErrorAction SilentlyContinue
+        }
+
+        # null out downed nodes and remember first time we saw one drop out
+        $down = 0
+        $j.ChildJobs |? State -ne Running |% {
+            $samples[$_.Location] = $null
+            $down += 1
+        }
+        if ($down -and $null -eq $downtime) {
+            $downtime = get-date
+        }
+
+        # if everything is down, we will attempt restart
+        if ($down -eq $j.ChildJobs.Count) {
+            $restart = $true
+            break
+        }
     }
 
-    # receive updates into the per-node hash
-    foreach ($child in $j.ChildJobs) {
-        $samples[$child.Location] = $child | receive-job -ErrorAction SilentlyContinue
-    }
-
-    # null out downed nodes and remember first time we saw one drop out
-    $down = 0
-    $j.ChildJobs |? State -ne Running |% {
-        $samples[$_.Location] = $null
-        $down += 1
-    }
-
-    if ($down -and $downtime -eq $null) {
-        $downtime = get-date
-    }
-
-    $downnow = $false
-    if ($down -eq $j.ChildJobs.Count) {
-        $downnow = $true
-    }
-
-    # if everything is down, or it has been 30 seconds with a downed node, restart the jobs to retry
-    if ($downnow -or ($downtime -ne $null -and ((get-date)-$downtime).totalseconds -gt 30)) {
+    # if explicit restart is required, or it has been 30 seconds with a downed node, restart the jobs to retry
+    if ($restart -or ($null -ne $downtime -and ((get-date)-$downtime).totalseconds -gt 30)) {
         $j | stop-job
         $j | remove-job
-        $j = start-sample $query $SampleInterval
+        $j = start-sample $ctrs $SampleInterval
+
+        # force gc to clear out accumulated job state quickly
+        [system.gc]::Collect()
+
         $downtime = $null
         $skipone = $true
+        $restart = $false
+        continue
     }
 
     # now process samples into per-node hashes of set/ctr containing lists of the
@@ -463,7 +513,7 @@ while ($true) {
 
     # post-process the samples into the counterset, then clear and dump
     $ctrs.DisplayPre($samples, $psamples)
-    cls
+    Clear-Host
     $drawsep = $false
     $ctrs |% {
         if ($drawsep) {
@@ -472,5 +522,12 @@ while ($true) {
         $drawsep = $true
         $_.Display()
 
+    }
+
+    # restart the jobs every so many loops to prevent resource growth
+    $loops += 1
+    if ($loops -gt 100) {
+        $loops = 0
+        $restart = $true
     }
 }
