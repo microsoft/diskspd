@@ -1,11 +1,16 @@
 DiskSpd
 =======
 
-DiskSpd is a storage performance tool from the Windows, Windows Server and Cloud Server Infrastructure engineering teams at Microsoft. Please visit <https://github.com/Microsoft/diskspd/wiki> for updated documentation. The latest update to DiskSpd can be downloaded from <https://aka.ms/diskspd>.
+DiskSpd is a storage performance tool from the Windows, Windows Server and Cloud Server Infrastructure engineering teams at Microsoft. Please visit <https://github.com/Microsoft/diskspd/wiki> for updated documentation.
 
 In addition to the tool itself, this repository hosts measurement frameworks which utilize DiskSpd. The initial example is [VM Fleet](https://github.com/Microsoft/diskspd/blob/master/Frameworks/VMFleet) that was used for the Windows Server 2016 Hyper-Converged Storage Spaces Direct work.
 
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+
+Releases
+========
+
+The [Releases](https://github.com/Microsoft/diskspd/releases) page includes the source code for the most current releases of the DiskSpd tool. The latest update to DiskSpd can be downloaded from <https://github.com/Microsoft/diskspd/releases/download/v2.0.21a/DiskSpd-2.0.21a.zip>.
 
 What's New?
 ===========
