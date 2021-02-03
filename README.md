@@ -10,7 +10,7 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 Releases
 ========
 
-The [Releases](https://github.com/Microsoft/diskspd/releases) page includes **pre-compiled binaries (ZIP) and source code** for the most current releases of the DiskSpd tool. The latest update to DiskSpd can always be downloaded from <https://github.com/Microsoft/diskspd/releases/latest/download/DiskSpd.zip>.
+The [Releases](https://github.com/Microsoft/diskspd/releases) page includes **pre-compiled binaries (ZIP) and source code** for the most current releases of the DiskSpd tool. The latest update to DiskSpd can always be downloaded from <https://github.com/Microsoft/diskspd/releases/latest/download/DiskSpd.zip> (aka <https://aka.ms/getdiskspd>).
 
 What's New?
 ===========
