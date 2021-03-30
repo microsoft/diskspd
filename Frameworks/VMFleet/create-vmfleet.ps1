@@ -139,7 +139,7 @@ icm $nodes -ArgumentList $stopafter,(Get-Command Stop-After) {
         $ok = $ok -band $?
         $null = reg add 'HKLM\tmp\Microsoft\Windows NT\CurrentVersion\WinLogon' /f /v AutoAdminLogon /t REG_DWORD /d 1
         $ok = $ok -band $?
-        $null = reg add 'HKLM\tmp\Microsoft\Windows NT\CurrentVersion\WinLogon' /f /v Shell /t REG_SZ /d 'powershell.exe -noexit -command c:\users\administrator\launch.ps1'
+        $null = reg add 'HKLM\tmp\Microsoft\Windows NT\CurrentVersion\WinLogon' /f /v Shell /t REG_SZ /d "powershell.exe -noexit -command c:\users\$Admin\launch.ps1"
         $ok = $ok -band $?
         $null = [gc]::Collect()
         $ok = $ok -band $?
@@ -159,8 +159,8 @@ icm $nodes -ArgumentList $stopafter,(Get-Command Stop-After) {
             return $ok
         }
 
-        del -Force z:\users\administrator\launch.ps1 -ErrorAction SilentlyContinue
-        gc C:\ClusterStorage\collect\control\launch-template.ps1 |% { $_ -replace '__CONNECTUSER__',$using:connectuser -replace '__CONNECTPASS__',$using:connectpass } > z:\users\administrator\launch.ps1
+        del -Force "z:\users\$Admin\launch.ps1" -ErrorAction SilentlyContinue
+        gc C:\ClusterStorage\collect\control\launch-template.ps1 |% { $_ -replace '__CONNECTUSER__',$using:connectuser -replace '__CONNECTPASS__',$using:connectpass } > "z:\users\$Admin\launch.ps1"
         $ok = $ok -band $?
         if (-not $ok) {
             Write-Error "failed injection of launch.ps1 for $vhdpath"
