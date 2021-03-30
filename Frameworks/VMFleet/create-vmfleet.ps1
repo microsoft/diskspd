@@ -63,6 +63,10 @@ if (Get-ClusterNode |? State -ne Up) {
 if ($nodes.count -eq 0) {
     $nodes = Get-ClusterNode
 }
+# Create Cluster Volume if needed
+# Get-ClusterNode |% { New-Volume -StoragePoolFriendlyName S2D* -FriendlyName $_ -FileSystem CSVFS_ReFS -Size 1Tb }
+# Check if needed Cluster Volumes are present
+Get-ClusterNode |% { try { $null = Get-Volume -FriendlyName $_ } catch { throw "Cannot find Cluster-Volume for NODE $_. Create it with" + 'Get-ClusterNode |% { New-Volume -StoragePoolFriendlyName S2D* -FriendlyName $_ -FileSystem CSVFS_ReFS -Size 1Tb }' } }
 
 # convert to fixed vhd(x) if needed
 if ((get-vhd $basevhd).VhdType -ne 'Fixed' -and $fixedvhd) {
