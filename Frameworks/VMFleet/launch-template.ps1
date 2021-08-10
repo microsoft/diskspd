@@ -26,9 +26,13 @@ SOFTWARE.
 #>
 
 $script = 'c:\run\master.ps1'
+<# prevent password injection errors when password contains ',"",*, etc. #>
+$password = @'
+__CONNECTPASS__
+'@
 
 while ($true) {
     Write-Host -fore Green Launching $script `@ $(Get-Date)
-    & $script -connectuser __CONNECTUSER__ -connectpass __CONNECTPASS__
+    & $script -connectuser __CONNECTUSER__ -connectpass $password
     sleep -Seconds 1
 }
