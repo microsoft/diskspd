@@ -33,7 +33,8 @@ SOFTWARE.
 class XmlResultParser: public IResultParser
 {
 public:
-    string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults);
+    string ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults);
+    string ParseProfile(const Profile& profile);
 
 private:
     void _PrintCpuUtilization(const Results& results, const SystemInformation& system);
@@ -45,7 +46,11 @@ private:
     void _PrintTargetIops(const IoBucketizer& readBucketizer, const IoBucketizer& writeBucketizer, UINT32 bucketTimeInMs);
     void _PrintOverallIops(const Results& results, UINT32 bucketTimeInMs);
     void _PrintIops(const IoBucketizer& readBucketizer, const IoBucketizer& writeBucketizer, UINT32 bucketTimeInMs);
+
     void _Print(const char *format, ...);
+    void _PrintInc(const char *format, ...);
+    void _PrintDec(const char *format, ...);
 
     string _sResult;
+    UINT32 _indent = 0;
 };

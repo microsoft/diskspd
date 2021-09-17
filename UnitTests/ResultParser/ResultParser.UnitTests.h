@@ -41,7 +41,12 @@ namespace UnitTests
     public:
         TEST_CLASS(ResultParserUnitTests);
         TEST_METHOD(Test_ParseResults);
+        TEST_METHOD(Test_ParseProfile);
         TEST_METHOD(Test_PrintTarget);
+        TEST_METHOD(Test_PrintTargetDistributionPct);
+        TEST_METHOD(Test_PrintTargetDistributionAbs);
+        TEST_METHOD(Test_PrintEffectiveDistributionPct);
+        TEST_METHOD(Test_PrintEffectiveDistributionAbs);
     };
 }
 

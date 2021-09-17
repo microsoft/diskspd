@@ -35,6 +35,7 @@ SOFTWARE.
 #include <evntrace.h>
 #include <ctime>
 #include <vector>
+#include <set>
 #include <Winternl.h>   //ntdll.dll
 #include <assert.h>
 #include "Histogram.h"
@@ -54,12 +55,12 @@ TRACELOGGING_DECLARE_PROVIDER(g_hEtwProvider);
 //
 //      Monday, June 16, 2014 12:00:00 AM
 
-#define DISKSPD_RELEASE_TAG ""
-#define DISKSPD_REVISION    "a"
+#define DISKSPD_RELEASE_TAG "-dev"
+#define DISKSPD_REVISION    ""
 
 #define DISKSPD_MAJOR       2
-#define DISKSPD_MINOR       0
-#define DISKSPD_BUILD       21
+#define DISKSPD_MINOR       1
+#define DISKSPD_BUILD       0
 #define DISKSPD_QFE         0
 
 #define DISKSPD_MAJORMINOR_VER_STR(x,y,z) #x "." #y "." #z
@@ -67,13 +68,24 @@ TRACELOGGING_DECLARE_PROVIDER(g_hEtwProvider);
 #define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
 
 #define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2018/9/21"
+#define DISKSPD_DATE_VERSION_STRING "2021/7/1"
 
 #define DISKSPD_TRACE_INFO      0x00000000
 #define DISKSPD_TRACE_RESERVED  0x00000001
 #define DISKSPD_TRACE_IO        0x00000100
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
+
+#define ROUND_DOWN(_x,_alignment)                           \
+    ( ((_x)/(_alignment)) * (_alignment) )
+
+#define ROUND_UP(_x,_alignment)                             \
+    ROUND_DOWN((_x) + (_alignment) - 1, (_alignment))
+
+#define TB (((UINT64)1)<<40)
+#define GB (((UINT64)1)<<30)
+#define MB (((UINT64)1)<<20)
+#define KB (((UINT64)1)<<10)
 
 struct ETWEventCounters
 {
@@ -150,6 +162,7 @@ namespace UnitTests
     class PerfTimerUnitTests;
     class ProfileUnitTests;
     class TargetUnitTests;
+    class IORequestGeneratorUnitTests;
 }
 
 class PerfTimer
@@ -175,6 +188,78 @@ private:
     static UINT64 _GetPerfTimerFreq();
 
     friend class UnitTests::PerfTimerUnitTests;
+};
+
+template <typename T1, typename T2>
+class Range
+{
+public:
+    Range(
+        T1 Source,
+        T1 Span,
+        T2 Dest
+    ) :
+        _src(Source),
+        _span(Span),
+        _dst(Dest)
+    {}
+
+    constexpr bool operator<(const Range<T1, T2>& other) const
+    {
+        //
+        // This is used for comparison of effective distributions during result reporting (dedup).
+        //
+        // A hole with _span == 0 sorts < range with _span > 0
+        // Note that a hole will never match in a find().
+        //
+
+        return _src < other._src ||
+                (_src == other._src &&
+                    (_span < other._span ||
+                    (_span == other._span && _dst < other._dst)));
+    }
+
+    static Range<T1, T2> const * find(const vector<Range<T1, T2>>& v, T1 c)
+    {
+        // v must be sorted
+        size_t s = 0, mid, e = v.size() - 1;
+
+        while (true)
+        {
+            mid = s + ((e - s) / 2);
+            if (c < v[mid]._src) {
+                if (s == mid)
+                {
+                    return nullptr;
+                }
+                e = mid - 1;
+            }
+            else if (c > v[mid]._src + v[mid]._span - 1)
+            {
+                if (e == mid)
+                {
+                    return nullptr;
+                }
+                s = mid + 1;
+            }
+            else
+            {
+                return &v[mid];
+            }
+        }
+    }
+
+    T1 _src, _span;
+    T2 _dst;
+};
+
+typedef Range<UINT32, pair<UINT64, UINT64>> DistributionRange;
+
+enum class DistributionType
+{
+    None,
+    Absolute,
+    Percent
 };
 
 //
@@ -225,12 +310,79 @@ public:
     {
         return (dividend + divisor - 1) / divisor;
     }
+
+    // True if result is <= ratio.
+    // The ratio is on the interval [0, 100]:
+    //  0 will never occur (always false)
+    //  100 will always occur (always true)
+
+    static bool BooleanRatio(Random *pRand, UINT32 ulRatio)
+    {   
+        return ((pRand->Rand32() % 100 + 1) <= ulRatio);
+    }
+
+    //
+    // This is close to strtoul[l], returning the next character to parse in the input string.
+    // This character can be used for validation (should there be any non-integer remaining),
+    // interpreting units that follow the integer (KMGTB), or parsing further (int[<sep><more>])
+    // content in the string.
+    //
+    // Return value indicates whether any integers were parsed to Output. Continue is only modified
+    // on success, and will point to the terminator on completion. False is returned on overflow.
+    //
+
+    template<typename T>
+    static bool ParseUInt(const char* Input, T& Output, const char*& Continue)
+    {
+        T current = 0, last = 0;
+        const char* input = Input;
+        bool parsed = false;
+
+        while (*input)
+        {
+            if (*input < '0' || *input > '9')
+            {
+                break;
+            }
+
+            parsed = true;
+            current *= 10;
+            current += static_cast<T>(*input) - static_cast<T>('0');
+
+            //
+            // Overflow?
+            //
+
+            if (current < last)
+            {
+                parsed = false;
+                break;
+            }
+            last = current;
+
+            input += 1;
+        }
+
+        //
+        // Return if string was consumed
+        // 
+        //
+
+        if (parsed)
+        {
+            Continue = input;
+            Output = current;
+        }
+
+        return parsed;
+    }
 };
 
 // To keep track of which type of IO was issued
 enum class IOOperation
 {
-    ReadIO = 1,
+    Unknown = 0,
+    ReadIO,
     WriteIO
 };
 
@@ -325,6 +477,9 @@ public:
 
     IoBucketizer readBucketizer;
     IoBucketizer writeBucketizer;
+
+    // Effective distribution after applying to target size (if specified/non-empty)
+    vector<DistributionRange> vDistributionRange;
 };
 
 class ThreadResults
@@ -635,6 +790,18 @@ public:
     }
 };
 
+//
+// Helper macros for outputting indented XML. They assume a local variable "indent".
+// Use the Inc form when outputting the opening tag for a multi-line section: <SomeSection>
+// Use Dec for the closing tag: </SomeSection>
+//
+
+// start line with indent
+#define AddXml(s,str)       { (s).append(indent, ' '); (s) += (str); }
+// start new indented section
+#define AddXmlInc(s,str)    { (s).append(indent, ' '); indent += 2; (s) += (str); }
+// end indented section
+#define AddXmlDec(s,str)    { indent -= 2; (s).append(indent, ' '); (s) += (str); }
 
 class SystemInformation
 {
@@ -698,24 +865,26 @@ public:
         return sText;
     }
 
-    string SystemInformation::GetXml() const
+    string SystemInformation::GetXml(UINT32 indent) const
     {
         char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
         int nWritten;
-        string sXml("<System>\n");
+        string sXml;
+
+        AddXmlInc(sXml, "<System>\n");
 
         // identify computer which ran the test
-        sXml += "<ComputerName>";
+        AddXml(sXml, "<ComputerName>");
         sXml += sComputerName;
         sXml += "</ComputerName>\n";
 
         // identify tool version which performed the test
-        sXml += "<Tool>\n";
-        sXml += "<Version>" DISKSPD_NUMERIC_VERSION_STRING "</Version>\n";
-        sXml += "<VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n";
-        sXml += "</Tool>\n";
-
-        sXml += "<RunTime>";
+        AddXmlInc(sXml, "<Tool>\n");
+        AddXml(sXml,"<Version>" DISKSPD_NUMERIC_VERSION_STRING "</Version>\n");
+        AddXml(sXml, "<VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n");
+        AddXmlDec(sXml, "</Tool>\n");
+        
+        AddXml(sXml, "<RunTime>");
         if (StartTime.wYear) {
 
             nWritten = sprintf_s(szBuffer, _countof(szBuffer),
@@ -732,10 +901,10 @@ public:
         sXml += "</RunTime>\n";
 
         // processor topology
-        sXml += "<ProcessorTopology>\n";
+        AddXmlInc(sXml, "<ProcessorTopology>\n");
         for (const auto& g : processorTopology._vProcessorGroupInformation)
         {
-            sXml += "<Group Group=\"";
+            AddXml(sXml, "<Group Group=\"");
             sXml += to_string(g._groupNumber);
             sXml += "\" MaximumProcessors=\"";
             sXml += to_string(g._maximumProcessorCount);
@@ -750,7 +919,7 @@ public:
         }
         for (const auto& n : processorTopology._vProcessorNumaInformation)
         {
-            sXml += "<Node Node=\"";
+            AddXml(sXml, "<Node Node=\"");
             sXml += to_string(n._nodeNumber);
             sXml += "\" Group=\"";
             sXml += to_string(n._groupNumber);
@@ -762,10 +931,10 @@ public:
         }
         for (const auto& s : processorTopology._vProcessorSocketInformation)
         {
-            sXml += "<Socket>\n";
+            AddXmlInc(sXml, "<Socket>\n");
             for (const auto& g : s._vProcessorMasks)
             {
-                sXml += "<Group Group=\"";
+                AddXml(sXml, "<Group Group=\"");
                 sXml += to_string(g.first);
                 sXml += "\" Processors=\"0x";
                 nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g.second);
@@ -773,11 +942,11 @@ public:
                 sXml += szBuffer;
                 sXml += "\"/>\n";
             }
-            sXml += "</Socket>\n";
+            AddXmlDec(sXml, "</Socket>\n");
         }
         for (const auto& h : processorTopology._vProcessorHyperThreadInformation)
         {
-            sXml += "<HyperThread Group=\"";
+            AddXml(sXml, "<HyperThread Group=\"");
             sXml += to_string(h._groupNumber);
             sXml += "\" Processors=\"0x";
             nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", h._processorMask);
@@ -785,9 +954,9 @@ public:
             sXml += szBuffer;
             sXml += "\"/>\n";
         }
-        sXml += "</ProcessorTopology>\n";
 
-        sXml += "</System>\n";
+        AddXmlDec(sXml, "</ProcessorTopology>\n");
+        AddXmlDec(sXml, "</System>\n");
 
         return sXml;
     }
@@ -848,6 +1017,16 @@ enum class MemoryMappedIoFlushMode {
     NonVolatileMemoryNoDrain,
 };
 
+enum class IOMode
+{
+    Unknown,
+    Random,
+    Sequential,
+    Mixed,
+    InterlockedSequential,
+    ParallelAsync
+};
+
 class ThreadTarget
 {
 public:
@@ -864,12 +1043,15 @@ public:
     void SetWeight(UINT32 ulWeight) { _ulWeight = ulWeight; }
     UINT32 GetWeight() const { return _ulWeight; }
 
-    string GetXml() const;
+    string GetXml(UINT32 indent) const;
 
 private:
     UINT32 _ulThread;
     UINT32 _ulWeight;
 };
+
+// Character which leads off a template target definition; e.g. *1, *2
+#define TEMPLATE_TARGET_PREFIX ('*')
 
 class Target
 {
@@ -878,9 +1060,9 @@ public:
     Target() :
         _dwBlockSize(64 * 1024),
         _dwRequestCount(2),
-        _ullBlockAlignment(64 * 1024),
-        _fBlockAlignmentValid(false),
-        _fUseRandomAccessPattern(false),
+        _ullBlockAlignment(0),
+        _ulWriteRatio(0),
+        _ulRandomRatio(0),
         _ullBaseFileOffset(0),
         _fParallelAsyncIO(false),
         _fInterlockedSequential(false),
@@ -896,7 +1078,6 @@ public:
         _fPrecreated(false),
         _ullFileSize(0),
         _ullMaxFileSize(0),
-        _ulWriteRatio(0),
         _fUseBurstSize(false),
         _dwBurstSize(0),
         _dwThinkTime(0),
@@ -910,14 +1091,41 @@ public:
         _ioPriorityHint(IoPriorityHintNormal),
         _ulWeight(1),
         _dwThroughputBytesPerMillisecond(0),
+        _dwThroughputIOPS(0),
         _cbRandomDataWriteBuffer(0),
         _sRandomDataWriteBufferSourcePath(),
-        _pRandomDataWriteBuffer(nullptr)
+        _pRandomDataWriteBuffer(nullptr),
+        _distributionType(DistributionType::None)
     {
     }
 
-    void SetPath(string sPath) { _sPath = sPath; }
-    string GetPath() const { return _sPath; }
+    IOMode GetIOMode() const
+    {
+        if (GetRandomRatio() == 100)
+        {
+            return IOMode::Random;
+        }
+        else if (GetRandomRatio() != 0)
+        {
+            return IOMode::Mixed;
+        }
+        else if (GetUseParallelAsyncIO())
+        {
+            return IOMode::ParallelAsync;
+        }
+        else if (GetUseInterlockedSequential())
+        {
+            return IOMode::InterlockedSequential;
+        }
+        else
+        {
+            return IOMode::Sequential;
+        }
+    }
+
+    void SetPath(const string& sPath) { _sPath = sPath; }
+    void SetPath(const char *pPath) { _sPath = pPath; }
+    const string& GetPath() const { return _sPath; }
 
     void SetBlockSizeInBytes(DWORD dwBlockSize) { _dwBlockSize = dwBlockSize; }
     DWORD GetBlockSizeInBytes() const { return _dwBlockSize; }
@@ -925,20 +1133,25 @@ public:
     void SetBlockAlignmentInBytes(UINT64 ullBlockAlignment)
     {
         _ullBlockAlignment = ullBlockAlignment;
-        _fBlockAlignmentValid = true;
+    }
+    // actual is used in validation to detect unclear/mis-specified intent
+    // like -rs<xx> -s
+    UINT64 GetBlockAlignmentInBytes(bool actual = false) const
+    {
+        return _ullBlockAlignment ? _ullBlockAlignment : (actual ? 0 : _dwBlockSize);
     }
 
-    UINT64 GetBlockAlignmentInBytes() const
-    {
-        return _fBlockAlignmentValid ? _ullBlockAlignment : _dwBlockSize;
-    }
-    
-    void SetUseRandomAccessPattern(bool fBool) { _fUseRandomAccessPattern = fBool; }
-    bool GetUseRandomAccessPattern() const { return _fUseRandomAccessPattern; } 
+    void SetWriteRatio(UINT32 writeRatio) { _ulWriteRatio = writeRatio; }
+    UINT32 GetWriteRatio() const { return _ulWriteRatio; }
+
+    void SetRandomRatio(UINT32 randomRatio) { _ulRandomRatio = randomRatio; }
+    UINT32 GetRandomRatio() const { return _ulRandomRatio; }
 
     void SetBaseFileOffsetInBytes(UINT64 ullBaseFileOffset) { _ullBaseFileOffset = ullBaseFileOffset; }
     UINT64 GetBaseFileOffsetInBytes() const { return _ullBaseFileOffset; }
-    UINT64 GetThreadBaseFileOffsetInBytes(UINT32 ulThreadNo) { return _ullBaseFileOffset + ulThreadNo * _ullThreadStride; }
+    UINT64 GetThreadBaseRelativeOffsetInBytes(UINT32 ulThreadNo) const { return ulThreadNo * _ullThreadStride; }
+    UINT64 GetThreadBaseFileOffsetInBytes(UINT32 ulThreadNo) const { return _ullBaseFileOffset + GetThreadBaseRelativeOffsetInBytes(ulThreadNo); }
+    
 
     void SetSequentialScanHint(bool fBool) { _fSequentialScanHint = fBool; }
     bool GetSequentialScanHint() const { return _fSequentialScanHint; }
@@ -959,10 +1172,10 @@ public:
     TargetCacheMode GetCacheMode() const { return _cacheMode;  }
 
     void SetWriteThroughMode(WriteThroughMode writeThroughMode ) { _writeThroughMode = writeThroughMode; }
-    WriteThroughMode GetWriteThroughMode( ) const { return _writeThroughMode; }
+    WriteThroughMode GetWriteThroughMode() const { return _writeThroughMode; }
 
     void SetMemoryMappedIoMode(MemoryMappedIoMode memoryMappedIoMode ) { _memoryMappedIoMode = memoryMappedIoMode; }
-    MemoryMappedIoMode GetMemoryMappedIoMode( ) const { return _memoryMappedIoMode; }
+    MemoryMappedIoMode GetMemoryMappedIoMode() const { return _memoryMappedIoMode; }
 
     void SetMemoryMappedIoNvToken(PVOID memoryMappedIoNvToken) { _memoryMappedIoNvToken = memoryMappedIoNvToken; }
     PVOID GetMemoryMappedIoNvToken() const { return _memoryMappedIoNvToken; }
@@ -1003,9 +1216,6 @@ public:
     void SetMaxFileSize(UINT64 ullMaxFileSize) { _ullMaxFileSize = ullMaxFileSize; }
     UINT64 GetMaxFileSize() const { return _ullMaxFileSize; }
 
-    void SetWriteRatio(UINT32 ulWriteRatio) { _ulWriteRatio = ulWriteRatio; }
-    UINT32 GetWriteRatio() const { return _ulWriteRatio; }
-
     void SetUseParallelAsyncIO(bool fBool) { _fParallelAsyncIO = fBool; }
     bool GetUseParallelAsyncIO() const { return _fParallelAsyncIO; }
     
@@ -1040,14 +1250,61 @@ public:
     void SetPrecreated(bool fBool) { _fPrecreated = fBool; }
     bool GetPrecreated() const { return _fPrecreated; }
 
-    void SetThroughput(DWORD dwThroughputBytesPerMillisecond) { _dwThroughputBytesPerMillisecond = dwThroughputBytesPerMillisecond; }
+    // Convert units to BPMS. Nonzero value of IOPS indicates originally specified units for display/profile.
+    void SetThroughputIOPS(DWORD dwIOPS)
+    {
+        _dwThroughputIOPS = dwIOPS;
+        _dwThroughputBytesPerMillisecond = (dwIOPS * _dwBlockSize) / 1000;
+    }
+    DWORD GetThroughputIOPS() const { return _dwThroughputIOPS; }
+    void SetThroughput(DWORD dwThroughputBytesPerMillisecond)
+    {
+        _dwThroughputIOPS = 0;
+        _dwThroughputBytesPerMillisecond = dwThroughputBytesPerMillisecond;
+    }
     DWORD GetThroughputInBytesPerMillisecond() const { return _dwThroughputBytesPerMillisecond; }
 
-    string GetXml() const;
+    string GetXml(UINT32 indent) const;
 
     bool AllocateAndFillRandomDataWriteBuffer(Random *pRand);
     void FreeRandomDataWriteBuffer();
     BYTE* GetRandomDataWriteBuffer(Random *pRand);
+
+    void SetDistributionRange(const vector<DistributionRange>& v, DistributionType t)
+    { 
+        _vDistributionRange = v; _distributionType = t;
+
+        // Now place final element if IO% is < 100.
+        // If this is an absolute specification, it will map to zero length here and
+        // conversion will occur at the time of target open to the rest of the target.
+        // For the percent specification we place the final element as-if directly stated,
+        // consuming the tail length.
+        //
+        // This done here so that the stated specification is indeed complete, and not left
+        // for the effective distribution.
+        //
+        // TBD this should be moved to a proper Distribution class.
+
+        const DistributionRange& last = *_vDistributionRange.rbegin();
+        
+        UINT32 ioCur = last._src + last._span;
+        if (ioCur < 100)
+        {
+            UINT64 targetCur = last._dst.first + last._dst.second;
+            if (t == DistributionType::Percent && targetCur < 100)
+            {
+                // tail is available
+                // if tail is not available, this will be caught by validation
+                _vDistributionRange.emplace_back(ioCur, 100 - ioCur, make_pair(targetCur, 100 - targetCur));
+            }
+            else
+            {
+                _vDistributionRange.emplace_back(ioCur, 100 - ioCur, make_pair(targetCur, 0));
+            }
+        }
+    }
+    auto& GetDistributionRange() const { return _vDistributionRange; }
+    auto GetDistributionType() const { return _distributionType; }
 
     DWORD GetCreateFlags(bool fAsync)
     {
@@ -1092,39 +1349,39 @@ private:
     DWORD _dwRequestCount;      // TODO: change the name to something more descriptive (OutstandingRequestCount?)
 
     UINT64 _ullBlockAlignment;
-    bool _fBlockAlignmentValid;
-    bool _fUseRandomAccessPattern;
+    UINT32 _ulWriteRatio;
+    UINT32 _ulRandomRatio;
  
     UINT64 _ullBaseFileOffset;
-    bool _fParallelAsyncIO;
-    bool _fInterlockedSequential;
 
     TargetCacheMode _cacheMode;
     WriteThroughMode _writeThroughMode;
     MemoryMappedIoMode _memoryMappedIoMode;
     MemoryMappedIoFlushMode _memoryMappedIoFlushMode;
     PVOID _memoryMappedIoNvToken;
-    bool _fZeroWriteBuffers;
     DWORD _dwThreadsPerFile;
     UINT64 _ullThreadStride;
 
-    bool _fCreateFile;
-    bool _fPrecreated;          // used to track which files have been created before the first timespan and which have to be created later
     UINT64 _ullFileSize;
     UINT64 _ullMaxFileSize;
 
-    UINT32 _ulWriteRatio;
-    bool _fUseBurstSize;    // TODO: "use" or "enable"?; since burst size must be specified with the think time, one variable should be sufficient
     DWORD _dwBurstSize;     // number of IOs in a burst
     DWORD _dwThinkTime;     // time to pause before issuing the next burst of IOs
-    // TODO: could this be removed by using _dwThinkTime==0?
-    bool _fThinkTime;       //variable to decide whether to think between IOs (default is false)
-    DWORD _dwThroughputBytesPerMillisecond; // set to 0 to disable throttling
 
-    bool _fSequentialScanHint;      // open file with the FILE_FLAG_SEQUENTIAL_SCAN hint
-    bool _fRandomAccessHint;        // open file with the FILE_FLAG_RANDOM_ACCESS hint
-    bool _fTemporaryFileHint;       // open file with the FILE_ATTRIBUTE_TEMPORARY hint
-    bool _fUseLargePages;           // Use large pages for IO buffers
+    DWORD _dwThroughputBytesPerMillisecond; // set to 0 to disable throttling
+    DWORD _dwThroughputIOPS;                // if IOPS are specified they are converted to BPMS but saved for fidelity to XML/output
+
+    bool _fThinkTime:1;             // variable to decide whether to think between IOs (default is false) (removed by using _dwThinkTime==0?)
+    bool _fUseBurstSize:1;          // TODO: "use" or "enable"?; since burst size must be specified with the think time, one variable should be sufficient
+    bool _fZeroWriteBuffers:1;
+    bool _fCreateFile:1;
+    bool _fPrecreated:1;            // used to track which files have been created before the first timespan and which have to be created later
+    bool _fParallelAsyncIO:1;
+    bool _fInterlockedSequential:1;
+    bool _fSequentialScanHint:1;    // open file with the FILE_FLAG_SEQUENTIAL_SCAN hint
+    bool _fRandomAccessHint:1;      // open file with the FILE_FLAG_RANDOM_ACCESS hint
+    bool _fTemporaryFileHint:1;     // open file with the FILE_ATTRIBUTE_TEMPORARY hint
+    bool _fUseLargePages:1;         // Use large pages for IO buffers
 
     UINT64 _cbRandomDataWriteBuffer;            // if > 0, then the write buffer should be filled with random data
     string _sRandomDataWriteBufferSourcePath;   // file that should be used for filling the write buffer (if the path is not available, use a crypto provider)
@@ -1137,6 +1394,9 @@ private:
 
     UINT32 _ulWeight;
     vector<ThreadTarget> _vThreadTargets;
+    
+    vector<DistributionRange> _vDistributionRange;
+    DistributionType _distributionType;
 
     bool _FillRandomDataWriteBuffer(Random *pRand);
 
@@ -1230,7 +1490,7 @@ public:
     void SetIoBucketDurationInMilliseconds(UINT32 ulIoBucketDurationInMilliseconds) { _ulIoBucketDurationInMilliseconds = ulIoBucketDurationInMilliseconds; }
     UINT32 GetIoBucketDurationInMilliseconds() const { return _ulIoBucketDurationInMilliseconds; }
     
-    string GetXml() const;
+    string GetXml(UINT32 indent) const;
     void MarkFilesAsPrecreated(const vector<string> vFiles);
 
 private:
@@ -1270,6 +1530,7 @@ class Profile
 {
 public:
     Profile() :
+        _fProfileOnly(false),
         _fVerbose(false),
         _dwProgress(0),
         _fEtwEnabled(false),
@@ -1301,6 +1562,9 @@ public:
     }
 
     const vector<TimeSpan>& GetTimeSpans() const { return _vTimeSpans; }
+
+    void SetProfileOnly(bool b) { _fProfileOnly = b; }
+    bool GetProfileOnly() const { return _fProfileOnly; }
 
     void SetVerbose(bool b) { _fVerbose = b; }
     bool GetVerbose() const { return _fVerbose; }
@@ -1346,7 +1610,7 @@ public:
     bool GetEtwUseSystemTimer() const   { return _fEtwUseSystemTimer; }
     bool GetEtwUseCyclesCounter() const { return _fEtwUseCyclesCounter; }
 
-    string GetXml() const;
+    string GetXml(UINT32 indent) const;
     bool Validate(bool fSingleSpec, SystemInformation *pSystem = nullptr) const;
     void MarkFilesAsPrecreated(const vector<string> vFiles);
 
@@ -1355,6 +1619,7 @@ private:
 
     vector<TimeSpan>_vTimeSpans;
     bool _fVerbose;
+    bool _fProfileOnly;
     DWORD _dwProgress;
     string _sCmdLine;
     ResultsFormat _resultsFormat;
@@ -1392,8 +1657,6 @@ public:
         _ActivityId()
     {
         memset(&_overlapped, 0, sizeof(OVERLAPPED));
-        _overlapped.Offset = 0xFFFFFFFF;
-        _overlapped.OffsetHigh = 0xFFFFFFFF;
     }
 
     static IORequest *OverlappedToIORequest(OVERLAPPED *pOverlapped)
@@ -1476,6 +1739,9 @@ typedef struct _ACTIVITY_ID {
 
 C_ASSERT(sizeof(ACTIVITY_ID) == sizeof(GUID));
 
+// Forward declaration
+class ThreadTargetState;
+
 class ThreadParameters
 {
 public:
@@ -1493,16 +1759,13 @@ public:
     const TimeSpan *pTimeSpan;
 
     vector<Target> vTargets;
+    vector<ThreadTargetState> vTargetStates;
     vector<HANDLE> vhTargets;
-    vector<UINT64> vullFileSizes;
+
     vector<size_t> vulReadBufferSize;
     vector<BYTE *> vpDataBuffers;
     vector<IORequest> vIORequest;
     vector<ThroughputMeter> vThroughputMeters;
-  
-    // For vanilla sequential access (-s):
-    // Private per-thread offsets, incremented directly, indexed to number of targets
-    vector<UINT64> vullPrivateSequentialOffsets; 
 
     // For interlocked sequential access (-si):
     // Pointers to offsets shared between threads, incremented with an interlocked op
@@ -1555,10 +1818,582 @@ private:
     UINT64 _ullActivityCount;
 };
 
+class ThreadTargetState
+{
+    public:
+
+    ThreadTargetState(
+        const ThreadParameters *pTp,
+        size_t iTarget,
+        UINT64 targetSize
+    ) :
+        _tp(pTp),
+        _target(&_tp->vTargets[iTarget]),
+        _targetSize(targetSize),
+        _mode(_target->GetIOMode()),
+
+        _nextSeqOffset(0),
+        _lastIO(IOOperation::Unknown),
+        _sharedSeqOffset(nullptr),
+        _ioDistributionSpan(100)
+    {
+        //
+        // Now calculate the maximum base-relative file offset that IO can be issued at.
+        //
+        // Trim by max file size limit, and reduce by base file offset.
+        //
+
+        if (_target->GetMaxFileSize())
+        {
+            _relTargetSize = _targetSize > _target->GetMaxFileSize() ? _target->GetMaxFileSize() : _targetSize;
+        }
+        else
+        {
+            _relTargetSize = _targetSize;
+        }
+
+        _relTargetSize -= _target->GetBaseFileOffsetInBytes();
+
+        //
+        // Align relative to the maximum offset at which aligned IO could be issued at.
+        //
+
+        _relTargetSizeAligned = _relTargetSize - _target->GetBlockSizeInBytes();
+        _relTargetSizeAligned -= _relTargetSizeAligned % _target->GetBlockAlignmentInBytes();
+        _relTargetSizeAligned += _target->GetBlockAlignmentInBytes();
+
+        // Grab the shared sequential pointer if this is interlocked.
+
+        if (_mode == IOMode::InterlockedSequential)
+        {
+            assert(_tp->pullSharedSequentialOffsets != nullptr);
+            _sharedSeqOffset = &_tp->pullSharedSequentialOffsets[iTarget];
+        }
+
+        // Convert and finalize the random distribution stated in the target using final bounds.
+
+        switch (_target->GetDistributionType())
+        {
+            case DistributionType::Percent:
+            {
+                UINT32 ioCarry = 0;
+
+                for (auto& r : _target->GetDistributionRange())
+                {
+                    //
+                    // The basic premise is to align the range's bounds to discover whether there are
+                    // any aligned offsets within it. To do this we align DOWN. This moves the adjacent
+                    // end of this range and base of the next in lockstep.
+                    //
+                    // There are two basic branches and three subcases in each:
+                    //
+                    //  * aligned base
+                    //  * unaligned base
+                    //  * and within each
+                    //      * aligned end
+                    //      * unaligned end in same alignment unit
+                    //      * unaligned end in next/following alignment unit
+                    //
+                    //  * aligned/aligned will not move b/e, there will be a positive range
+                    //  * aligned/unaligned-next will move e in step with the following b
+                    //      and there will be a positive range
+                    //  * aligned/unaligned-same will result in b=e after aligning; IO at b is
+                    //      the only possible IO
+                    //
+                    // Unaligned base is more interesting due to degenerate spans, spans where the
+                    // mimimum %range is smaller than the block alignment. For instance, a 100KiB target
+                    // with a 4K alignment has a 1%/1KB minimum and may create these cases.
+                    //
+                    //  * unaligned/aligned aligns base (down) and there is a positive range
+                    //  * unaligned/unaligned-next aligns both down and there is a positive range
+                    //  * unaligned/unaligned-same has no aligned offset in the range; we can detect
+                    //      this by aligning e first and seeing if it is less than unaligned b. there
+                    //      are two subcases:
+                    //      * if the prior range is of zero length, we roll this range's IO% onto it -
+                    //        this combines two or more adjacent degenerate spans
+                    //      * if it was not of zero length, we roll over the IO% to the next/last range
+                    //
+                    //  Now, in the cases where we have a positive range we may still find our aligned
+                    //  base is the same as the prior range - the prior was degenerate and the current
+                    //  is not. In this case we need to round our base up so that we do not share a base.
+                    //  We may then find that our rounded up base makes us degenerate and ... roll over.
+                    //
+                    // Note that this is a closed/open interval. The end offset is NOT a member of this
+                    // range. Consider an 8KiB file divided 50:50 into two 4KB ranges. The first range is
+                    // [0,4KB) and the second is [4KB, 8KB). The IO at offset 4KB belongs to the second
+                    // range, not the first.
+                    //
+
+                    //
+                    // Skip holes. These have the effect of excluding a range of the target by way of
+                    // zero IO will be issued to them; the resulting range is still IO 0-100%.
+                    //
+
+                    if (!r._span) {
+                        continue;
+                    }
+
+                    UINT64 b, e;
+
+                    b = ((r._dst.first * _relTargetSizeAligned) / 100);
+                    // guarantee end (don't lose it in integer math)
+                    if (r._dst.first + r._dst.second == 100)
+                    {
+                        e = _relTargetSizeAligned;
+                    }
+                    else
+                    {
+                        e = b + ((r._dst.second * _relTargetSizeAligned) / 100);
+                    }
+
+                    e = ROUND_DOWN(e, _target->GetBlockAlignmentInBytes());
+
+                    // unaligned/unaligned-same
+                    // carryover IO% to next/last range
+                    if (e < b)
+                    {
+                        // is the prior range degenerate?
+                        // if so, extend its IO%
+                        // note that this cannot happen for the first range, so there
+                        // will always be a range to look at.
+                        if (_vDistributionRange.rbegin()->_dst.first == e)
+                        {
+                            _vDistributionRange.rbegin()->_span += r._span;
+                        }
+                        // carry over to next
+                        else
+                        {
+                            ioCarry = r._span;
+                        }
+
+                        continue;
+                    }
+
+                    b = ROUND_DOWN(b, _target->GetBlockAlignmentInBytes());
+
+                    // Now if b < e (a positive range) we may discover we're adjacent
+                    // to a degenerate range. This is the case of re-aligning b up.
+                    // Note that the degenerate range logically rounds up - this does
+                    // not affect operation, but presents the correct appearance of a
+                    // closed/open interval with respect to the subsequent range.
+                    // Case: -rdpct10/1:10/1
+                    //
+                    // It is possible b == e: this is a case where b was already aligned
+                    // and we're placing a normal degenerate span. No special handling.
+
+                    if (b < e &&
+                        _vDistributionRange.size() &&
+                        _vDistributionRange.rbegin()->_dst.first == b)
+                    {
+
+                        b += _target->GetBlockAlignmentInBytes();
+                        _vDistributionRange.rbegin()->_dst.second += _target->GetBlockAlignmentInBytes();
+
+                        // Now there are two degenerate cases to manage.
+
+                        // if we're dealing with a degenerate at the tail, allow carryover
+                        if (b == _relTargetSizeAligned)
+                        {
+                            ioCarry = r._span;
+                            continue;
+                        }
+
+                        // otherwise, if the range became degenerate in the up-alignment, it must
+                        // combine with the prior degenerate since its logical range is included
+                        // with it.
+                        if (b == e)
+                        {
+                            _vDistributionRange.rbegin()->_span += r._span;
+                            continue;
+                        }
+
+                        // fall through to place re-aligned b/e (non degenerate)
+                    }
+
+                    // prefer to roll IO% to the smaller of prior range/this range
+                    if (ioCarry &&
+                        _vDistributionRange.rbegin()->_span < r._span)
+                    {
+                        _vDistributionRange.rbegin()->_span += ioCarry;
+                        ioCarry = 0;
+                    }
+
+                    _vDistributionRange.emplace_back(
+                        r._src - ioCarry,
+                        r._span + ioCarry,
+                        make_pair(b, e - b));
+
+                    ioCarry = 0;
+                }
+
+                // Apply trailing carryover to final range, extending it.
+                // Guarantee target range extends to aligned size - rollover is always from
+                // a degenerate range we could not place directly. We need to gross up the
+                // actual tail so that the effective correctly spans the open/closed interval
+                // to target size.
+                // -rdpct10/96:10/3:80/1 - the last range is degenerate and needs to roll.
+                if (ioCarry)
+                {
+                    DistributionRange& last = *_vDistributionRange.rbegin();
+
+                    last._span += ioCarry;
+                    last._dst.second = _relTargetSizeAligned - last._dst.first;
+                }
+            }
+            break;
+
+            case DistributionType::Absolute:
+            {
+                UINT32 ioUsed = 0;
+
+                for (auto& r : _target->GetDistributionRange())
+                {
+                    //
+                    // The premise for absolute distributions is similar but without the complication of
+                    // degenerate ranges. The offsets are provided and we only need to push the last to
+                    // the end of the range if it was left open (its length is zero). They do not need to
+                    // be aligned, similar to -T thread stride - this is the caller's dilemma. We already
+                    // know by validation that IO can be issued in the range since any absolute distribution
+                    // with a range < block size would have been rejected.
+                    //
+                    // If the range was not left open we have two cases:
+                    //
+                    //  * the end is within the final range
+                    //  * the end is past it
+                    //
+                    // If the end is within the final range that will again be the caller's dilemma, we'll
+                    // simply trim the length of that range. If it is past it, we will discard the trailing
+                    // ranges and trim the maximum IO% so that they become a proportional specification of the
+                    // IO. For instance, if a 10/10/80 winds up with the 80% not addressable in the file, the
+                    // maximum IO% trims to 20 and it logically becomes a 50:50 split (10:10).
+                    //
+
+                    UINT64 l;
+
+                    //
+                    // Skip holes. These have the effect of excluding a range of the target by way of
+                    // zero IO will be issued to them; the resulting range is still IO 0-100%.
+                    //
+
+                    if (!r._span) {
+                        continue;
+                    }
+
+                    // beyond end? done, with whatever tail IO% not seen
+                    if (r._dst.first >= _relTargetSize)
+                    {
+                        break;
+                    }
+                    // open end or spans end? - set to aligned remainder
+                    else if (r._dst.second == 0 ||
+                             r._dst.first + r._dst.second > _relTargetSize)
+                    {
+                        // ensure tail can accept IO by blocksize - caller has stated this is aligned by
+                        // its specification
+                        l = _relTargetSize - r._dst.first;
+
+                        if (l < _target->GetBlockSizeInBytes())
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        l = r._dst.second;
+                    }
+
+                    _vDistributionRange.emplace_back(
+                        r._src,
+                        r._span,
+                        make_pair(r._dst.first, l));
+
+                    ioUsed += r._span;
+                }
+
+                // reduce the IO distribution to that specified by the ranges consumed.
+                // it is still logically 100%, simply over a range of less than 0-100.
+                _ioDistributionSpan = ioUsed;
+            }
+            break;
+
+            // none
+            default:
+            break;
+        }
+
+        Reset();
+    }
+
+    //
+    // Reset IO pointer/type state to initial conditions.
+    //
+
+    VOID Reset()
+    {
+        //
+        // Now set the (base-relative) initial sequential offset
+        //  * sequential: based on thread stride
+        //  * mixed: randomized starting position
+        //
+        // Note this is repeated for ParallelAsync initialization since sequential offset is in the IO request there.
+        //
+
+        switch (_mode)
+        {
+            case IOMode::Sequential:
+            _nextSeqOffset = _target->GetThreadBaseRelativeOffsetInBytes(_tp->ulRelativeThreadNo);
+            break;
+
+            case IOMode::Mixed:
+            _nextSeqOffset = NextRelativeRandomOffset();
+            break;
+
+            default:
+            break;
+        }
+        
+        _lastIO = NextIOType(true);
+    }
+
+    //
+    // Validate whether this thread can start IO given thread stride and file size.
+    //
+
+    bool CanStart()
+    {
+        UINT64 startingFileOffset = _target->GetThreadBaseRelativeOffsetInBytes(_tp->ulRelativeThreadNo);
+
+        if (startingFileOffset + _target->GetBlockSizeInBytes() > _relTargetSize)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    UINT64 TargetSize()
+    {
+        return _targetSize;
+    }
+
+    VOID InitializeParallelAsyncIORequest(IORequest& ioRequest) const
+    {
+        ULARGE_INTEGER initialOffset;
+
+        //
+        // Bias backwards by one IO so that this functions as the last-IO-issued pointer.
+        // It will be incremented to the expected first offset. Note: absolute offset.
+        //
+
+        initialOffset.QuadPart = _target->GetThreadBaseFileOffsetInBytes(_tp->ulRelativeThreadNo) - _target->GetBlockAlignmentInBytes();
+
+        ioRequest.GetOverlapped()->Offset = initialOffset.LowPart;
+        ioRequest.GetOverlapped()->OffsetHigh = initialOffset.HighPart;
+    }
+
+    UINT64 NextRelativeSeqOffset()
+    {
+        UINT64 nextOffset;
+
+        nextOffset = _nextSeqOffset;
+
+        // Wrap?
+
+        if (nextOffset + _target->GetBlockSizeInBytes() > _relTargetSize) {
+            nextOffset = _target->GetThreadBaseRelativeOffsetInBytes(_tp->ulRelativeThreadNo) % _target->GetBlockAlignmentInBytes();
+        }
+
+        _nextSeqOffset = nextOffset + _target->GetBlockAlignmentInBytes();
+
+        return nextOffset;
+    }
+
+    UINT64 NextRelativeInterlockedSeqOffset()
+    {
+        UINT64 nextOffset;
+
+        // advance shared and rewind to get offset to use
+        nextOffset = InterlockedAdd64((PLONG64) _sharedSeqOffset, _target->GetBlockAlignmentInBytes());
+        nextOffset -=  _target->GetBlockAlignmentInBytes();
+
+        nextOffset %= _relTargetSizeAligned;
+        return nextOffset;
+    }    
+
+    UINT64 NextRelativeParaSeqOffset(IORequest& ioRequest)
+    {
+        ULARGE_INTEGER nextOffset;
+
+        //
+        // Note: parallel seq differs from the other sequential cases in that the
+        // pointer indicates the prior IO, not the offset to issue the current at.
+        // Advance it.
+        //
+
+        nextOffset.LowPart = ioRequest.GetOverlapped()->Offset;
+        nextOffset.HighPart = ioRequest.GetOverlapped()->OffsetHigh;
+        nextOffset.QuadPart -= _target->GetBaseFileOffsetInBytes();     // absolute -> relative
+        nextOffset.QuadPart += _target->GetBlockAlignmentInBytes();     // advance past last IO (!)
+
+        // Wrap?
+
+        if (nextOffset.QuadPart + _target->GetBlockSizeInBytes() > _relTargetSize) {
+            nextOffset.QuadPart = _target->GetThreadBaseRelativeOffsetInBytes(_tp->ulRelativeThreadNo) % _target->GetBlockAlignmentInBytes();
+        }
+
+        return nextOffset.QuadPart;
+    }
+
+    UINT64 NextRelativeRandomOffset() const
+    {
+        UINT64 nextOffset = _tp->pRand->Rand64();
+        nextOffset -= nextOffset % _target->GetBlockAlignmentInBytes();
+
+        //
+        // With a distribution we choose by bucket. Note the bucket is already aligned.
+        //
+
+        if (_vDistributionRange.size())
+        {
+            auto r = DistributionRange::find(_vDistributionRange, _tp->pRand->Rand64() % _ioDistributionSpan);
+            nextOffset %= r->_dst.second;   // trim to range length (already aligned)    
+            nextOffset += r->_dst.first;    // bump by range base
+        }
+        // Full width.
+        else
+        {
+            nextOffset %= _relTargetSizeAligned;
+        }
+
+        return nextOffset;
+    }
+
+    UINT64 NextRelativeMixedOffset(bool& fRandom)
+    {
+        ULARGE_INTEGER nextOffset;
+
+        fRandom = Util::BooleanRatio(_tp->pRand, _target->GetRandomRatio());
+
+        if (fRandom)
+        {
+            nextOffset.QuadPart = NextRelativeRandomOffset();
+            _nextSeqOffset = nextOffset.QuadPart + _target->GetBlockAlignmentInBytes();
+            return nextOffset.QuadPart;
+        }
+
+        return NextRelativeSeqOffset();
+    }
+
+    IOOperation NextIOType(bool newType)
+    {
+        IOOperation ioType;
+
+        if (_target->GetWriteRatio() == 0)
+        {
+           ioType = IOOperation::ReadIO;
+        }
+        else if (_target->GetWriteRatio() == 100)
+        {
+            ioType = IOOperation::WriteIO;
+        }
+        else if (_mode == IOMode::Mixed && !newType)
+        {
+            // repeat last IO if not needing a new choice (e.g., random)
+            ioType = _lastIO;
+        }
+        else 
+        {
+            ioType = Util::BooleanRatio(_tp->pRand, _target->GetWriteRatio()) ? IOOperation::WriteIO : IOOperation::ReadIO;
+            _lastIO = ioType;
+        }
+
+        return ioType;
+    }
+
+    void NextIORequest(IORequest &ioRequest)
+    {
+        bool fRandom = false;
+        ULARGE_INTEGER nextOffset = { 0 };
+
+        switch (_mode)
+        {
+            case IOMode::Sequential:
+            nextOffset.QuadPart = NextRelativeSeqOffset();
+            break;
+
+            case IOMode::InterlockedSequential:
+            nextOffset.QuadPart = NextRelativeInterlockedSeqOffset();
+            break;
+
+            case IOMode::ParallelAsync:
+            nextOffset.QuadPart = NextRelativeParaSeqOffset(ioRequest);
+            break;
+
+            case IOMode::Mixed:
+            nextOffset.QuadPart = NextRelativeMixedOffset(fRandom);
+            break;
+
+            case IOMode::Random:
+            nextOffset.QuadPart = NextRelativeRandomOffset();
+            fRandom = true;
+            break;
+
+            default:
+            assert(false);
+        }
+
+        //
+        //  Convert relative offset to absolute.
+        //
+
+        nextOffset.QuadPart += _target->GetBaseFileOffsetInBytes();
+
+        //
+        // Move offset into the IO request and decide what IO type will be issued.
+        // Mixed which has chosen sequential will repeat last IO type so that seq
+        // runs are homogeneous.
+        //
+
+        ioRequest.GetOverlapped()->Offset = nextOffset.LowPart;
+        ioRequest.GetOverlapped()->OffsetHigh = nextOffset.HighPart;
+        ioRequest.SetIoType(NextIOType(fRandom));
+    }
+
+    private:
+
+    const ThreadParameters *_tp;
+    const Target *_target;
+    const UINT64 _targetSize;   // unmodified absolute target size
+    const IOMode _mode;         // thread's mode of IO operations to this target (Random, Sequential, etc.)
+
+    //
+    // Offsets/sizes are zero-based relative to target base offset, not absolute file offset.
+    // Relative size is trimmed with respect to block alignment, if specified.
+    //
+    
+    UINT64 _relTargetSize;              // relative target size for IO v. base/max
+    UINT64 _relTargetSizeAligned;       // relative target size for zero-base aligned IO (applies to: Random, InterlockedSequential)
+    UINT64 _nextSeqOffset;              // next IO offset to issue sequential IO at (applies to: Sequential & Mixed)
+    volatile UINT64 *_sharedSeqOffset;  // ... for interlocked IO (applies to: InterlockedSequential)
+    IOOperation _lastIO;                // last IO type (applies to: Mixed)
+
+public:
+
+    //
+    // Random distribution (stated in absolute offsets of target)
+    //
+
+    vector<DistributionRange> _vDistributionRange;
+    UINT32 _ioDistributionSpan;
+
+    friend class UnitTests::IORequestGeneratorUnitTests;
+};
+
 class IResultParser
 {
 public:
-    virtual string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults) = 0;
+    virtual string ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults) = 0;
+    virtual string ParseProfile(const Profile& profile) = 0;
 };
 
 class EtwResultParser

@@ -41,5 +41,7 @@ namespace UnitTests
     public:
         TEST_CLASS(XmlResultParserUnitTests);
         TEST_METHOD(Test_ParseResults);
+        TEST_METHOD(Test_ParseProfile);
+        TEST_METHOD(Test_ParseTargetProfile);
     };
 }

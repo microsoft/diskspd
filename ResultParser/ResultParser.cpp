@@ -32,6 +32,7 @@ SOFTWARE.
 #include "ResultParser.h"
 
 #include "common.h"
+#include <functional>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,39 +44,81 @@ SOFTWARE.
 #include <assert.h>
 
 // TODO: refactor to a single function shared with the XmlResultParser
+// Note: not thread safe (avoid 4K on the stack)
+
+static char printBuffer[4096] = {};
+
 void ResultParser::_Print(const char *format, ...)
 {
     assert(nullptr != format);
     va_list listArg;
     va_start(listArg, format);
-    char buffer[4096] = {};
-    vsprintf_s(buffer, _countof(buffer), format, listArg);
+    vsprintf_s(printBuffer, _countof(printBuffer), format, listArg);
     va_end(listArg);
-    _sResult += buffer;
+    _sResult += printBuffer;
 }
 
 /*****************************************************************************/
 // display file size in a user-friendly form
 //
 
-void ResultParser::_DisplayFileSize(UINT64 fsize)
+struct {
+    UINT32 sizeShift;
+    PCHAR name;
+} sizeUnits[] = {
+    { 40, "TiB" },
+    { 30, "GiB" },
+    { 20, "MiB" },
+    { 10, "KiB" }
+};
+
+void ResultParser::_DisplayFileSize(UINT64 fsize, UINT32 align)
 {
-    if( fsize > (UINT64)10*1024*1024*1024 )    // > 10GB
+    char fmtbuf[16];
+
+    for (auto& s : sizeUnits)
     {
-        _Print("%uGiB", fsize >> 30);
+        UINT64 sz = (UINT64)1 << s.sizeShift;
+        if (fsize >= sz)
+        {
+            // Even multiple?
+            if ((fsize & (sz - 1)) == 0)
+            {
+                // note: guaranteed no loss of precision - TB shift guarantees
+                // 0 in high 32bits.
+                UINT32 f = static_cast<UINT32>(fsize >> s.sizeShift);
+
+                if (align)
+                {
+                    // "%<align>u%s"
+                    _snprintf(fmtbuf, sizeof(fmtbuf), "%%%uu%%s", align);
+                    _Print(fmtbuf, f, s.name);
+                }
+                else
+                {
+                    _Print("%u%s", f, s.name);
+                }
+                return;
+            }
+
+            // Not even, use fp.
+            double f = static_cast<double>(fsize) / sz;
+
+            if (align)
+            {
+                // "%<align>.2f%s"
+                _snprintf(fmtbuf, sizeof(fmtbuf), "%%%u.2f%%s", align);
+                _Print(fmtbuf, f, s.name);
+            }
+            else
+            {
+                _Print("%0.2f%s", f, s.name);
+            }
+            return;
+        }
     }
-    else if( fsize > (UINT64)10*1024*1024 )    // > 10MB
-    {
-        _Print("%uMiB", fsize >> 20);
-    }
-    else if( fsize > 10*1024 )                // > 10KB
-    {
-        _Print("%uKiB", fsize >> 10);
-    }
-    else
-    {
-        _Print("%I64uB", fsize);
-    }
+
+    _Print("%I64u", fsize);
 }
 
 /*****************************************************************************/
@@ -108,7 +151,6 @@ void ResultParser::_DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo)
     _Print("Lost Real Time Buffers:\t%lu\n",
         sessionInfo.ulRealTimeBuffersLost);
 }
-
 
 /*****************************************************************************/
 void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters) 
@@ -214,9 +256,212 @@ void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters E
     }
 }
 
+void ResultParser::_PrintDistribution(DistributionType dT, const vector<DistributionRange>& v, char* spc)
+{
+    if (dT == DistributionType::None)
+    {
+        return;
+    }
+
+    switch (dT)
+    {
+        case DistributionType::Percent:
+        for (auto r : v)
+        {
+            _Print(spc);
+            _Print("   %3u%% of IO => [%2I64u%% - %3I64u%%) of target\n",
+                    r._span,
+                    r._dst.first,
+                    r._dst.first + r._dst.second
+                );
+        }
+        break;
+
+        case DistributionType::Absolute:
+        {
+            const DistributionRange& last = *v.rbegin();
+            UINT32 max = last._src + last._span;
+
+            for (auto r : v)
+            {
+                _Print(spc);
+                // If this is a trimmed distribution (target was smaller than its range)
+                // then we need to rescale the trimmed IO% to 100%. Present this with a
+                // single decimal point, which may of course show rounding.
+                if (max < 100)
+                {
+                    _Print("    %0.1f%% of IO => [", (double) 100 * r._span / max);
+                }
+                // Otherwise it is a simple 1-100% and can avoid rounding artifacts.
+                else
+                {
+                    _Print("   %3u%% of IO => [", r._span);
+                }
+                
+                if (r._dst.first == 0)
+                {
+                    // directly emit leading zero so we can align it
+                    _Print("     0   ");
+                }
+                else
+                {
+                    _DisplayFileSize(r._dst.first, 6);
+                }
+                _Print(" - ");
+                // zero length occurs (only) in specification is a placeholder for end of target
+                if (r._dst.second)
+                {
+                    _DisplayFileSize(r._dst.first + r._dst.second, 6);
+                    _Print(")\n");
+                }
+                else
+                {
+                    _Print("      end)\n");
+                }
+            }
+        }
+        break;
+    }
+}
+
+class DistributionRef {
+public:
+
+    DistributionRef(
+        const string &TargetPath,
+        UINT32 Thread        
+    )
+    {
+        set<UINT32> s;
+        s.insert(Thread);
+
+        _mTargetThreads.emplace(make_pair(TargetPath, std::move(s)));
+    }
+
+    //
+    // Map a target to the set of threads referencing it with a given distribution
+    //
+
+    map<string, set<UINT32>> _mTargetThreads;
+};
+
+namespace std
+{
+    template<>
+    struct less<vector<DistributionRange> *>
+    {
+        // map by pointer, compare with the distributions
+        bool operator()(const vector<DistributionRange> * const &lhs, const vector<DistributionRange> * const &rhs) const
+        {
+            return *lhs < *rhs;
+        }
+    };
+}
+
+void ResultParser::_PrintEffectiveDistributions(const Results& results)
+{
+    //
+    // Effective distributions can be distinct per target if they vary in size.
+    // While not possible at the command line, more complex configurations can
+    // in general specify a distribution per target per thread.
+    //
+    // This deduplicates the effective distributions so that we report each
+    // with the target/thread list which used the (equivalent) distribution
+    // to access the target.
+    //
+
+    bool header = false;
+    UINT32 threadNo = 0;
+    map<vector<DistributionRange> *, DistributionRef> m;
+
+    for (auto& thResult : results.vThreadResults)
+    {
+        for (auto& tgtResult : thResult.vTargetResults)
+        {
+            if (tgtResult.vDistributionRange.size())
+            {
+                auto it = m.find(const_cast<vector<DistributionRange> *>(&tgtResult.vDistributionRange));
+                if (it == m.end())
+                {
+                    m.emplace(make_pair(const_cast<vector<DistributionRange> *>(&tgtResult.vDistributionRange),
+                                        DistributionRef(tgtResult.sPath, threadNo)));
+                }
+                else
+                {
+                    it->second._mTargetThreads[tgtResult.sPath].insert(threadNo);
+                }
+            }
+        }
+
+        ++threadNo;
+    }
+
+    for (auto& r : m)
+    {
+        if (!header)
+        {
+            header = true;
+            _Print("\nEffective IO Distributions\n--------------------------\n");
+        }
+        // _Print("target: %s\n", r.second._sTargets.cbegin()->c_str());
+        for (auto& tgt : r.second._mTargetThreads)
+        {
+            _Print("target: %s [thread:", tgt.first.c_str());
+
+            UINT32 lastTh = MAXUINT, runLen = 0;
+
+            for (auto& th : tgt.second)
+            {
+                if (lastTh != MAXUINT)
+                {
+                    // accumulate run?
+                    if (lastTh + 1 == th) {
+                        lastTh = th;
+                        ++runLen;
+                        continue;
+                    }
+
+                    // end of run - indicate ellision of actual runs
+                    if (runLen > 1)
+                    {
+                        _Print(" -");
+                    }
+                    _Print(" %u", lastTh);
+                }
+
+                // start new run (may be singular)
+                _Print(" %u", th);
+                lastTh = th;
+                runLen = 0;
+            }
+
+            // terminate final run
+            if (runLen > 1)
+            {
+                _Print(" -");
+            }
+            // don't show last thread twice if it terminated run
+            if (runLen)
+            {
+                _Print(" %u", lastTh);
+            }
+            
+            _Print("]\n");
+        }
+        _PrintDistribution(DistributionType::Absolute, *r.first, "");
+    }
+}
+
 void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fUseRequestsPerFile, bool fCompletionRoutines)
 {
-    _Print("\tpath: '%s'\n", target.GetPath().c_str());
+    if (target.GetPath().c_str()[0] == TEMPLATE_TARGET_PREFIX)
+    {
+        _Print("\tpath: template target '%s'\n", target.GetPath().c_str() + 1);
+    }
+    else
+    {
+        _Print("\tpath: '%s'\n", target.GetPath().c_str());    
+    }
     _Print("\t\tthink time: %ums\n", target.GetThinkTime());
     _Print("\t\tburst size: %u\n", target.GetBurstSize());
     // TODO: completion routines/ports
@@ -279,11 +524,18 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
 
     if (target.GetRandomDataWriteBufferSize() > 0)
     {
-        _Print("\t\twrite buffer size: %I64u\n", target.GetRandomDataWriteBufferSize());
+        _Print("\t\twrite buffer size: ");
+        _DisplayFileSize(target.GetRandomDataWriteBufferSize());
+        _Print("\n");
+
         string sWriteBufferSourcePath = target.GetRandomDataWriteBufferSourcePath();
-        if (sWriteBufferSourcePath != "")
+        if (!sWriteBufferSourcePath.empty())
         {
             _Print("\t\twrite buffer source: '%s'\n", sWriteBufferSourcePath.c_str());
+        }
+        else
+        {
+            _Print("\t\twrite buffer source: random fill\n");
         }
     }
 
@@ -304,40 +556,58 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     {
         _Print("\t\tperforming mix test (read/write ratio: %d/%d)\n", 100 - target.GetWriteRatio(), target.GetWriteRatio());
     }
-    _Print("\t\tblock size: %d\n", target.GetBlockSizeInBytes());
-    if (target.GetUseRandomAccessPattern())
+
+    _Print("\t\tblock size: ");
+    _DisplayFileSize(target.GetBlockSizeInBytes());
+    _Print("\n");
+
+    if (target.GetRandomRatio() == 100)
     {
         _Print("\t\tusing random I/O (alignment: ");
     }
     else
     {
-        if (target.GetUseInterlockedSequential())
+        if (target.GetRandomRatio() > 0)
         {
-            _Print("\t\tusing interlocked sequential I/O (stride: ");
+            _Print("\t\tusing mixed random/sequential I/O (%u%% random) (alignment/stride: ", target.GetRandomRatio());
         }
         else
         {
-            _Print("\t\tusing sequential I/O (stride: ");
+            _Print("\t\tusing%s sequential I/O (stride: ", target.GetUseInterlockedSequential() ? " interlocked":"");
         }
     }
-    _Print("%I64u)\n", target.GetBlockAlignmentInBytes());
+    _DisplayFileSize(target.GetBlockAlignmentInBytes());
+    _Print(")\n");
 
     if (fUseRequestsPerFile)
     {
-        _Print("\t\tnumber of outstanding I/O operations: %d\n", target.GetRequestCount());
+        _Print("\t\tnumber of outstanding I/O operations per thread: %d\n", target.GetRequestCount());
+    }
+    else
+    {
+        _Print("\t\trelative IO weight in thread pool: %u\n", target.GetWeight());
     }
     
     if (0 != target.GetBaseFileOffsetInBytes())
     {
-        _Print("\t\tbase file offset: %I64u\n", target.GetBaseFileOffsetInBytes());
+        _Print("\t\tbase file offset: ");
+        _DisplayFileSize(target.GetBaseFileOffsetInBytes());
+        _Print("\n");
     }
 
     if (0 != target.GetMaxFileSize())
     {
-        _Print("\t\tmax file size: %I64u\n", target.GetMaxFileSize());
+        _Print("\t\tmax file size: ");
+        _DisplayFileSize(target.GetMaxFileSize());
+        _Print("\n");
     }
 
-    _Print("\t\tthread stride size: %I64u\n", target.GetThreadStrideInBytes());
+    if (0 != target.GetThreadStrideInBytes())
+    {
+        _Print("\t\tthread stride size: ");
+        _DisplayFileSize(target.GetThreadStrideInBytes());
+        _Print("\n");
+    }
 
     if (target.GetSequentialScanHint())
     {
@@ -386,6 +656,21 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     {
         _Print("\t\tIO priority: unknown\n");
     }
+
+    if (target.GetThroughputIOPS())
+    {
+        _Print("\t\tthroughput rate-limited to %u IOPS\n", target.GetThroughputIOPS());
+    }
+    else if (target.GetThroughputInBytesPerMillisecond())
+    {
+        _Print("\t\tthroughput rate-limited to %u B/ms\n", target.GetThroughputInBytesPerMillisecond());
+    }
+
+    if (target.GetDistributionRange().size())
+    {
+        _Print("\t\tIO Distribution:\n");
+        _PrintDistribution(target.GetDistributionType(), target.GetDistributionRange(), "\t\t");
+    }
 }
 
 void ResultParser::_PrintTimeSpan(const TimeSpan& timeSpan)
@@ -406,6 +691,11 @@ void ResultParser::_PrintTimeSpan(const TimeSpan& timeSpan)
         _Print("\tgathering IOPS at intervals of %ums\n", timeSpan.GetIoBucketDurationInMilliseconds());
     }
     _Print("\trandom seed: %u\n", timeSpan.GetRandSeed());
+    if (timeSpan.GetThreadCount() != 0)
+    {
+        _Print("\tthread pool with %u threads\n", timeSpan.GetThreadCount());
+        _Print("\tnumber of outstanding I/O operations per thread: %d\n", timeSpan.GetRequestCount());
+    }
 
     const auto& vAffinity = timeSpan.GetAffinityAssignments();
     if ( vAffinity.size() > 0)
@@ -844,7 +1134,14 @@ void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogr
            totalLatencyHistogram.GetMax()/1000);
 }
 
-string ResultParser::ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults)
+string ResultParser::ParseProfile(const Profile& profile)
+{
+    _sResult.clear();
+    _PrintProfile(profile);
+    return _sResult;    
+}
+
+string ResultParser::ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults)
 {
     _sResult.clear();
 
@@ -887,6 +1184,8 @@ string ResultParser::ParseResults(Profile& profile, const SystemInformation& sys
 
             _Print("proc count:\t\t%u\n", ulProcCount);
             _PrintCpuUtilization(results, system);
+
+            _PrintEffectiveDistributions(results);
 
             _Print("\nTotal IO\n");
             _PrintSection(_SectionEnum::TOTAL, timeSpan, results);

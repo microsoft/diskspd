@@ -249,14 +249,14 @@ namespace UnitTests
         vector<struct IORequestGenerator::CreateFileParameters> v = io._GetFilesToPrecreate(profile);
         VERIFY_ARE_EQUAL(v.size(), (size_t)0);
     }
-    
+
     void IORequestGeneratorUnitTests::Test_GetNextFileOffsetRandom()
     {
-        Target target; 
+        Target target;
         target.SetBaseFileOffsetInBytes(1000);
         target.SetBlockAlignmentInBytes(500);
         target.SetBlockSizeInBytes(1000);
-        target.SetUseRandomAccessPattern(true);
+        target.SetRandomRatio(100);
 
         Random r;
         ThreadParameters tp;
@@ -266,21 +266,26 @@ namespace UnitTests
         TimeSpan timespan;
         tp.pTimeSpan = &timespan;
 
-        tp.vullPrivateSequentialOffsets.push_back(0);
-        tp.vullFileSizes.push_back(3000);
+        ThreadTargetState tts(&tp, 0, 3000);
+        IORequest ior(tp.pRand);
+
+        ULARGE_INTEGER nextOffset;
 
         for( int i = 0; i < 10; ++i )
         {
-            UINT64 nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, 0);
-            VERIFY_IS_GREATER_THAN_OR_EQUAL(nextOffset, 1000);
-            VERIFY_IS_LESS_THAN_OR_EQUAL(nextOffset, 2000);
-            VERIFY_ARE_EQUAL(nextOffset % 500, 0);
+            tts.NextIORequest(ior);
+            nextOffset.LowPart = ior.GetOverlapped()->Offset;
+            nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+
+            VERIFY_IS_GREATER_THAN_OR_EQUAL(nextOffset.QuadPart, 1000);
+            VERIFY_IS_LESS_THAN_OR_EQUAL(nextOffset.QuadPart, 2000);
+            VERIFY_ARE_EQUAL(nextOffset.QuadPart % 500, 0);
         }
     }
-    
+
     void IORequestGeneratorUnitTests::Test_GetNextFileOffsetSequential()
     {
-        Target target; 
+        Target target;
         target.SetBaseFileOffsetInBytes(1000);
         target.SetBlockAlignmentInBytes(500);
         target.SetBlockSizeInBytes(1000);
@@ -293,24 +298,32 @@ namespace UnitTests
         TimeSpan timespan;
         tp.pTimeSpan = &timespan;
 
-        tp.vullPrivateSequentialOffsets.push_back(0);
-        tp.vullFileSizes.push_back(3000);
+        ThreadTargetState tts(&tp, 0, 3000);
+        IORequest ior(tp.pRand);
 
-        UINT64 nextOffset;
+        ULARGE_INTEGER nextOffset;
 
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
-        VERIFY_ARE_EQUAL(nextOffset, 1000);
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, 0);
-        VERIFY_ARE_EQUAL(nextOffset, 1500);
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, 0);
-        VERIFY_ARE_EQUAL(nextOffset, 2000);
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, 0);
-        VERIFY_ARE_EQUAL(nextOffset, 1000);
+        tts.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 1000);
+        tts.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 1500);
+        tts.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 2000);
+        tts.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 1000);
     }
-    
+
     void IORequestGeneratorUnitTests::Test_GetNextFileOffsetInterlockedSequential()
     {
-        Target target; 
+        Target target;
         target.SetBaseFileOffsetInBytes(1000);
         target.SetBlockAlignmentInBytes(500);
         target.SetBlockSizeInBytes(1000);
@@ -331,31 +344,44 @@ namespace UnitTests
 
         TimeSpan timespan;
         timespan.SetThreadCount(2);
-        
+
         tp1.pTimeSpan = &timespan;
         tp2.pTimeSpan = &timespan;
 
-        tp1.vullFileSizes.push_back(3000);
-        tp2.vullFileSizes.push_back(3000);
+        ThreadTargetState tts1(&tp1, 0, 3000);
+        ThreadTargetState tts2(&tp2, 0, 3000);
+        IORequest ior(tp1.pRand);
 
-        UINT64 nextOffset;
+        ULARGE_INTEGER nextOffset;
 
         // begin at base
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp1, 0, FIRST_OFFSET);
-        VERIFY_ARE_EQUAL(nextOffset, 1000);
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp1, 0, 0);
-        VERIFY_ARE_EQUAL(nextOffset, 1500);
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp2, 0, FIRST_OFFSET);
-        VERIFY_ARE_EQUAL(nextOffset, 2000);
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp1, 0, 0);
-        VERIFY_ARE_EQUAL(nextOffset, 1000);
-        nextOffset = IORequestGenerator::GetNextFileOffset(tp2, 0, 0);
-        VERIFY_ARE_EQUAL(nextOffset, 1500);
+        // thread 2 jumps in and continues the pattern (despite FIRST_OFFSET)
+        // note that blocksize is 1000, so we loop back at 2000
+        tts1.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 1000);
+        tts1.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 1500);
+        tts2.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 2000);
+        tts1.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 1000);
+        tts2.NextIORequest(ior);
+        nextOffset.LowPart = ior.GetOverlapped()->Offset;
+        nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+        VERIFY_ARE_EQUAL(nextOffset.QuadPart, 1500);
     }
 
     void IORequestGeneratorUnitTests::Test_GetNextFileOffsetParallelAsyncIO()
     {
-        Target target; 
+        Target target;
         target.SetBaseFileOffsetInBytes(1000);
         target.SetBlockAlignmentInBytes(500);
         target.SetBlockSizeInBytes(1000);
@@ -369,20 +395,23 @@ namespace UnitTests
         TimeSpan timespan;
         tp.pTimeSpan = &timespan;
 
-        tp.vullPrivateSequentialOffsets.push_back(0);
-        tp.vullFileSizes.push_back(3000);
+        ThreadTargetState tts(&tp, 0, 3000);
+        IORequest ior(tp.pRand);
 
-        UINT64 nextOffset;
+        ULARGE_INTEGER nextOffset;
 
         {
             UINT64 aOff[] = { 1000, 1500, 2000, 1000, 1500 };
             vector<UINT64> vOff(aOff, aOff + _countof(aOff));
 
-            nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
+            tts.InitializeParallelAsyncIORequest(ior);
+            tts.NextIORequest(ior);
             for (auto off : vOff)
             {
-                VERIFY_ARE_EQUAL(nextOffset, off, L"case 1");
-                nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, nextOffset);
+                nextOffset.LowPart = ior.GetOverlapped()->Offset;
+                nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+                VERIFY_ARE_EQUAL(nextOffset.QuadPart, off, L"case 1");
+                tts.NextIORequest(ior);
             }
         }
     }
@@ -390,9 +419,9 @@ namespace UnitTests
     void IORequestGeneratorUnitTests::Test_GetThreadBaseFileOffset()
     {
         Random r;
-        ThreadParameters tp; 
+        ThreadParameters tp;
         Target target;
-        
+
         tp.pRand = &r;
         target.SetBaseFileOffsetInBytes(1000);
         target.SetBlockAlignmentInBytes(500);
@@ -403,8 +432,8 @@ namespace UnitTests
         UINT64 startingOffset;
 
         // normal sequential - both threads, each file at base
-        tp.vTargets[0].SetUseRandomAccessPattern(false);
-        tp.vTargets[1].SetUseRandomAccessPattern(false);
+        tp.vTargets[0].SetRandomRatio(0);
+        tp.vTargets[1].SetRandomRatio(0);
 
         tp.ulThreadNo = 0;
         tp.ulRelativeThreadNo = 0;
@@ -478,8 +507,8 @@ namespace UnitTests
         UINT64 startingOffset;
 
         // normal sequential - first at base, second with stride
-        tp.vTargets[0].SetUseRandomAccessPattern(false);
-        tp.vTargets[1].SetUseRandomAccessPattern(false);
+        tp.vTargets[0].SetRandomRatio(0);
+        tp.vTargets[1].SetRandomRatio(0);
 
         tp.ulThreadNo = 0;
         tp.ulRelativeThreadNo = 0;
@@ -564,12 +593,13 @@ namespace UnitTests
         ThreadParameters tp;
         tp.pRand = &r;
         tp.vTargets.push_back(target);
-        tp.vullPrivateSequentialOffsets.push_back(0);
-        tp.vullFileSizes.push_back(3000);
 
-        // this is equivalent to -c2000 -T250 -s500 -b1000
+        // this is equivalent to -c3000 -T250 -s500 -b1000
 
-        UINT64 nextOffset;
+        ThreadTargetState tts(&tp, 0, 3000);
+        IORequest ior(tp.pRand);
+
+        ULARGE_INTEGER nextOffset;
 
         // relative thread zero should loop back to base
         tp.ulThreadNo = 0;
@@ -578,11 +608,13 @@ namespace UnitTests
             UINT64 aOff[] = { 0, 500, 1000, 1500, 2000, 0, 500 };
             vector<UINT64> vOff(aOff, aOff + _countof(aOff));
 
-            nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
+            tts.NextIORequest(ior);
             for (auto off : vOff)
             {
-                VERIFY_ARE_EQUAL(nextOffset, off, L"case 1");
-                nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, nextOffset);
+                nextOffset.LowPart = ior.GetOverlapped()->Offset;
+                nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+                VERIFY_ARE_EQUAL(nextOffset.QuadPart, off, L"case 1");
+                tts.NextIORequest(ior);
             }
         }
 
@@ -590,35 +622,41 @@ namespace UnitTests
         // it will also detect and handle not issuing an IO spanning eof.
         tp.ulThreadNo = 1;
         tp.ulRelativeThreadNo = 1;
+        tts.Reset();
         {
             UINT64 aOff[] = { 250, 750, 1250, 1750, 250, 750 };
             vector<UINT64> vOff(aOff, aOff + _countof(aOff));
 
-            nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
+            tts.NextIORequest(ior);
             for (auto off : vOff)
             {
-                VERIFY_ARE_EQUAL(nextOffset, off, L"case 2");
-                nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, nextOffset);
+                nextOffset.LowPart = ior.GetOverlapped()->Offset;
+                nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+                VERIFY_ARE_EQUAL(nextOffset.QuadPart, off, L"case 2");
+                tts.NextIORequest(ior);
             }
         }
 
         // increasing the stride, relative thread one will loop back to an earlier offset
         // before returning to its initial offset
         tp.vTargets[0].SetThreadStrideInBytes(750);
+        tts.Reset();
         {
             UINT64 aOff[] = { 750, 1250, 1750, 250, 750, 1250 };
             vector<UINT64> vOff(aOff, aOff + _countof(aOff));
 
-            nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
+            tts.NextIORequest(ior);
             for (auto off : vOff)
             {
-                VERIFY_ARE_EQUAL(nextOffset, off, L"case 3");
-                nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, nextOffset);
+                nextOffset.LowPart = ior.GetOverlapped()->Offset;
+                nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+                VERIFY_ARE_EQUAL(nextOffset.QuadPart, off, L"case 3");
+                tts.NextIORequest(ior);
             }
         }
     }
 
-    void IORequestGeneratorUnitTests::Test_SequentialWithStrideNonInterleaved()
+    void IORequestGeneratorUnitTests::Test_SequentialWithStride()
     {
         // this ut handles the case where -T > -s
 
@@ -631,72 +669,659 @@ namespace UnitTests
         ThreadParameters tp;
         tp.pRand = &r;
         tp.vTargets.push_back(target);
-        tp.vullPrivateSequentialOffsets.push_back(0);
-        tp.vullFileSizes.push_back(3000);
 
-        // this is equivalent to -c2000 -T250 -s500 -b1000
+        // this is equivalent to -c3000 -T500 -s250 -b1000
 
-        UINT64 nextOffset;
+        ThreadTargetState tts(&tp, 0, 3000);
+        IORequest ior(tp.pRand);
+
+        ULARGE_INTEGER nextOffset;
 
         // relative thread zero should loop back to base
         tp.ulThreadNo = 0;
         tp.ulRelativeThreadNo = 0;
         {
-            UINT64 aOff[] = { 0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 0, 250 };
+            UINT64 aOff[] = { 0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000 };
             vector<UINT64> vOff(aOff, aOff + _countof(aOff));
 
-            nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
+            tts.NextIORequest(ior);
             for (auto off : vOff)
             {
-                VERIFY_ARE_EQUAL(nextOffset, off, L"case 1");
-                nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, nextOffset);
+                nextOffset.LowPart = ior.GetOverlapped()->Offset;
+                nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+                VERIFY_ARE_EQUAL(nextOffset.QuadPart, off, L"case 1");
+                tts.NextIORequest(ior);
             }
         }
 
         // relative thread one should also loop back to base
         tp.ulThreadNo = 1;
         tp.ulRelativeThreadNo = 1;
+        tts.Reset();
         {
-            UINT64 aOff[] = { 500, 750, 1000, 1250, 1500, 1750, 2000, 0, 250, 500, 750 };
+            UINT64 aOff[] = { 500, 750, 1000, 1250, 1500, 1750, 2000, 0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000 };
             vector<UINT64> vOff(aOff, aOff + _countof(aOff));
 
-            nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
+            tts.NextIORequest(ior);
             for (auto off : vOff)
             {
-                VERIFY_ARE_EQUAL(nextOffset, off, L"case 2");
-                nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, nextOffset);
+                nextOffset.LowPart = ior.GetOverlapped()->Offset;
+                nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+                VERIFY_ARE_EQUAL(nextOffset.QuadPart, off, L"case 2");
+                tts.NextIORequest(ior);
             }
         }
+    }
 
-        // making the stride uneven w.r.t the alignment ... thread zero is the same
-        tp.vTargets[0].SetThreadStrideInBytes(800);
+    void IORequestGeneratorUnitTests::Test_SequentialWithStrideUneven()
+    {
+        // this ut handles the case where -T > -s and -T is not a multiple of -s
+        // threads io offsets are disjoint
+
+        Target target;
+        target.SetThreadStrideInBytes(500);
+        target.SetBlockAlignmentInBytes(200);
+        target.SetBlockSizeInBytes(200);
+
+        Random r;
+        ThreadParameters tp;
+        tp.pRand = &r;
+        tp.vTargets.push_back(target);
+
+        // this is equivalent to -c3000 -T500 -s200 -b200
+
+        ThreadTargetState tts(&tp, 0, 3000);
+        IORequest ior(tp.pRand);
+
+        ULARGE_INTEGER nextOffset;
+
+        // relative thread zero should loop back to base
         tp.ulThreadNo = 0;
         tp.ulRelativeThreadNo = 0;
         {
-            UINT64 aOff[] = { 0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 0, 250 };
+            UINT64 aOff[] = { 0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 0, 200, 400 };
             vector<UINT64> vOff(aOff, aOff + _countof(aOff));
 
-            nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
+            tts.NextIORequest(ior);
             for (auto off : vOff)
             {
-                VERIFY_ARE_EQUAL(nextOffset, off, L"case 3");
-                nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, nextOffset);
+                nextOffset.LowPart = ior.GetOverlapped()->Offset;
+                nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+                VERIFY_ARE_EQUAL(nextOffset.QuadPart, off, L"case 1");
+                tts.NextIORequest(ior);
             }
         }
 
-        // while thread one loops back to an early point in the file, but not base
+        // relative thread one should also loop back to base
         tp.ulThreadNo = 1;
         tp.ulRelativeThreadNo = 1;
+        tts.Reset();
         {
-            UINT64 aOff[] = { 800, 1050, 1300, 1550, 1800, 50, 300, 550, 800, 1050 };
+            UINT64 aOff[] = { 500, 700, 900, 1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500, 2700, 100, 300, 500, 700, 900 };
             vector<UINT64> vOff(aOff, aOff + _countof(aOff));
 
-            nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, FIRST_OFFSET);
+            tts.NextIORequest(ior);
             for (auto off : vOff)
             {
-                VERIFY_ARE_EQUAL(nextOffset, off, L"case 4");
-                nextOffset = IORequestGenerator::GetNextFileOffset(tp, 0, nextOffset);
+                nextOffset.LowPart = ior.GetOverlapped()->Offset;
+                nextOffset.HighPart = ior.GetOverlapped()->OffsetHigh;
+                VERIFY_ARE_EQUAL(nextOffset.QuadPart, off, L"case 2");
+                tts.NextIORequest(ior);
             }
+        }
+    }
+
+    void IORequestGeneratorUnitTests::Test_ThreadTargetStateInit()
+    {
+        // this ut validates that a constructed ThreadTargetState
+        // has an initialized IO type, and that it will then agree
+        // with the first generated IO's type for homegenous/mixed
+        // write mixes.
+
+        Target target;
+        target.SetThreadStrideInBytes(500);
+        target.SetBlockAlignmentInBytes(200);
+        target.SetBlockSizeInBytes(200);
+
+        Random r;
+        ThreadParameters tp;
+        tp.pRand = &r;
+        tp.vTargets.push_back(target);
+
+        UINT32 writeMix[] = { 0, 50, 100 };
+        vector<UINT32> vwriteMix(writeMix, writeMix + _countof(writeMix));
+
+        for (auto w : vwriteMix)
+        {
+            target.SetWriteRatio(w);
+
+            // Validate that ThreadTargetState defines last IO type in all running modes
+
+            VERIFY_ARE_EQUAL(target.GetIOMode(), IOMode::Sequential);
+            {
+                ThreadTargetState tts(&tp, 0, 3000);
+                VERIFY_ARE_NOT_EQUAL(tts._lastIO, IOOperation::Unknown);
+                IORequest ior(tp.pRand);
+                VERIFY_ARE_EQUAL(tts._lastIO, ior.GetIoType());
+            }
+            // nothing to undo
+
+            target.SetUseInterlockedSequential(true);
+            VERIFY_ARE_EQUAL(target.GetIOMode(), IOMode::InterlockedSequential);
+            {
+                ThreadTargetState tts(&tp, 0, 3000);
+                VERIFY_ARE_NOT_EQUAL(tts._lastIO, IOOperation::Unknown);
+                IORequest ior(tp.pRand);
+                VERIFY_ARE_EQUAL(tts._lastIO, ior.GetIoType());
+            }
+            target.SetUseInterlockedSequential(false);
+
+            target.SetRandomRatio(50);
+            VERIFY_ARE_EQUAL(target.GetIOMode(), IOMode::Mixed);
+            {
+                ThreadTargetState tts(&tp, 0, 3000);
+                VERIFY_ARE_NOT_EQUAL(tts._lastIO, IOOperation::Unknown);
+                IORequest ior(tp.pRand);
+                VERIFY_ARE_EQUAL(tts._lastIO, ior.GetIoType());
+            }
+            target.SetRandomRatio(0);
+
+            target.SetRandomRatio(100);
+            VERIFY_ARE_EQUAL(target.GetIOMode(), IOMode::Random);
+            {
+                ThreadTargetState tts(&tp, 0, 3000);
+                VERIFY_ARE_NOT_EQUAL(tts._lastIO, IOOperation::Unknown);
+                IORequest ior(tp.pRand);
+                VERIFY_ARE_EQUAL(tts._lastIO, ior.GetIoType());
+            }
+            target.SetRandomRatio(0);
+
+            target.SetUseParallelAsyncIO(true);
+            VERIFY_ARE_EQUAL(target.GetIOMode(), IOMode::ParallelAsync);
+            {
+                ThreadTargetState tts(&tp, 0, 3000);
+                VERIFY_ARE_NOT_EQUAL(tts._lastIO, IOOperation::Unknown);
+                IORequest ior(tp.pRand);
+                VERIFY_ARE_EQUAL(tts._lastIO, ior.GetIoType());
+            }
+            target.SetUseParallelAsyncIO(false);
+        }
+    }
+
+    void IORequestGeneratorUnitTests::Test_ThreadTargetStateEffectiveDistPct()
+    {
+        // this ut validates that a constructed ThreadTargetState
+        // has a properly laid out effective distribution given
+        // the specified percent distribution on the target.
+        //
+        // basic cases:
+        //  hole
+        //  degenerate span (covers no offsets)
+        //      rollover to next (degenerate is not last in dist)
+        //      apply to last (degenerate is last in dist)
+
+        Target target;
+        target.SetBlockAlignmentInBytes(4*KB);
+        target.SetBlockSizeInBytes(4*KB);
+
+        Random r;
+        ThreadParameters tp;
+        tp.pRand = &r;
+
+        vector<DistributionRange> v;
+
+        // -rdpct10/10:10/10:0/10 + tail
+        // this is the same distribution in the cmdlineparser UT
+        v.emplace_back(0, 10, make_pair(0, 10));
+        v.emplace_back(10, 10, make_pair(10, 10));
+        v.emplace_back(20, 0, make_pair(20, 10));   // zero IO% length hole
+        v.emplace_back(20, 80, make_pair(30, 70));
+        target.SetDistributionRange(v, DistributionType::Percent);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 3);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 8*KB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 8*KB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 12*KB); // note length
+            // note hole removed
+            VERIFY_ARE_EQUAL(ev[2]._src, (UINT64) 20);           ///
+            VERIFY_ARE_EQUAL(ev[2]._span, (UINT64) 80);
+            VERIFY_ARE_EQUAL(ev[2]._dst.first, (UINT64) 28*KB);
+            VERIFY_ARE_EQUAL(ev[2]._dst.second, (UINT64) 72*KB);
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        //
+        // Degenerate span cases
+        //
+
+        // -rdpct10/10:10/10:10/1 + tail
+        // this creates the degenerate - non-degenerate case where
+        // the non-degenerate must round up.
+        v.emplace_back(0, 10, make_pair(0, 10));
+        v.emplace_back(10, 10, make_pair(10, 10));
+        v.emplace_back(20, 10, make_pair(20, 1));   // degenerate < alignment
+        v.emplace_back(30, 70, make_pair(21, 79));
+        target.SetDistributionRange(v, DistributionType::Percent);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 4);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 8*KB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 8*KB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 12*KB);
+            VERIFY_ARE_EQUAL(ev[2]._src, (UINT64) 20);           /// degenerate
+            VERIFY_ARE_EQUAL(ev[2]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[2]._dst.first, (UINT64) 20*KB);
+            VERIFY_ARE_EQUAL(ev[2]._dst.second, (UINT64) 4*KB);
+            VERIFY_ARE_EQUAL(ev[3]._src, (UINT64) 30);           ///
+            VERIFY_ARE_EQUAL(ev[3]._span, (UINT64) 70);
+            VERIFY_ARE_EQUAL(ev[3]._dst.first, (UINT64) 24*KB);
+            VERIFY_ARE_EQUAL(ev[3]._dst.second, (UINT64) 76*KB);
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdpct10/96:10/3:80/1
+        // tail is degenerate and needs to roll to last
+        v.emplace_back(0, 10, make_pair(0, 96));
+        v.emplace_back(10, 10, make_pair(96, 3));
+        v.emplace_back(20, 80, make_pair(99, 1));   // degenerate tail
+        target.SetDistributionRange(v, DistributionType::Percent);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 96*KB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 90);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 96*KB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 4*KB);
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdpct10/5:10/1:80/94
+        // the degenerate cannot immediately combine with its non-degenerate predecessor, so rolls over
+        // however, since the predecessor is smaller, it prefers to combine in that direction
+        v.emplace_back(0, 10, make_pair(0, 5));
+        v.emplace_back(10, 10, make_pair(5, 1));
+        v.emplace_back(20, 80, make_pair(6, 94));   // non-degenerate tail
+        target.SetDistributionRange(v, DistributionType::Percent);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 20);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 4*KB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 20);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 80);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 4*KB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 96*KB);
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdpct10/1:10/1
+        // first two are degenerate and combine, tail rounds up and consumes rest
+        v.emplace_back(0, 10, make_pair(0, 1));
+        v.emplace_back(10, 10, make_pair(1, 1));
+        v.emplace_back(20, 80, make_pair(2, 98));   // non-degenerate tail
+        target.SetDistributionRange(v, DistributionType::Percent);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 20);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 4*KB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 20);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 80);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 4*KB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 96*KB);
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // repeated 10/1
+        // This stresses the combination logic
+        // The first four should successively combine in a [0, 4KiB) range, the fifth
+        // will land in a new [4KiB,8KiB) range.
+        //
+        for (int n = 1; n <= 5; ++n)
+        {
+            int m;
+            for (m = 0; m < n; ++m)
+            {
+                v.emplace_back(m*10, 10, make_pair(m*1, 1));
+            }
+            v.emplace_back(m*10, 100 - m*10, make_pair(m, 100 - m));   // non-degenerate tail
+            target.SetDistributionRange(v, DistributionType::Percent);
+            tp.vTargets.push_back(target);
+
+            // Fifth case is three ranges; handle seperately. May be worth wrestling down
+            // how to combine these to allow us to sweep n further, but for now this is fine.
+            if (n == 5)
+            {
+                ThreadTargetState tts(&tp, 0, 100*KB);
+                vector<DistributionRange>& ev = tts._vDistributionRange;
+
+                VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+                VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 3);
+                VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+                VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 40);
+                VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+                VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 4*KB);
+                VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 40);           ///
+                VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+                VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 4*KB);
+                VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 4*KB);
+                VERIFY_ARE_EQUAL(ev[2]._src, (UINT64) 50);           ///
+                VERIFY_ARE_EQUAL(ev[2]._span, (UINT64) 50);
+                VERIFY_ARE_EQUAL(ev[2]._dst.first, (UINT64) 8*KB);
+                VERIFY_ARE_EQUAL(ev[2]._dst.second, (UINT64) 92*KB);
+                tp.vTargets.clear();
+                v.clear();
+                break;
+            }
+
+            {
+                ThreadTargetState tts(&tp, 0, 100*KB);
+                vector<DistributionRange>& ev = tts._vDistributionRange;
+
+                VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+                VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+                VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+                VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) m*10);
+                VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+                VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 4*KB);
+                VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) m*10);           ///
+                VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 100 - m*10);
+                VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 4*KB);
+                VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 96*KB);
+                tp.vTargets.clear();
+                v.clear();
+            }
+        }
+    }
+
+    void IORequestGeneratorUnitTests::Test_ThreadTargetStateEffectiveDistAbs()
+    {
+        // this ut validates that a constructed ThreadTargetState
+        // has a properly laid out effective distribution given
+        // the specified absolute distribution on the target.
+
+        Target target;
+        target.SetBlockAlignmentInBytes(4*KB);
+        target.SetBlockSizeInBytes(4*KB);
+
+        Random r;
+        ThreadParameters tp;
+
+        vector<DistributionRange> v;
+
+        // -rdabs10/1G:10/1G:0/100G, again producing tail - with autoscale (0)
+        // this is the same distribution in the cmdlineparser UT
+        // aligned tail range
+        v.emplace_back(0,10, make_pair(0, 1*GB));
+        v.emplace_back(10,10, make_pair(1*GB, 1*GB));
+        v.emplace_back(20,0, make_pair(2*GB, 100*GB));
+        v.emplace_back(20,80, make_pair(102*GB, 0));
+        target.SetDistributionRange(v, DistributionType::Absolute);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 200*GB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 3);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 1*GB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 1*GB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 1*GB); // note length
+            // note hole removed
+            VERIFY_ARE_EQUAL(ev[2]._src, (UINT64) 20);           ///
+            VERIFY_ARE_EQUAL(ev[2]._span, (UINT64) 80);
+            VERIFY_ARE_EQUAL(ev[2]._dst.first, (UINT64) 102*GB);
+            VERIFY_ARE_EQUAL(ev[2]._dst.second, (UINT64) 98*GB);
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdabs10/1G:10/1G:0/100G:20/1T
+        // trim - distribution exceeds target size, end is in last range so no IO% trim
+        // note same distribution aside from hardening the tail (no autoscale) to a large value
+        v.emplace_back(0,10, make_pair(0, 1*GB));
+        v.emplace_back(10,10, make_pair(1*GB, 1*GB));
+        v.emplace_back(20,0, make_pair(2*GB, 100*GB));
+        v.emplace_back(20,80, make_pair(102*GB, 1*TB));
+        target.SetDistributionRange(v, DistributionType::Absolute);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 200*GB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 3);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 1*GB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 1*GB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 1*GB); // note length
+            // note hole removed
+            VERIFY_ARE_EQUAL(ev[2]._src, (UINT64) 20);           ///
+            VERIFY_ARE_EQUAL(ev[2]._span, (UINT64) 80);
+            VERIFY_ARE_EQUAL(ev[2]._dst.first, (UINT64) 102*GB);
+            VERIFY_ARE_EQUAL(ev[2]._dst.second, (UINT64) 98*GB);
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdabs10/100G:10/100G
+        // trim - distribution exceeds target size (autoscale tail); target end aligned to last range start
+        // drop the IO% of the trailing range
+        v.emplace_back(0,10, make_pair(0, 100*GB));
+        v.emplace_back(10,10, make_pair(100*GB, 100*GB));
+        v.emplace_back(20,80, make_pair(200*GB, 0));
+        target.SetDistributionRange(v, DistributionType::Absolute);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 200*GB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 20);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 100*GB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 100*GB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 100*GB); // note length
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdabs10/100G:10/200G
+        // trim - distribution exceeds target size (autoscale tail); last range beyond target end
+        // drop the IO% of the trailing range
+        v.emplace_back(0,10, make_pair(0, 100*GB));
+        v.emplace_back(10,10, make_pair(100*GB, 200*GB));
+        v.emplace_back(20,80, make_pair(300*GB, 0));
+        target.SetDistributionRange(v, DistributionType::Absolute);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 200*GB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 20);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 100*GB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 100*GB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 100*GB); // note length
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        //
+        // Unaligned intervals
+        //
+
+        target.SetBlockAlignmentInBytes(3*KB);
+        target.SetBlockSizeInBytes(3*KB);
+
+        // -rdabs10/10K:10/10K
+        // not naturally aligned to target, but is naturally aligned to interval (!)
+        // 0-10k and 10k-90k - IO all the way to 100K (97K + 3K) is OK
+        v.emplace_back(0,10, make_pair(0, 10*KB));
+        v.emplace_back(10,10, make_pair(10*KB, 90*KB));
+        v.emplace_back(20,80, make_pair(300*GB, 0));
+        target.SetDistributionRange(v, DistributionType::Absolute);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 20);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 10*KB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 10*KB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 90*KB); // note length
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdabs10/10K:10/1G
+        // previous distribution, target ends in last range (same result, trimmed)
+        v.emplace_back(0,10, make_pair(0, 10*KB));
+        v.emplace_back(10,10, make_pair(10*KB, 90*KB));
+        v.emplace_back(20,80, make_pair(300*GB, 0));
+        target.SetDistributionRange(v, DistributionType::Absolute);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 20);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 10*KB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);           ///
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 10*KB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 90*KB); // note length
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdabs10/98k
+        // autoscale tail cannot issue IO, so distribution is not extended
+        v.emplace_back(0,10, make_pair(0, 98*KB));
+        v.emplace_back(10,90, make_pair(98*KB, 0));
+        target.SetDistributionRange(v, DistributionType::Absolute);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 1);
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 10);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 98*KB);
+            tp.vTargets.clear();
+            v.clear();
+        }
+
+        // -rdabs10/96k
+        // autoscale tail can issue single IO @ 96K
+        v.emplace_back(0,10, make_pair(0, 96*KB));
+        v.emplace_back(10,90, make_pair(96*KB, 0));
+        target.SetDistributionRange(v, DistributionType::Absolute);
+        tp.vTargets.push_back(target);
+
+        {
+            ThreadTargetState tts(&tp, 0, 100*KB);
+            vector<DistributionRange>& ev = tts._vDistributionRange;
+
+            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
+            VERIFY_ARE_EQUAL(ev[0]._dst.second, (UINT64) 96*KB);
+            VERIFY_ARE_EQUAL(ev[1]._src, (UINT64) 10);
+            VERIFY_ARE_EQUAL(ev[1]._span, (UINT64) 90);
+            VERIFY_ARE_EQUAL(ev[1]._dst.first, (UINT64) 96*KB);
+            VERIFY_ARE_EQUAL(ev[1]._dst.second, (UINT64) 4*KB);
+            tp.vTargets.clear();
+            v.clear();
         }
     }
 }

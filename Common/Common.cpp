@@ -237,50 +237,54 @@ string Util::DoubleToStringHelper(const double d)
     return string(szFloatBuffer);
 }
 
-string ThreadTarget::GetXml() const
+string ThreadTarget::GetXml(UINT32 indent) const
 {
     char buffer[4096];
-    string sXml("<ThreadTarget>\n");
+    string sXml;
+    
+    AddXmlInc(sXml, "<ThreadTarget>\n");
 
     sprintf_s(buffer, _countof(buffer), "<Thread>%u</Thread>\n", _ulThread);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     if (_ulWeight != 0)
     {
         sprintf_s(buffer, _countof(buffer), "<Weight>%u</Weight>\n", _ulWeight);
-        sXml += buffer;
+        AddXml(sXml, buffer);
     }
 
-    sXml += "</ThreadTarget>\n";
+    AddXmlDec(sXml, "</ThreadTarget>\n");
 
     return sXml;
 }
 
-string Target::GetXml() const
+string Target::GetXml(UINT32 indent) const
 {
     char buffer[4096];
-    string sXml("<Target>\n");
-    sXml += "<Path>" + _sPath + "</Path>\n";
+    string sXml;
+    
+    AddXmlInc(sXml, "<Target>\n");
+    AddXml(sXml, "<Path>" + _sPath + "</Path>\n");
 
     sprintf_s(buffer, _countof(buffer), "<BlockSize>%u</BlockSize>\n", _dwBlockSize);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<BaseFileOffset>%I64u</BaseFileOffset>\n", _ullBaseFileOffset);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
-    sXml += _fSequentialScanHint ? "<SequentialScan>true</SequentialScan>\n" : "<SequentialScan>false</SequentialScan>\n";
-    sXml += _fRandomAccessHint ? "<RandomAccess>true</RandomAccess>\n" : "<RandomAccess>false</RandomAccess>\n";
-    sXml += _fTemporaryFileHint ? "<TemporaryFile>true</TemporaryFile>\n" : "<TemporaryFile>false</TemporaryFile>\n";
-    sXml += _fUseLargePages ? "<UseLargePages>true</UseLargePages>\n" : "<UseLargePages>false</UseLargePages>\n";
+    AddXml(sXml, _fSequentialScanHint ? "<SequentialScan>true</SequentialScan>\n" : "<SequentialScan>false</SequentialScan>\n");
+    AddXml(sXml, _fRandomAccessHint ? "<RandomAccess>true</RandomAccess>\n" : "<RandomAccess>false</RandomAccess>\n");
+    AddXml(sXml, _fTemporaryFileHint ? "<TemporaryFile>true</TemporaryFile>\n" : "<TemporaryFile>false</TemporaryFile>\n");
+    AddXml(sXml, _fUseLargePages ? "<UseLargePages>true</UseLargePages>\n" : "<UseLargePages>false</UseLargePages>\n");
 
     // TargetCacheMode::Cached is implied default
     switch (_cacheMode)
     {
     case TargetCacheMode::DisableLocalCache:
-        sXml += "<DisableLocalCache>true</DisableLocalCache>\n";
+        AddXml(sXml, "<DisableLocalCache>true</DisableLocalCache>\n");
         break;
     case TargetCacheMode::DisableOSCache:
-        sXml += "<DisableOSCache>true</DisableOSCache>\n";
+        AddXml(sXml, "<DisableOSCache>true</DisableOSCache>\n");
         break;
     }
 
@@ -288,7 +292,7 @@ string Target::GetXml() const
     switch (_writeThroughMode)
     {
     case WriteThroughMode::On:
-        sXml += "<WriteThrough>true</WriteThrough>\n";
+        AddXml(sXml, "<WriteThrough>true</WriteThrough>\n");
         break;
     }
     
@@ -296,7 +300,7 @@ string Target::GetXml() const
     switch (_memoryMappedIoMode)
     {
     case MemoryMappedIoMode::On:
-        sXml += "<MemoryMappedIo>true</MemoryMappedIo>\n";
+        AddXml(sXml, "<MemoryMappedIo>true</MemoryMappedIo>\n");
         break;
     }
 
@@ -304,126 +308,180 @@ string Target::GetXml() const
     switch (_memoryMappedIoFlushMode)
     {
     case MemoryMappedIoFlushMode::ViewOfFile:
-        sXml += "<FlushType>ViewOfFile</FlushType>\n";
+        AddXml(sXml, "<FlushType>ViewOfFile</FlushType>\n");
         break;
     case MemoryMappedIoFlushMode::NonVolatileMemory:
-        sXml += "<FlushType>NonVolatileMemory</FlushType>\n";
+        AddXml(sXml, "<FlushType>NonVolatileMemory</FlushType>\n")
         break;
     case MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain:
-        sXml += "<FlushType>NonVolatileMemoryNoDrain</FlushType>\n";
+        AddXml(sXml, "<FlushType>NonVolatileMemoryNoDrain</FlushType>\n");
         break;
     }
 
-    sXml += "<WriteBufferContent>\n";
+    AddXmlInc(sXml, "<WriteBufferContent>\n");
     if (_fZeroWriteBuffers)
     {
-        sXml += "<Pattern>zero</Pattern>\n";
+        AddXml(sXml, "<Pattern>zero</Pattern>\n");
     }
     else if (_cbRandomDataWriteBuffer == 0)
     {
-        sXml += "<Pattern>sequential</Pattern>\n";
+        AddXml(sXml, "<Pattern>sequential</Pattern>\n");
     }
     else
     {
-        sXml += "<Pattern>random</Pattern>\n";
-        sXml += "<RandomDataSource>\n";
+        AddXml(sXml, "<Pattern>random</Pattern>\n");
+        AddXmlInc(sXml, "<RandomDataSource>\n");
         sprintf_s(buffer, _countof(buffer), "<SizeInBytes>%I64u</SizeInBytes>\n", _cbRandomDataWriteBuffer);
-        sXml += buffer;
+        AddXml(sXml, buffer);
         if (_sRandomDataWriteBufferSourcePath != "")
         {
-            sXml += "<FilePath>" + _sRandomDataWriteBufferSourcePath + "</FilePath>\n";
+            AddXml(sXml, "<FilePath>" + _sRandomDataWriteBufferSourcePath + "</FilePath>\n");
         }
-        sXml += "</RandomDataSource>\n";
+        AddXmlDec(sXml, "</RandomDataSource>\n");
     }
-    sXml += "</WriteBufferContent>\n";
+    AddXmlDec(sXml, "</WriteBufferContent>\n");
 
-    sXml += _fParallelAsyncIO ? "<ParallelAsyncIO>true</ParallelAsyncIO>\n" : "<ParallelAsyncIO>false</ParallelAsyncIO>\n";
+    AddXml(sXml, _fParallelAsyncIO ? "<ParallelAsyncIO>true</ParallelAsyncIO>\n" : "<ParallelAsyncIO>false</ParallelAsyncIO>\n");
 
     if (_fUseBurstSize)
     {
         sprintf_s(buffer, _countof(buffer), "<BurstSize>%u</BurstSize>\n", _dwBurstSize);
-        sXml += buffer;
+        AddXml(sXml, buffer);
     }
 
     if (_fThinkTime)
     {
         sprintf_s(buffer, _countof(buffer), "<ThinkTime>%u</ThinkTime>\n", _dwThinkTime);
-        sXml += buffer;
+        AddXml(sXml, buffer);
     }
 
     if (_fCreateFile)
     {
         sprintf_s(buffer, _countof(buffer), "<FileSize>%I64u</FileSize>\n", _ullFileSize);
-        sXml += buffer;
+        AddXml(sXml, buffer);
     }
 
     // If XML contains <Random>, <StrideSize> is ignored
-    if (_fUseRandomAccessPattern)
+    if (_ulRandomRatio > 0)
     {
         sprintf_s(buffer, _countof(buffer), "<Random>%I64u</Random>\n", GetBlockAlignmentInBytes());
-        sXml += buffer;
+        AddXml(sXml, buffer);
+
+        // 100% random is <Random> alone
+        if (_ulRandomRatio != 100)
+        {
+            sprintf_s(buffer, _countof(buffer), "<RandomRatio>%u</RandomRatio>\n", GetRandomRatio());
+            AddXml(sXml, buffer);
+        }
+
+        // Distributions only occur in profiles with random IO.
+
+        if (_vDistributionRange.size())
+        {
+            char *type = nullptr;
+
+            switch (_distributionType)
+            {
+                case DistributionType::Absolute:
+                type = "Absolute";
+                break;
+
+                case DistributionType::Percent:
+                type = "Percent";
+                break;
+
+                default:
+                assert(false);
+            }
+
+            AddXmlInc(sXml, "<Distribution>\n");
+            AddXmlInc(sXml, "<");
+            sXml += type;
+            sXml += ">\n";
+
+            for (auto r : _vDistributionRange)
+            {
+                sprintf_s(buffer, _countof(buffer), "<Range IO=\"%u\">%I64u", r._span, r._dst.second);
+                AddXml(sXml, buffer);
+                sXml += "</Range>\n";
+            }
+
+            AddXmlDec(sXml, "</");
+            sXml += type;
+            sXml += ">\n";
+            AddXmlDec(sXml, "</Distribution>\n");
+        }
     }
     else
     {
         sprintf_s(buffer, _countof(buffer), "<StrideSize>%I64u</StrideSize>\n", GetBlockAlignmentInBytes());
-        sXml += buffer;
+        AddXml(sXml, buffer);
     
-        sXml += _fInterlockedSequential ?
+        AddXml(sXml, _fInterlockedSequential ?
             "<InterlockedSequential>true</InterlockedSequential>\n" :
-            "<InterlockedSequential>false</InterlockedSequential>\n";
+            "<InterlockedSequential>false</InterlockedSequential>\n");
     }
 
     sprintf_s(buffer, _countof(buffer), "<ThreadStride>%I64u</ThreadStride>\n", _ullThreadStride);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<MaxFileSize>%I64u</MaxFileSize>\n", _ullMaxFileSize);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<RequestCount>%u</RequestCount>\n", _dwRequestCount);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<WriteRatio>%u</WriteRatio>\n", _ulWriteRatio);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
-    sprintf_s(buffer, _countof(buffer), "<Throughput>%u</Throughput>\n", _dwThroughputBytesPerMillisecond);
-    sXml += buffer;
-
-    sprintf_s(buffer, _countof(buffer), "<ThreadsPerFile>%u</ThreadsPerFile>\n", _dwThreadsPerFile);
-    sXml += buffer;
-
-    if (_ioPriorityHint == IoPriorityHintVeryLow)
+    // Preserve specified units
+    if (_dwThroughputIOPS)
     {
-        sXml += "<IOPriority>1</IOPriority>\n";
-    }
-    else if (_ioPriorityHint == IoPriorityHintLow)
-    {
-        sXml += "<IOPriority>2</IOPriority>\n";
-    }
-    else if (_ioPriorityHint == IoPriorityHintNormal)
-    {
-        sXml += "<IOPriority>3</IOPriority>\n";
+        sprintf_s(buffer, _countof(buffer), "<Throughput unit=\"IOPS\">%u</Throughput>\n", _dwThroughputIOPS);
+        AddXml(sXml, buffer);
     }
     else
     {
-        sXml += "<IOPriority>* UNSUPPORTED *</IOPriority>\n";
+        sprintf_s(buffer, _countof(buffer), "<Throughput>%u</Throughput>\n", _dwThroughputBytesPerMillisecond);
+        AddXml(sXml, buffer);
+    }
+
+    sprintf_s(buffer, _countof(buffer), "<ThreadsPerFile>%u</ThreadsPerFile>\n", _dwThreadsPerFile);
+    AddXml(sXml, buffer);
+
+    if (_ioPriorityHint == IoPriorityHintVeryLow)
+    {
+        AddXml(sXml, "<IOPriority>1</IOPriority>\n");
+    }
+    else if (_ioPriorityHint == IoPriorityHintLow)
+    {
+        AddXml(sXml, "<IOPriority>2</IOPriority>\n");
+    }
+    else if (_ioPriorityHint == IoPriorityHintNormal)
+    {
+        AddXml(sXml, "<IOPriority>3</IOPriority>\n");
+    }
+    else
+    {
+        AddXml(sXml, "<IOPriority>* UNSUPPORTED *</IOPriority>\n");
     }
 
     sprintf_s(buffer, _countof(buffer), "<Weight>%u</Weight>\n", _ulWeight);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     if (_vThreadTargets.size() > 0)
     {
-        sXml += "<ThreadTargets>\n";
+        AddXmlInc(sXml, "<ThreadTargets>\n");
 
         for (const auto& threadTarget : _vThreadTargets)
         {
-            sXml += threadTarget.GetXml();
+            sXml += threadTarget.GetXml(indent);
         }
 
-        sXml += "</ThreadTargets>\n";
+        AddXmlDec(sXml, "</ThreadTargets>\n");
     }
 
-    sXml += "</Target>\n";
+    AddXmlDec(sXml, "</Target>\n");
 
     return sXml;
 }
@@ -537,55 +595,56 @@ BYTE* Target::GetRandomDataWriteBuffer(Random *pRand)
     return pBuffer;
 }
 
-string TimeSpan::GetXml() const
+string TimeSpan::GetXml(UINT32 indent) const
 {
-    string sXml("<TimeSpan>\n");
+    string sXml;
     char buffer[4096];
 
-    sXml += _fCompletionRoutines ? "<CompletionRoutines>true</CompletionRoutines>\n" : "<CompletionRoutines>false</CompletionRoutines>\n";
-    sXml += _fMeasureLatency ? "<MeasureLatency>true</MeasureLatency>\n" : "<MeasureLatency>false</MeasureLatency>\n";
-    sXml += _fCalculateIopsStdDev ? "<CalculateIopsStdDev>true</CalculateIopsStdDev>\n" : "<CalculateIopsStdDev>false</CalculateIopsStdDev>\n";
-    sXml += _fDisableAffinity ? "<DisableAffinity>true</DisableAffinity>\n" : "<DisableAffinity>false</DisableAffinity>\n";
+    AddXmlInc(sXml, "<TimeSpan>\n");
+    AddXml(sXml, _fCompletionRoutines ? "<CompletionRoutines>true</CompletionRoutines>\n" : "<CompletionRoutines>false</CompletionRoutines>\n");
+    AddXml(sXml,_fMeasureLatency ? "<MeasureLatency>true</MeasureLatency>\n" : "<MeasureLatency>false</MeasureLatency>\n");
+    AddXml(sXml, _fCalculateIopsStdDev ? "<CalculateIopsStdDev>true</CalculateIopsStdDev>\n" : "<CalculateIopsStdDev>false</CalculateIopsStdDev>\n");
+    AddXml(sXml, _fDisableAffinity ? "<DisableAffinity>true</DisableAffinity>\n" : "<DisableAffinity>false</DisableAffinity>\n");
 
     sprintf_s(buffer, _countof(buffer), "<Duration>%u</Duration>\n", _ulDuration);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<Warmup>%u</Warmup>\n", _ulWarmUp);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<Cooldown>%u</Cooldown>\n", _ulCoolDown);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<ThreadCount>%u</ThreadCount>\n", _dwThreadCount);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<RequestCount>%u</RequestCount>\n", _dwRequestCount);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<IoBucketDuration>%u</IoBucketDuration>\n", _ulIoBucketDurationInMilliseconds);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     sprintf_s(buffer, _countof(buffer), "<RandSeed>%u</RandSeed>\n", _ulRandSeed);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     if (_vAffinity.size() > 0)
     {
-        sXml += "<Affinity>\n";
+        AddXmlInc(sXml, "<Affinity>\n");
         for (const auto& a : _vAffinity)
         {
             sprintf_s(buffer, _countof(buffer), "<AffinityGroupAssignment Group=\"%u\" Processor=\"%u\"/>\n", a.wGroup, a.bProc);
-            sXml += buffer;
+            AddXml(sXml, buffer);
         }
-        sXml += "</Affinity>\n";
+        AddXmlDec(sXml, "</Affinity>\n");
     }
 
-    sXml += "<Targets>\n";
+    AddXmlInc(sXml, "<Targets>\n");
     for (const auto& target : _vTargets)
     {
-        sXml += target.GetXml();
+        sXml += target.GetXml(indent);
     }
-    sXml += "</Targets>\n";
-    sXml += "</TimeSpan>\n";
+    AddXmlDec(sXml, "</Targets>\n");
+    AddXmlDec(sXml, "</TimeSpan>\n");
     return sXml;
 }
 
@@ -603,66 +662,68 @@ void TimeSpan::MarkFilesAsPrecreated(const vector<string> vFiles)
     }
 }
 
-string Profile::GetXml() const
+string Profile::GetXml(UINT32 indent) const
 {
-    string sXml("<Profile>\n");
+    string sXml;
     char buffer[4096];
 
+    AddXmlInc(sXml, "<Profile>\n");
+
     sprintf_s(buffer, _countof(buffer), "<Progress>%u</Progress>\n", _dwProgress);
-    sXml += buffer;
+    AddXml(sXml, buffer);
 
     if (_resultsFormat == ResultsFormat::Text)
     {
-        sXml += "<ResultFormat>text</ResultFormat>\n";
+        AddXml(sXml, "<ResultFormat>text</ResultFormat>\n");
     }
     else if (_resultsFormat == ResultsFormat::Xml)
     {
-        sXml += "<ResultFormat>xml</ResultFormat>\n";
+        AddXml(sXml, "<ResultFormat>xml</ResultFormat>\n");
     }
     else
     {
-        sXml += "<ResultFormat>* UNSUPPORTED *</ResultFormat>\n";
+        AddXml(sXml, "<ResultFormat>* UNSUPPORTED *</ResultFormat>\n");
     }
 
-    sXml += _fVerbose ? "<Verbose>true</Verbose>\n" : "<Verbose>false</Verbose>\n";
+    AddXml(sXml, _fVerbose ? "<Verbose>true</Verbose>\n" : "<Verbose>false</Verbose>\n");
     if (_precreateFiles == PrecreateFiles::UseMaxSize)
     {
-        sXml += "<PrecreateFiles>UseMaxSize</PrecreateFiles>\n";
+        AddXml(sXml, "<PrecreateFiles>UseMaxSize</PrecreateFiles>\n");
     }
     else if (_precreateFiles == PrecreateFiles::OnlyFilesWithConstantSizes)
     {
-        sXml += "<PrecreateFiles>CreateOnlyFilesWithConstantSizes</PrecreateFiles>\n";
+        AddXml(sXml, "<PrecreateFiles>CreateOnlyFilesWithConstantSizes</PrecreateFiles>\n");
     }
     else if (_precreateFiles == PrecreateFiles::OnlyFilesWithConstantOrZeroSizes)
     {
-        sXml += "<PrecreateFiles>CreateOnlyFilesWithConstantOrZeroSizes</PrecreateFiles>\n";
+        AddXml(sXml, "<PrecreateFiles>CreateOnlyFilesWithConstantOrZeroSizes</PrecreateFiles>\n");
     }
 
     if (_fEtwEnabled)
     {
-        sXml += "<ETW>\n";
-        sXml += _fEtwProcess ? "<Process>true</Process>\n" : "<Process>false</Process>\n";
-        sXml += _fEtwThread ? "<Thread>true</Thread>\n" : "<Thread>false</Thread>\n";
-        sXml += _fEtwImageLoad ? "<ImageLoad>true</ImageLoad>\n" : "<ImageLoad>false</ImageLoad>\n";
-        sXml += _fEtwDiskIO ? "<DiskIO>true</DiskIO>\n" : "<DiskIO>false</DiskIO>\n";
-        sXml += _fEtwMemoryPageFaults ? "<MemoryPageFaults>true</MemoryPageFaults>\n" : "<MemoryPageFaults>false</MemoryPageFaults>\n";
-        sXml += _fEtwMemoryHardFaults ? "<MemoryHardFaults>true</MemoryHardFaults>\n" : "<MemoryHardFaults>false</MemoryHardFaults>\n";
-        sXml += _fEtwNetwork ? "<Network>true</Network>\n" : "<Network>false</Network>\n";
-        sXml += _fEtwRegistry ? "<Registry>true</Registry>\n" : "<Registry>false</Registry>\n";
-        sXml += _fEtwUsePagedMemory ? "<UsePagedMemory>true</UsePagedMemory>\n" : "<UsePagedMemory>false</UsePagedMemory>\n";
-        sXml += _fEtwUsePerfTimer ? "<UsePerfTimer>true</UsePerfTimer>\n" : "<UsePerfTimer>false</UsePerfTimer>\n";
-        sXml += _fEtwUseSystemTimer ? "<UseSystemTimer>true</UseSystemTimer>\n" : "<UseSystemTimer>false</UseSystemTimer>\n";
-        sXml += _fEtwUseCyclesCounter ? "<UseCyclesCounter>true</UseCyclesCounter>\n" : "<UseCyclesCounter>false</UseCyclesCounter>\n";
-        sXml += "</ETW>\n";
+        AddXmlInc(sXml, "<ETW>\n");
+        AddXml(sXml, _fEtwProcess ? "<Process>true</Process>\n" : "<Process>false</Process>\n");
+        AddXml(sXml, _fEtwThread ? "<Thread>true</Thread>\n" : "<Thread>false</Thread>\n");
+        AddXml(sXml, _fEtwImageLoad ? "<ImageLoad>true</ImageLoad>\n" : "<ImageLoad>false</ImageLoad>\n");
+        AddXml(sXml, _fEtwDiskIO ? "<DiskIO>true</DiskIO>\n" : "<DiskIO>false</DiskIO>\n");
+        AddXml(sXml, _fEtwMemoryPageFaults ? "<MemoryPageFaults>true</MemoryPageFaults>\n" : "<MemoryPageFaults>false</MemoryPageFaults>\n");
+        AddXml(sXml, _fEtwMemoryHardFaults ? "<MemoryHardFaults>true</MemoryHardFaults>\n" : "<MemoryHardFaults>false</MemoryHardFaults>\n");
+        AddXml(sXml, _fEtwNetwork ? "<Network>true</Network>\n" : "<Network>false</Network>\n");
+        AddXml(sXml, _fEtwRegistry ? "<Registry>true</Registry>\n" : "<Registry>false</Registry>\n");
+        AddXml(sXml, _fEtwUsePagedMemory ? "<UsePagedMemory>true</UsePagedMemory>\n" : "<UsePagedMemory>false</UsePagedMemory>\n");
+        AddXml(sXml, _fEtwUsePerfTimer ? "<UsePerfTimer>true</UsePerfTimer>\n" : "<UsePerfTimer>false</UsePerfTimer>\n");
+        AddXml(sXml, _fEtwUseSystemTimer ? "<UseSystemTimer>true</UseSystemTimer>\n" : "<UseSystemTimer>false</UseSystemTimer>\n");
+        AddXml(sXml, _fEtwUseCyclesCounter ? "<UseCyclesCounter>true</UseCyclesCounter>\n" : "<UseCyclesCounter>false</UseCyclesCounter>\n");
+        AddXmlDec(sXml, "</ETW>\n");
     }
 
-    sXml += "<TimeSpans>\n";
+    AddXmlInc(sXml, "<TimeSpans>\n");
     for (const auto& timespan : _vTimeSpans)
     {
-        sXml += timespan.GetXml();
+        sXml += timespan.GetXml(indent);
     }
-    sXml += "</TimeSpans>\n";
-    sXml += "</Profile>\n";
+    AddXmlDec(sXml, "</TimeSpans>\n");
+    AddXmlDec(sXml, "</Profile>\n");
     return sXml;
 }
 
@@ -792,16 +853,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     fOk = false;
                 }
 
-                // FIXME: we can no longer do this check, because the target no longer
-                // contains a property that uniquely identifies the case where "-s" or <StrideSize>
-                // was passed.  
-#if 0
-                if (target.GetUseRandomAccessPattern() && target.GetEnableCustomStrideSize())
-                {
-                    fprintf(stderr, "WARNING: -s is ignored if -r is provided\n");
-                }
-#endif
-                if (target.GetUseRandomAccessPattern())
+                if (target.GetRandomRatio())
                 {
                     if (target.GetThreadStrideInBytes() > 0)
                     {
@@ -824,15 +876,15 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                 }
                 else
                 {
+                    if (target.GetDistributionRange().size() != 0)
+                    {
+                        fprintf(stderr, "ERROR: random distribution ranges (-rd) do not apply to sequential-only IO patterns\n");
+                        fOk = false;
+                    }
+                    
                     if (target.GetUseParallelAsyncIO() && target.GetRequestCount() == 1)
                     {
                         fprintf(stderr, "WARNING: -p does not have effect unless outstanding I/O count (-o) is > 1\n");
-                    }
-
-                    if (timeSpan.GetRandSeed() > 0)
-                    {
-                        fprintf(stderr, "WARNING: -z is ignored if -r is not provided\n");
-                        // although ulRandSeed==0 is a valid value, it's interpreted as "not provided" for this warning
                     }
 
                     if (target.GetUseInterlockedSequential())
@@ -869,6 +921,78 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     }
                 }
 
+                // Distribution ranges are only applied to random loads. Note validation failure in the sequential case.
+                // TBD this should be moved to a proper Distribution class.
+                {
+                    UINT32 ioAcc = 0;
+                    UINT64 targetAcc = 0;
+                    bool absZero = false, absZeroLast = false;
+                    for  (const auto& r : target.GetDistributionRange())
+                    {
+                        if (target.GetDistributionType() == DistributionType::Absolute)
+                        {
+                            // allow zero target span in last position
+                            absZeroLast = false;
+                            if (r._dst.second == 0 && !absZero)
+                            {
+                                // legal in last position
+                                absZero = absZeroLast = true;
+                            }
+                            else if (r._dst.second < target.GetBlockSizeInBytes())
+                            {
+                                fprintf(stderr, "ERROR: invalid random distribution target range %I64u - must be a minimum of the specified block size (%u bytes)\n", r._dst.second, target.GetBlockSizeInBytes());
+                                fOk = false;
+                                break;
+                            }
+                        }
+
+                        // Validate accumulating IO%
+                        if (ioAcc + r._span > 100)
+                        {
+                            fprintf(stderr, "ERROR: invalid random distribution IO%% %u: can be at most %u - total must be <= 100%%\n", r._span, 100 - ioAcc);
+                            fOk = false;
+                            break;
+                        }
+
+                        // Validate accumulating Target%
+                        // Note that absolute range needs no additional validation - known nonzero/large enough for IO
+                        if (target.GetDistributionType() == DistributionType::Percent)
+                        {
+                            if (targetAcc + r._dst.second > 100) 
+                            {
+                                fprintf(stderr, "ERROR: invalid random distribution Target%% %I64u: can be at most %I64u - total must be <= 100%%\n", r._dst.second, 100 - targetAcc);
+                                fOk = false;
+                                break;
+                            }
+
+                            // Consuming the target before consuming the IO is invalid.
+                            // No holes in IO.
+                            if (targetAcc + r._dst.second == 100 && ioAcc + r._span < 100)
+                            {
+                                fprintf(stderr, "ERROR: invalid random distribution: the target is covered with %u%% IO left to distribute\n", 100 - (ioAcc + r._span));
+                                fOk = false;
+                                break;
+                            }
+                        }
+
+                        ioAcc += r._span;
+                        targetAcc += r._dst.second;
+                    }
+
+                    // Percent dist Target% must sum to 100%. IO% underflow (either due to early Target% 100% or Target% overflow) is handled above.
+                    if (target.GetDistributionType() == DistributionType::Percent &&
+                        targetAcc != 100)
+                    {
+                        fprintf(stderr, "ERROR: invalid random distribution span: Target%% (%I64u%%) must total 100%%\n", targetAcc);
+                        fOk = false;
+                    }
+                    if (absZero && !absZeroLast)
+                    {
+                        fprintf(stderr, "ERROR: invalid zero target range in random distribution - must be a minimum of the specified block size (%u bytes)\n", target.GetBlockSizeInBytes());
+                        fOk = false;
+                    }
+                }
+
                 if (target.GetRandomDataWriteBufferSize() > 0)
                 {
                     if (target.GetRandomDataWriteBufferSize() < target.GetBlockSizeInBytes())
@@ -898,6 +1022,18 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     target.GetMemoryMappedIoFlushMode() != MemoryMappedIoFlushMode::Undefined)
                 {
                     fprintf(stderr, "ERROR: memory mapped flush mode (-N) can only be specified with memory mapped IO (-Sm)\n");
+                    fOk = false;
+                }
+
+                if (GetProfileOnly() == false)
+                {
+                    auto sPath = target.GetPath();
+
+                    if (sPath[0] == TEMPLATE_TARGET_PREFIX)
+                    {
+                        fprintf(stderr, "ERROR: template target '%s' was not substituted - all template targets must be substituted to run a profile\n", sPath.c_str());
+                        fOk = false;
+                    }
                 }
 
                 // in the cases where there is only a single configuration specified for each target (e.g., cmdline),

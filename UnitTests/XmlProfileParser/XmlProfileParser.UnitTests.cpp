@@ -29,7 +29,6 @@ SOFTWARE.
 
 #include "StdAfx.h"
 #include "XmlProfileParser.UnitTests.h"
-#include "XmlProfileParser.h"
 #include <stdlib.h>
 
 using namespace WEX::TestExecution;
@@ -203,7 +202,9 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        // note: many conflicts, this ut is a broad blend of specific element parsing, NOT a valid profile
+        VERIFY_IS_FALSE(profile.Validate(false));
         VERIFY_IS_TRUE(profile.GetVerbose() == true);
         VERIFY_IS_TRUE(profile.GetProgress() == 15);
 // TODO:        VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b4K -w84 -a1,4,6 testfile.dat testfile2.dat") == 0);
@@ -240,7 +241,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
         VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
         VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)123);
-        VERIFY_IS_TRUE(t.GetUseRandomAccessPattern() == true);
+        VERIFY_IS_TRUE(t.GetRandomRatio() == 100);
         VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
         VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 234);
         VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 333);
@@ -270,7 +271,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetPath().compare("testfile2.dat") == 0);
         VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
         VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
-        VERIFY_IS_TRUE(t.GetUseRandomAccessPattern() == false);
+        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
         VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
         VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
         VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
@@ -301,7 +302,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetPath().compare("testfile3.dat") == 0);
         VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
         VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
-        VERIFY_IS_TRUE(t.GetUseRandomAccessPattern() == false);
+        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
         VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
         VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
         VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
@@ -332,7 +333,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetPath().compare("testfile4.dat") == 0);
         VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
         VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
-        VERIFY_IS_TRUE(t.GetUseRandomAccessPattern() == false);
+        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
         VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
         VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
         VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
@@ -423,7 +424,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::UseMaxSize);
     }
 
@@ -449,7 +451,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::OnlyFilesWithConstantSizes);
     }
 
@@ -475,7 +478,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::OnlyFilesWithConstantOrZeroSizes);
     }
 
@@ -503,7 +507,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         vector<TimeSpan> vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         vector<Target> vTargets(vTimespans[0].GetTargets());
@@ -541,7 +546,8 @@ namespace UnitTests
 
             XmlProfileParser p;
             Profile profile;
-            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
             vector<TimeSpan> vTimespans(profile.GetTimeSpans());
             VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
 
@@ -578,7 +584,7 @@ namespace UnitTests
 
             XmlProfileParser p;
             Profile profile;
-            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         }
 
         // out-of-range group index (WORD)
@@ -606,7 +612,7 @@ namespace UnitTests
 
             XmlProfileParser p;
             Profile profile;
-            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         }
     }
 
@@ -635,7 +641,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         vector<TimeSpan> vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
 
@@ -672,7 +679,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         vector<TimeSpan> vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         vector<Target> vTargets(vTimespans[0].GetTargets());
@@ -705,7 +713,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         vector<TimeSpan> vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         VERIFY_IS_TRUE(vTimespans[0].GetRandomWriteData() == true);
@@ -744,7 +753,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         vector<TimeSpan> vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         vector<Target> vTargets(vTimespans[0].GetTargets());
@@ -783,7 +793,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         vector<TimeSpan> vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         vector<Target> vTargets(vTimespans[0].GetTargets());
@@ -835,7 +846,8 @@ namespace UnitTests
 
         XmlProfileParser p;
         Profile profile;
-        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, _hModule));
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        VERIFY_IS_TRUE(profile.Validate(false));
         vector<TimeSpan> vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         VERIFY_ARE_EQUAL(vTimespans[0].GetThreadCount(), (DWORD)4);
@@ -853,5 +865,808 @@ namespace UnitTests
         VERIFY_ARE_EQUAL(vThreadTargets[2].GetWeight(), (UINT32)0);
         VERIFY_ARE_EQUAL(vTargets[1].GetWeight(), (UINT32)100);
         VERIFY_ARE_EQUAL(vTargets[1].GetThreadTargets().size(), (size_t)0);
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseThroughput()
+    {
+        const PCHAR xmlDoc = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                       "<Profile>\n"
+                       "    <TimeSpans>\n"
+                       "        <TimeSpan>\n"
+                       "            <Targets>\n"
+                       "                <Target>\n"
+                       "                    <Path></Path>\n"
+                       "                    <BlockSize>%s</BlockSize>\n"
+                       "                    <Throughput%s>%s</Throughput>\n"
+                       "                </Target>\n"
+                       "            </Targets>\n"
+                       "        </TimeSpan>\n"
+                       "    </TimeSpans>\n"
+                       "</Profile>\n";
+        XmlProfileParser p;
+        FILE *pFile = nullptr;
+
+        //
+        // Positive varations - units & default
+        //
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "131072", " unit=\"IOPS\"", "10");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetTargets()[0].GetThroughputInBytesPerMillisecond(), (DWORD)((128*1024*10)/1000));
+        }
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "131072", " unit=\"BPMS\"", "1500");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetTargets()[0].GetThroughputInBytesPerMillisecond(), (DWORD)1500);
+        }
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "131072", "", "1024");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetTargets()[0].GetThroughputInBytesPerMillisecond(), (DWORD)1024);
+        }
+
+        //
+        // Negative variations - bad units / good units with bad data
+        //
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "131072", " unit=\"FRUIT\"", "1500");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "131072", " unit=\"IOPS\"", "FRUIT");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "131072", " unit=\"BPMS\"", "FRUIT");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "131072", "", "FRUIT");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseRandomSequentialMixed()
+    {
+        const PCHAR xmlDoc = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                       "<Profile>\n"
+                       "    <TimeSpans>\n"
+                       "        <TimeSpan>\n"
+                       "            <Targets>\n"
+                       "                <Target>\n"
+                       "                    <Path></Path>\n"
+                       "%s"                                             // insert conflicts
+                       "                    <Random%s>%s</Random%s>"    // Random/RandomRatio
+                       "                </Target>\n"
+                       "            </Targets>\n"
+                       "        </TimeSpan>\n"
+                       "    </TimeSpans>\n"
+                       "</Profile>\n";
+        XmlProfileParser p;
+        FILE *pFile = nullptr;
+
+        // Positive cases
+
+        // Isolated
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "", "Ratio", "50", "Ratio");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetTargets()[0].GetRandomRatio(), (UINT32) 50);
+        }
+
+        // With <Random>
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "<Random>8192</Random>", "Ratio", "50", "Ratio");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetTargets()[0].GetRandomRatio(), (UINT32) 50);
+        }        
+
+        // Negative, bounds validation
+        
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "", "Ratio", "0", "Ratio");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "", "Ratio", "100", "Ratio");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "", "Ratio", "-100", "Ratio");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "", "Ratio", "200", "Ratio");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "", "Ratio", "junk", "Ratio");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // Negative, sequential conflict with RandomRatio
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "<StrideSize>8192</StrideSize>", "Ratio", "50", "Ratio");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // Negative, sequential conflict with Random
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDoc, "<StrideSize>8192</StrideSize>", "", "8192", "");
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+    }
+
+    // Template document for running distribution tests - type tags bracketing a type-specific insert
+    static const PCHAR xmlDistDoc = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<Profile>\n"
+        "    <TimeSpans>\n"
+        "        <TimeSpan>\n"
+        "            <Targets>\n"
+        "                <Target>\n"
+        "                    <Path></Path>\n"
+        "                    <Random>65536</Random>\n"
+        "                    <Distribution>\n"
+        "                        <%s>\n"            // type
+        "                            %s"            // ranges
+        "                        </%s>\n"           // type
+        "                    </Distribution>"
+        "                </Target>\n"
+        "            </Targets>\n"
+        "        </TimeSpan>\n"
+        "    </TimeSpans>\n"
+        "</Profile>\n";
+
+    void XmlProfileParserUnitTests::ValidateDistribution(
+        const PWCHAR desc,
+        boolean expectedParse,
+        boolean expectedValidate,
+        DistributionType type,
+        PCHAR xmlDoc,
+        const RangePair *insert,
+        const DistQuad *dist
+        )
+    {
+        Profile profile;
+        XmlProfileParser p;
+        FILE *pFile = nullptr;
+        string xmlInsert;
+
+        // Construct XML range list
+        for (UINT32 i = 0; i < insert->size; i++)
+        {
+            xmlInsert += "<Range IO=\"";
+            xmlInsert += to_string(insert->range[i].io);
+            xmlInsert += "\">";
+            xmlInsert += to_string(insert->range[i].target);
+            xmlInsert += "</Range>\n";
+        }
+
+        // Bracketing typename - xmlDoc is assumed to be of the form ...<Type>[insert here]</Type>...
+        PCHAR typeName = nullptr;
+
+        switch (type)
+        {
+            case DistributionType::Absolute:
+            typeName = "Absolute";
+            break;
+            
+            case DistributionType::Percent:
+            typeName = "Percent";
+            break;
+            
+            default:
+            assert(false);
+            break;
+        }
+
+        // Generate content into temporary file and parse/validate
+        // Emit the description at parse validation for documentation in the output
+        fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+        VERIFY_IS_TRUE(pFile != nullptr);
+        fprintf(pFile, xmlDoc, typeName, xmlInsert.c_str(), typeName);
+        fclose(pFile);
+
+        if (!expectedParse)
+        {
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule), desc);
+            return; // done
+        }
+
+        VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule), desc);
+
+        if (!expectedValidate)
+        {
+            VERIFY_IS_FALSE(profile.Validate(false));
+            return; // done
+        }
+
+        VERIFY_IS_TRUE(profile.Validate(false));
+        auto t = profile.GetTimeSpans()[0].GetTargets()[0];
+        auto dt = t.GetDistributionType();
+        auto& v = t.GetDistributionRange();
+
+        VERIFY_ARE_EQUAL(type, dt);
+        VERIFY_ARE_EQUAL(dist->size, v.size());
+        for (size_t i = 0; i < v.size(); ++i)
+        {
+            VERIFY_ARE_EQUAL(v[i]._src, dist->range[i].ioBase);
+            VERIFY_ARE_EQUAL(v[i]._span, dist->range[i].ioSpan);
+            VERIFY_ARE_EQUAL(v[i]._dst.first, dist->range[i].targetBase);
+            VERIFY_ARE_EQUAL(v[i]._dst.second, dist->range[i].targetSpan);
+        }
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseDistributionAbsolute()
+    {
+        //
+        // Positive cases - first matches the ResultParser UT
+        //
+
+        {
+            // -rdabs10/1g:10/1g:0/100g
+            // hole + tail
+            const RangePair insert = {
+                3,
+                {{10,   1*GB},
+                {10,    1*GB},
+                {0,     100*GB}}
+            };
+            const DistQuad dist = {
+                4,
+                {{0,    10,     0,      1*GB},
+                {10,    10,     1*GB,   1*GB},
+                {20,    0,      2*GB,   100*GB},
+                {20,    80,     102*GB, 0}}
+            };
+
+            ValidateDistribution(L"Case 1", true, true, DistributionType::Absolute, xmlDistDoc, &insert, &dist);
+        }
+
+        //
+        // Negative cases
+        //
+
+        {
+            // -rdabs10/10 (note lack of units/small)
+            // same negative case in cmdlineparser
+            const RangePair insert = {
+                1,
+                {{10,   10}}
+            };
+
+            ValidateDistribution(L"Case 2", true, false, DistributionType::Absolute, xmlDistDoc, &insert, nullptr);
+        }
+        {
+            // zero target not at end
+            const RangePair insert = {
+                3,
+                {{10,   1*GB},
+                {10,    0},
+                {80,    1*GB}}
+            };
+
+            ValidateDistribution(L"Case 3", true, false, DistributionType::Absolute, xmlDistDoc, &insert, nullptr);
+        }
+        {
+            // -rdabs10/10G:80/10G:20:10G
+            // IO% overflow
+            const RangePair insert = {
+                3,
+                {{10,   10*GB},
+                {80,   10*GB},
+                {20,   10*GB}}
+            };
+
+            ValidateDistribution(L"Case 4", true, false, DistributionType::Absolute, xmlDistDoc, &insert, nullptr);
+        }
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseDistributionPercent()
+    {
+        //
+        // Positive cases - first matches the ResultParser UT
+        //
+
+        {
+            // -rdpct10/10:10/10:0/10
+            // hole + tail
+            const RangePair insert = {
+                3,
+                {{10,   10},
+                {10,    10},
+                {0,     10}}
+            };
+            const DistQuad dist = {
+                4,
+                {{0,    10,     0,      10},
+                {10,    10,     10,     10},
+                {20,    0,      20,     10},
+                {20,    80,     30,     70}}
+            };
+
+            ValidateDistribution(L"Case 1", true, true, DistributionType::Percent, xmlDistDoc, &insert, &dist);
+        }
+
+        //
+        // Negative cases
+        //
+
+        {
+            // zero target not at end - fails parse (before validate)
+            const RangePair insert = {
+                3,
+                {{10,   10},
+                {10,    0},
+                {80,    10}}
+            };
+
+            ValidateDistribution(L"Case 2", false, false, DistributionType::Percent, xmlDistDoc, &insert, nullptr);
+        }
+        {
+            // zero target at end - fails parse (before validate)
+            const RangePair insert = {
+                2,
+                {{10,   10},
+                {90,    0}}
+            };
+
+            ValidateDistribution(L"Case 3", false, false, DistributionType::Percent, xmlDistDoc, &insert, nullptr);
+        }
+        {
+            // IO% overflow / Target% OK
+            const RangePair insert = {
+                3,
+                {{10,   10},
+                {80,    10},
+                {20,    80}}
+            };
+
+            ValidateDistribution(L"Case 4", true, false, DistributionType::Percent, xmlDistDoc, &insert, nullptr);
+        }
+        {
+            // IO% 100% / Target% incomplete
+            const RangePair insert = {
+                3,
+                {{10,   10},
+                {80,    10},
+                {10,    10}}
+            };
+
+            ValidateDistribution(L"Case 5", true, false, DistributionType::Percent, xmlDistDoc, &insert, nullptr);
+        }
+        {
+            // IO% incomplete / Target% 100%
+            const RangePair insert = {
+                3,
+                {{10,   10},
+                {10,    80},
+                {10,    10}}
+            };
+
+            ValidateDistribution(L"Case 6", true, false, DistributionType::Percent, xmlDistDoc, &insert, nullptr);
+        }
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseTemplateTargets()
+    {
+        const PCHAR xmlDocPre = \
+                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                    "<Profile>\n"
+                    "  <TimeSpans>\n";
+
+        const PCHAR xmlDocPost = \
+                    "  </TimeSpans>\n"
+                    "</Profile>\n";
+
+        const PCHAR xmlTimeSpanPre = \
+                    "<TimeSpan>\n"
+                    "  <Targets>\n";
+
+        const PCHAR xmlTimeSpanPost = \
+                    "  </Targets>\n"
+                    "</TimeSpan>\n";
+
+        const PCHAR xmlTarget = \
+                    "<Target>\n"
+                    "  <Path>%s</Path>\n"
+                    "</Target>\n";
+
+        XmlProfileParser p;
+        FILE *pFile = nullptr;
+
+        // Non template baseline - null ptr pass for subst
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "foo.bin");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "foo.bin"));
+        }
+
+        // Non template baseline - empty pass for subst
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "foo.bin");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+ 
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "foo.bin"));
+        }
+
+        // Template - 1 template, bad formats which will not parse (and will parse independent of subst)
+
+        {
+
+            char *cStrs[] = { "*", "*foo", "*1foo", "**1", "*-1" };
+
+            for (auto s : cStrs)
+            {
+                Profile profile;
+                fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+                VERIFY_IS_TRUE(pFile != nullptr);
+                fprintf(pFile, xmlDocPre);
+                fprintf(pFile, xmlTimeSpanPre);
+                fprintf(pFile, xmlTarget, s);
+                fprintf(pFile, xmlTimeSpanPost);
+                fprintf(pFile, xmlDocPost);
+                fclose(pFile);
+                pFile = nullptr;
+
+                vector<Target> vTargets;
+    
+                VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            }
+        }
+
+        // Template - 1 template, unsubst, will fail execution validation since !profile only
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+ 
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            VERIFY_IS_FALSE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "*1"));
+        }
+
+        // Template - 1 timespan 1 template, unsubst, will pass execution validation since profile only
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+ 
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            profile.SetProfileOnly(true);
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "*1"));
+        }
+
+        // Template - 1 timespan 1 template 1 subst - will pass execution validation
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+            vTargets.emplace_back();
+            vTargets[0].SetPath("foo.bin");
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "foo.bin"));
+        }
+
+        // Template - 1 timespan 1 template 2 subst - will fail parse due to unused subst
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+            vTargets.emplace_back();
+            vTargets[0].SetPath("foo.bin");
+            vTargets.emplace_back();
+            vTargets[1].SetPath("bar.bin");
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+        }        
+
+        // 1 timespan 2 same template 1 subst
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+            vTargets.emplace_back();
+            vTargets[0].SetPath("foo.bin");
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "foo.bin"));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[1].GetPath().c_str(), "foo.bin"));
+        }        
+
+        // 1 timespan 2 template 2 subst
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTarget, "*2");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+            vTargets.emplace_back();
+            vTargets[0].SetPath("foo.bin");
+            vTargets.emplace_back();
+            vTargets[1].SetPath("bar.bin");
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "foo.bin"));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[1].GetPath().c_str(), "bar.bin"));
+        }        
+
+        // 1 timespan 2 template 1 subst - will fail since second template does not have a subst
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTarget, "*2");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+            vTargets.emplace_back();
+            vTargets[0].SetPath("foo.bin");
+
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+        }        
+
+        // 2 timespan same template 1 subst
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+            vTargets.emplace_back();
+            vTargets[0].SetPath("foo.bin");
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "foo.bin"));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[1].GetTargets()[0].GetPath().c_str(), "foo.bin"));
+        }        
+
+        // 2 timespan 1 template/ea 2 subst
+
+        {
+            Profile profile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, xmlDocPre);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*1");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlTimeSpanPre);
+            fprintf(pFile, xmlTarget, "*2");
+            fprintf(pFile, xmlTimeSpanPost);
+            fprintf(pFile, xmlDocPost);
+            fclose(pFile);
+            pFile = nullptr;
+
+            vector<Target> vTargets;
+            vTargets.emplace_back();
+            vTargets[0].SetPath("foo.bin");
+            vTargets.emplace_back();
+            vTargets[1].SetPath("bar.bin");
+
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, &vTargets, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "foo.bin"));
+            VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[1].GetTargets()[0].GetPath().c_str(), "bar.bin"));
+        }        
     }
 }

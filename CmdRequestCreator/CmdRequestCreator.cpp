@@ -51,22 +51,6 @@ static HANDLE g_hEventStarted = NULL;   // event signalled to notify that the ac
 static HANDLE g_hEventFinished = NULL;  // event signalled to notify that the actual test has finished
 
 /*****************************************************************************/
-// wrapper for printf. printf cannot be used directly, because IORequestGenerator.dll
-// may be consumed by gui app which doesn't have stdout
-void WINAPI PrintOut(const char *format, va_list args)
-{
-    vprintf(format, args);
-}
-
-/*****************************************************************************/
-// wrapper for fprintf. fprintf cannot be used directly, because IORequestGenerator.dll
-// may be consumed by gui app which doesn't have stdout
-void WINAPI PrintError(const char *format, va_list args)
-{
-    vfprintf(stderr, format, args);
-}
-
-/*****************************************************************************/
 BOOL WINAPI ctrlCRoutine(DWORD dwCtrlType)
 {
     if( CTRL_C_EVENT == dwCtrlType )
@@ -123,6 +107,27 @@ int __cdecl main(int argc, const char* argv[])
         return ERROR_PARSE_CMD_LINE;
     }
 
+    // Instantiate parsers
+    ResultParser resultParser;
+    XmlResultParser xmlResultParser;
+    IResultParser *pResultParser = nullptr;
+    if (profile.GetResultsFormat() == ResultsFormat::Xml)
+    {
+        pResultParser = &xmlResultParser;
+    }
+    else
+    {
+        pResultParser = &resultParser;
+    }
+
+    // Profile only? If so, complete now.
+    if (profile.GetProfileOnly())
+    {
+        string s = pResultParser->ParseProfile(profile);
+        printf("%s", s.c_str());
+        return 0;
+    }
+
     synch.pfnCallbackTestStarted = TestStarted;
     synch.pfnCallbackTestFinished = TestFinished;
 
@@ -157,20 +162,9 @@ int __cdecl main(int argc, const char* argv[])
     //
     // call IO request generator
     //
-    ResultParser resultParser;
-    XmlResultParser xmlResultParser;
-    IResultParser *pResultParser = nullptr;
-    if (profile.GetResultsFormat() == ResultsFormat::Xml)
-    {
-        pResultParser = &xmlResultParser;
-    }
-    else
-    {
-        pResultParser = &resultParser;
-    }
 
     IORequestGenerator ioGenerator;
-    if (!ioGenerator.GenerateRequests(profile, *pResultParser, (PRINTF)PrintOut, (PRINTF)PrintError, (PRINTF)PrintOut, &synch))
+    if (!ioGenerator.GenerateRequests(profile, *pResultParser, &synch))
     {
         if (profile.GetResultsFormat() == ResultsFormat::Xml)
         {

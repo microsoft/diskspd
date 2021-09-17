@@ -69,10 +69,12 @@ namespace UnitTests
         results.vSystemProcessorPerfInfo.push_back(zeroSystemProcessorInfo);
         results.vSystemProcessorPerfInfo.push_back(zeroSystemProcessorInfo);
         
-        // TODO: many file cases (see WINPERF bug 2407)
+        // TODO: multiple target cases, full profile/result variations
         target.SetPath("testfile1.dat");
         target.SetCacheMode(TargetCacheMode::DisableOSCache);
         target.SetWriteThroughMode(WriteThroughMode::On);
+        target.SetThroughputIOPS(1000);
+        
         timeSpan.AddTarget(target);
         timeSpan.SetCalculateIopsStdDev(true);
 
@@ -139,169 +141,301 @@ namespace UnitTests
         // stringify random text, quoting "'s and adding newline/preserving tabs
         // gc some.txt |% { write-host $("`"{0}\n`"" -f $($_ -replace "`"","\`"" -replace "`t","\t")) }
 
-        const char *pcszExpectedOutput = "<Results>\n"
-            "<System>\n"
-            "<ComputerName></ComputerName>\n"
-            "<Tool>\n"
-            "<Version>" DISKSPD_NUMERIC_VERSION_STRING "</Version>\n"
-            "<VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n"
-            "</Tool>\n"
-            "<RunTime></RunTime>\n"
-            "<ProcessorTopology>\n"
-            "<Group Group=\"0\" MaximumProcessors=\"1\" ActiveProcessors=\"1\" ActiveProcessorMask=\"0x1\"/>\n"
-            "<Group Group=\"1\" MaximumProcessors=\"4\" ActiveProcessors=\"2\" ActiveProcessorMask=\"0x6\"/>\n"
-            "<Node Node=\"0\" Group=\"0\" Processors=\"0x1\"/>\n"
-            "<Node Node=\"1\" Group=\"1\" Processors=\"0x6\"/>\n"
-            "<Socket>\n"
-            "<Group Group=\"0\" Processors=\"0x1\"/>\n"
-            "<Group Group=\"1\" Processors=\"0x6\"/>\n"
-            "</Socket>\n"
-            "<HyperThread Group=\"0\" Processors=\"0x1\"/>\n"
-            "<HyperThread Group=\"1\" Processors=\"0x6\"/>\n"
-            "</ProcessorTopology>\n"
-            "</System>\n"
-            "<Profile>\n"
-            "<Progress>0</Progress>\n"
-            "<ResultFormat>text</ResultFormat>\n"
-            "<Verbose>false</Verbose>\n"
-            "<TimeSpans>\n"
-            "<TimeSpan>\n"
-            "<CompletionRoutines>false</CompletionRoutines>\n"
-            "<MeasureLatency>false</MeasureLatency>\n"
-            "<CalculateIopsStdDev>true</CalculateIopsStdDev>\n"
-            "<DisableAffinity>false</DisableAffinity>\n"
-            "<Duration>10</Duration>\n"
-            "<Warmup>5</Warmup>\n"
-            "<Cooldown>0</Cooldown>\n"
-            "<ThreadCount>0</ThreadCount>\n"
-            "<RequestCount>0</RequestCount>\n"
-            "<IoBucketDuration>1000</IoBucketDuration>\n"
-            "<RandSeed>0</RandSeed>\n"
-            "<Targets>\n"
-            "<Target>\n"
-            "<Path>testfile1.dat</Path>\n"
-            "<BlockSize>65536</BlockSize>\n"
-            "<BaseFileOffset>0</BaseFileOffset>\n"
-            "<SequentialScan>false</SequentialScan>\n"
-            "<RandomAccess>false</RandomAccess>\n"
-            "<TemporaryFile>false</TemporaryFile>\n"
-            "<UseLargePages>false</UseLargePages>\n"
-            "<DisableOSCache>true</DisableOSCache>\n"
-            "<WriteThrough>true</WriteThrough>\n"
-            "<WriteBufferContent>\n"
-            "<Pattern>sequential</Pattern>\n"
-            "</WriteBufferContent>\n"
-            "<ParallelAsyncIO>false</ParallelAsyncIO>\n"
-            "<StrideSize>65536</StrideSize>\n"
-            "<InterlockedSequential>false</InterlockedSequential>\n"
-            "<ThreadStride>0</ThreadStride>\n"
-            "<MaxFileSize>0</MaxFileSize>\n"
-            "<RequestCount>2</RequestCount>\n"
-            "<WriteRatio>0</WriteRatio>\n"
-            "<Throughput>0</Throughput>\n"
-            "<ThreadsPerFile>1</ThreadsPerFile>\n"
-            "<IOPriority>3</IOPriority>\n"
-            "<Weight>1</Weight>\n"
-            "</Target>\n"
-            "</Targets>\n"
-            "</TimeSpan>\n"
-            "</TimeSpans>\n"
-            "</Profile>\n"
-            "<TimeSpan>\n"
-            "<TestTimeSeconds>120.00</TestTimeSeconds>\n"
-            "<ThreadCount>1</ThreadCount>\n"
-            "<RequestCount>0</RequestCount>\n"
-            "<ProcCount>3</ProcCount>\n"
-            "<CpuUtilization>\n"
-            "<CPU>\n"
-            "<Group>0</Group>\n"
-            "<Id>0</Id>\n"
-            "<UsagePercent>55.00</UsagePercent>\n"
-            "<UserPercent>30.00</UserPercent>\n"
-            "<KernelPercent>25.00</KernelPercent>\n"
-            "<IdlePercent>45.00</IdlePercent>\n"
-            "</CPU>\n"
-            "<CPU>\n"
-            "<Group>1</Group>\n"
-            "<Id>1</Id>\n"
-            "<UsagePercent>0.00</UsagePercent>\n"
-            "<UserPercent>0.00</UserPercent>\n"
-            "<KernelPercent>0.00</KernelPercent>\n"
-            "<IdlePercent>100.00</IdlePercent>\n"
-            "</CPU>\n"
-            "<CPU>\n"
-            "<Group>1</Group>\n"
-            "<Id>2</Id>\n"
-            "<UsagePercent>0.00</UsagePercent>\n"
-            "<UserPercent>0.00</UserPercent>\n"
-            "<KernelPercent>0.00</KernelPercent>\n"
-            "<IdlePercent>100.00</IdlePercent>\n"
-            "</CPU>\n"
-            "<Average>\n"
-            "<UsagePercent>18.33</UsagePercent>\n"
-            "<UserPercent>10.00</UserPercent>\n"
-            "<KernelPercent>8.33</KernelPercent>\n"
-            "<IdlePercent>81.67</IdlePercent>\n"
-            "</Average>\n"
-            "</CpuUtilization>\n"
-            "<Iops>\n"
-            "<ReadIopsStdDev>0.000</ReadIopsStdDev>\n"
-            "<IopsStdDev>0.000</IopsStdDev>\n"
-            "<Bucket SampleMillisecond=\"1000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"2000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"3000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"4000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"5000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"6000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"7000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"8000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"9000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"10000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "</Iops>\n"
-            "<Thread>\n"
-            "<Id>0</Id>\n"
-            "<Target>\n"
-            "<Path>testfile1.dat</Path>\n"
-            "<BytesCount>6291456</BytesCount>\n"
-            "<FileSize>10485760</FileSize>\n"
-            "<IOCount>16</IOCount>\n"
-            "<ReadBytes>4194304</ReadBytes>\n"
-            "<ReadCount>6</ReadCount>\n"
-            "<WriteBytes>2097152</WriteBytes>\n"
-            "<WriteCount>10</WriteCount>\n"
-            "<Iops>\n"
-            "<ReadIopsStdDev>0.000</ReadIopsStdDev>\n"
-            "<IopsStdDev>0.000</IopsStdDev>\n"
-            "<Bucket SampleMillisecond=\"1000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"2000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"3000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"4000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"5000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"6000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"7000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"8000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"9000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "<Bucket SampleMillisecond=\"10000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
-            "</Iops>\n"
-            "</Target>\n"
-            "</Thread>\n"
-            "</TimeSpan>\n"
+        const char *pcszExpectedOutput = \
+            "<Results>\n"
+            "  <System>\n"
+            "    <ComputerName></ComputerName>\n"
+            "    <Tool>\n"
+            "      <Version>" DISKSPD_NUMERIC_VERSION_STRING "</Version>\n"
+            "      <VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n"
+            "    </Tool>\n"
+            "    <RunTime></RunTime>\n"
+            "    <ProcessorTopology>\n"
+            "      <Group Group=\"0\" MaximumProcessors=\"1\" ActiveProcessors=\"1\" ActiveProcessorMask=\"0x1\"/>\n"
+            "      <Group Group=\"1\" MaximumProcessors=\"4\" ActiveProcessors=\"2\" ActiveProcessorMask=\"0x6\"/>\n"
+            "      <Node Node=\"0\" Group=\"0\" Processors=\"0x1\"/>\n"
+            "      <Node Node=\"1\" Group=\"1\" Processors=\"0x6\"/>\n"
+            "      <Socket>\n"
+            "        <Group Group=\"0\" Processors=\"0x1\"/>\n"
+            "        <Group Group=\"1\" Processors=\"0x6\"/>\n"
+            "      </Socket>\n"
+            "      <HyperThread Group=\"0\" Processors=\"0x1\"/>\n"
+            "      <HyperThread Group=\"1\" Processors=\"0x6\"/>\n"
+            "    </ProcessorTopology>\n"
+            "  </System>\n"
+            "  <Profile>\n"
+            "    <Progress>0</Progress>\n"
+            "    <ResultFormat>text</ResultFormat>\n"
+            "    <Verbose>false</Verbose>\n"
+            "    <TimeSpans>\n"
+            "      <TimeSpan>\n"
+            "        <CompletionRoutines>false</CompletionRoutines>\n"
+            "        <MeasureLatency>false</MeasureLatency>\n"
+            "        <CalculateIopsStdDev>true</CalculateIopsStdDev>\n"
+            "        <DisableAffinity>false</DisableAffinity>\n"
+            "        <Duration>10</Duration>\n"
+            "        <Warmup>5</Warmup>\n"
+            "        <Cooldown>0</Cooldown>\n"
+            "        <ThreadCount>0</ThreadCount>\n"
+            "        <RequestCount>0</RequestCount>\n"
+            "        <IoBucketDuration>1000</IoBucketDuration>\n"
+            "        <RandSeed>0</RandSeed>\n"
+            "        <Targets>\n"
+            "          <Target>\n"
+            "            <Path>testfile1.dat</Path>\n"
+            "            <BlockSize>65536</BlockSize>\n"
+            "            <BaseFileOffset>0</BaseFileOffset>\n"
+            "            <SequentialScan>false</SequentialScan>\n"
+            "            <RandomAccess>false</RandomAccess>\n"
+            "            <TemporaryFile>false</TemporaryFile>\n"
+            "            <UseLargePages>false</UseLargePages>\n"
+            "            <DisableOSCache>true</DisableOSCache>\n"
+            "            <WriteThrough>true</WriteThrough>\n"
+            "            <WriteBufferContent>\n"
+            "              <Pattern>sequential</Pattern>\n"
+            "            </WriteBufferContent>\n"
+            "            <ParallelAsyncIO>false</ParallelAsyncIO>\n"
+            "            <StrideSize>65536</StrideSize>\n"
+            "            <InterlockedSequential>false</InterlockedSequential>\n"
+            "            <ThreadStride>0</ThreadStride>\n"
+            "            <MaxFileSize>0</MaxFileSize>\n"
+            "            <RequestCount>2</RequestCount>\n"
+            "            <WriteRatio>0</WriteRatio>\n"
+            "            <Throughput unit=\"IOPS\">1000</Throughput>\n"
+            "            <ThreadsPerFile>1</ThreadsPerFile>\n"
+            "            <IOPriority>3</IOPriority>\n"
+            "            <Weight>1</Weight>\n"
+            "          </Target>\n"
+            "        </Targets>\n"
+            "      </TimeSpan>\n"
+            "    </TimeSpans>\n"
+            "  </Profile>\n"
+            "  <TimeSpan>\n"
+            "    <TestTimeSeconds>120.00</TestTimeSeconds>\n"
+            "    <ThreadCount>1</ThreadCount>\n"
+            "    <RequestCount>0</RequestCount>\n"
+            "    <ProcCount>3</ProcCount>\n"
+            "    <CpuUtilization>\n"
+            "      <CPU>\n"
+            "        <Group>0</Group>\n"
+            "        <Id>0</Id>\n"
+            "        <UsagePercent>55.00</UsagePercent>\n"
+            "        <UserPercent>30.00</UserPercent>\n"
+            "        <KernelPercent>25.00</KernelPercent>\n"
+            "        <IdlePercent>45.00</IdlePercent>\n"
+            "      </CPU>\n"
+            "      <CPU>\n"
+            "        <Group>1</Group>\n"
+            "        <Id>1</Id>\n"
+            "        <UsagePercent>0.00</UsagePercent>\n"
+            "        <UserPercent>0.00</UserPercent>\n"
+            "        <KernelPercent>0.00</KernelPercent>\n"
+            "        <IdlePercent>100.00</IdlePercent>\n"
+            "      </CPU>\n"
+            "      <CPU>\n"
+            "        <Group>1</Group>\n"
+            "        <Id>2</Id>\n"
+            "        <UsagePercent>0.00</UsagePercent>\n"
+            "        <UserPercent>0.00</UserPercent>\n"
+            "        <KernelPercent>0.00</KernelPercent>\n"
+            "        <IdlePercent>100.00</IdlePercent>\n"
+            "      </CPU>\n"
+            "      <Average>\n"
+            "        <UsagePercent>18.33</UsagePercent>\n"
+            "        <UserPercent>10.00</UserPercent>\n"
+            "        <KernelPercent>8.33</KernelPercent>\n"
+            "        <IdlePercent>81.67</IdlePercent>\n"
+            "      </Average>\n"
+            "    </CpuUtilization>\n"
+            "    <Iops>\n"
+            "      <ReadIopsStdDev>0.000</ReadIopsStdDev>\n"
+            "      <IopsStdDev>0.000</IopsStdDev>\n"
+            "      <Bucket SampleMillisecond=\"1000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"2000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"3000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"4000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"5000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"6000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"7000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"8000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"9000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "      <Bucket SampleMillisecond=\"10000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "    </Iops>\n"
+            "    <Thread>\n"
+            "      <Id>0</Id>\n"
+            "      <Target>\n"
+            "        <Path>testfile1.dat</Path>\n"
+            "        <BytesCount>6291456</BytesCount>\n"
+            "        <FileSize>10485760</FileSize>\n"
+            "        <IOCount>16</IOCount>\n"
+            "        <ReadBytes>4194304</ReadBytes>\n"
+            "        <ReadCount>6</ReadCount>\n"
+            "        <WriteBytes>2097152</WriteBytes>\n"
+            "        <WriteCount>10</WriteCount>\n"
+            "        <Iops>\n"
+            "          <ReadIopsStdDev>0.000</ReadIopsStdDev>\n"
+            "          <IopsStdDev>0.000</IopsStdDev>\n"
+            "          <Bucket SampleMillisecond=\"1000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"2000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"3000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"4000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"5000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"6000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"7000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"8000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"9000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "          <Bucket SampleMillisecond=\"10000\" Read=\"1\" Write=\"0\" Total=\"1\" ReadMinLatencyMilliseconds=\"0.000\" ReadMaxLatencyMilliseconds=\"0.000\" ReadAvgLatencyMilliseconds=\"0.000\" ReadLatencyStdDev=\"0.000\" WriteMinLatencyMilliseconds=\"0.000\" WriteMaxLatencyMilliseconds=\"0.000\" WriteAvgLatencyMilliseconds=\"0.000\" WriteLatencyStdDev=\"0.000\"/>\n"
+            "        </Iops>\n"
+            "      </Target>\n"
+            "    </Thread>\n"
+            "  </TimeSpan>\n"
             "</Results>";
 
 #if 0
         HANDLE h;
         DWORD written;
-        h = CreateFileW(L"z:\\foo.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        h = CreateFileW(L"g:\\xmlresult-received.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         WriteFile(h, sResults.c_str(), (DWORD)sResults.length(), &written, NULL);
+        VERIFY_ARE_EQUAL(sResults.length(), written);
         CloseHandle(h);
 
-        printf("'%s'\n", sResults.c_str());
+        h = CreateFileW(L"g:\\xmlresult-expected.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        WriteFile(h, pcszExpectedOutput, (DWORD)strlen(pcszExpectedOutput), &written, NULL);
+        VERIFY_ARE_EQUAL((DWORD)strlen(pcszExpectedOutput), written);
+        CloseHandle(h);
+
+        printf("--\n%s\n", sResults.c_str());
         printf("-------------------------------------------------\n");
-        printf("'%s'\n", pcszExpectedOutput);
+        printf("--\n%s\n", pcszExpectedOutput);
 #endif
 
-        VERIFY_ARE_EQUAL(sResults.length(), strlen(pcszExpectedOutput));
-        VERIFY_ARE_EQUAL(memcmp(sResults.c_str(), pcszExpectedOutput, sResults.length()), 0);
-        VERIFY_IS_TRUE(strcmp(sResults.c_str(), pcszExpectedOutput) == 0);
+        VERIFY_ARE_EQUAL(0, strcmp(sResults.c_str(), pcszExpectedOutput));
+    }
+
+    void XmlResultParserUnitTests::Test_ParseProfile()
+    {
+        Profile profile;
+        XmlResultParser parser;
+        TimeSpan timeSpan;
+        Target target;
+
+        timeSpan.AddTarget(target);
+        profile.AddTimeSpan(timeSpan);
+
+        string s = parser.ParseProfile(profile);
+        const char *pcszExpectedOutput = "<Profile>\n"
+            "  <Progress>0</Progress>\n"
+            "  <ResultFormat>text</ResultFormat>\n"
+            "  <Verbose>false</Verbose>\n"
+            "  <TimeSpans>\n"
+            "    <TimeSpan>\n"
+            "      <CompletionRoutines>false</CompletionRoutines>\n"
+            "      <MeasureLatency>false</MeasureLatency>\n"
+            "      <CalculateIopsStdDev>false</CalculateIopsStdDev>\n"
+            "      <DisableAffinity>false</DisableAffinity>\n"
+            "      <Duration>10</Duration>\n"
+            "      <Warmup>5</Warmup>\n"
+            "      <Cooldown>0</Cooldown>\n"
+            "      <ThreadCount>0</ThreadCount>\n"
+            "      <RequestCount>0</RequestCount>\n"
+            "      <IoBucketDuration>1000</IoBucketDuration>\n"
+            "      <RandSeed>0</RandSeed>\n"
+            "      <Targets>\n"
+            "        <Target>\n"
+            "          <Path></Path>\n"
+            "          <BlockSize>65536</BlockSize>\n"
+            "          <BaseFileOffset>0</BaseFileOffset>\n"
+            "          <SequentialScan>false</SequentialScan>\n"
+            "          <RandomAccess>false</RandomAccess>\n"
+            "          <TemporaryFile>false</TemporaryFile>\n"
+            "          <UseLargePages>false</UseLargePages>\n"
+            "          <WriteBufferContent>\n"
+            "            <Pattern>sequential</Pattern>\n"
+            "          </WriteBufferContent>\n"
+            "          <ParallelAsyncIO>false</ParallelAsyncIO>\n"
+            "          <StrideSize>65536</StrideSize>\n"
+            "          <InterlockedSequential>false</InterlockedSequential>\n"
+            "          <ThreadStride>0</ThreadStride>\n"
+            "          <MaxFileSize>0</MaxFileSize>\n"
+            "          <RequestCount>2</RequestCount>\n"
+            "          <WriteRatio>0</WriteRatio>\n"
+            "          <Throughput>0</Throughput>\n"
+            "          <ThreadsPerFile>1</ThreadsPerFile>\n"
+            "          <IOPriority>3</IOPriority>\n"
+            "          <Weight>1</Weight>\n"
+            "        </Target>\n"
+            "      </Targets>\n"
+            "    </TimeSpan>\n"
+            "  </TimeSpans>\n"
+            "</Profile>\n";
+
+        //VERIFY_ARE_EQUAL(pcszExpectedOutput, s.c_str());
+        VERIFY_ARE_EQUAL(strlen(pcszExpectedOutput), s.length());
+        VERIFY_IS_TRUE(!strcmp(pcszExpectedOutput, s.c_str()));
+    }
+
+    void XmlResultParserUnitTests::Test_ParseTargetProfile()
+    {
+        Target target;
+        string sResults;
+        char pszExpectedOutput[4096];
+        int nWritten;
+
+        const char *pcszOutputTemplate = \
+            "<Target>\n"
+            "  <Path>testfile1.dat</Path>\n"
+            "  <BlockSize>65536</BlockSize>\n"
+            "  <BaseFileOffset>0</BaseFileOffset>\n"
+            "  <SequentialScan>false</SequentialScan>\n"
+            "  <RandomAccess>false</RandomAccess>\n"
+            "  <TemporaryFile>false</TemporaryFile>\n"
+            "  <UseLargePages>false</UseLargePages>\n"
+            "  <DisableOSCache>true</DisableOSCache>\n"
+            "  <WriteThrough>true</WriteThrough>\n"
+            "  <WriteBufferContent>\n"
+            "    <Pattern>sequential</Pattern>\n"
+            "  </WriteBufferContent>\n"
+            "  <ParallelAsyncIO>false</ParallelAsyncIO>\n"
+            "  <StrideSize>65536</StrideSize>\n"
+            "  <InterlockedSequential>false</InterlockedSequential>\n"
+            "  <ThreadStride>0</ThreadStride>\n"
+            "  <MaxFileSize>0</MaxFileSize>\n"
+            "  <RequestCount>2</RequestCount>\n"
+            "  <WriteRatio>0</WriteRatio>\n"
+            "  <Throughput%s>%s</Throughput>\n"       // 2 param
+            "  <ThreadsPerFile>1</ThreadsPerFile>\n"
+            "  <IOPriority>3</IOPriority>\n"
+            "  <Weight>1</Weight>\n"
+            "</Target>\n";
+
+        target.SetPath("testfile1.dat");
+        target.SetCacheMode(TargetCacheMode::DisableOSCache);
+        target.SetWriteThroughMode(WriteThroughMode::On);
+        
+        // Base case - no limit
+ 
+        nWritten = sprintf_s(pszExpectedOutput, sizeof(pszExpectedOutput),
+                             pcszOutputTemplate, "", "0");
+        VERIFY_IS_GREATER_THAN(nWritten, 0);
+        sResults = target.GetXml(0);
+        VERIFY_ARE_EQUAL(sResults, pszExpectedOutput);
+
+        // IOPS - with units
+
+        target.SetThroughputIOPS(1000);
+        nWritten = sprintf_s(pszExpectedOutput, sizeof(pszExpectedOutput),
+                             pcszOutputTemplate, " unit=\"IOPS\"", "1000");
+        VERIFY_IS_GREATER_THAN(nWritten, 0);
+        sResults = target.GetXml(0);
+        VERIFY_ARE_EQUAL(sResults, pszExpectedOutput);
+ 
+        // BPMS - not specified with units in output
+
+        target.SetThroughput(1000);
+        nWritten = sprintf_s(pszExpectedOutput, sizeof(pszExpectedOutput),
+                             pcszOutputTemplate, "", "1000");
+        VERIFY_IS_GREATER_THAN(nWritten, 0);
+        sResults = target.GetXml(0);
+        VERIFY_ARE_EQUAL(sResults, pszExpectedOutput);
     }
 }

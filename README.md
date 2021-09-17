@@ -17,6 +17,23 @@ What's New?
 
 ## DISKSPD ##
 
+DISKSPD 2.1 7/1/2021
+
+* New `-g<n>i` form allowing throughput limit specification in units of IOPS (per specified blocksize)
+* New `-rs<pct>` to specify mixed random/sequential operation (pct random); geometric distribution of run lengths
+* New `-rd<distribution>` to specify non-uniform IO distributions across target
+  * `pct` by target percentage
+  * `abs` by absolute offset
+* New `-Rp<text|xml>` to show specified parameter set in indicated profile output form; works with -X XML profiles and conventional command line
+* XML results/profiles are now indented for ease of review
+* Text result output updates
+  * now shows values in size units (K/M/G, and now TiB) to two decimals
+  * thread stride no longer shown unless specified
+  * -F/-O threadpool parameters shown
+* XML profiles can now be built more generically
+  * XML profiles can be stated in terms of templated target names (*1, *2), replaced in order from command line invocation
+  * the command line now allows options alongside -X: -v, -z, -R and -W/-d/-C along with template target specs
+
 DISKSPD 2.0.21a 9/21/2018
 
 * Added support for memory mapped I/O:

@@ -45,14 +45,20 @@ namespace UnitTests
         TEST_METHOD(Test_GetFilesToPrecreateConstantSizes);
         TEST_METHOD(Test_GetFilesToPrecreateConstantOrZeroSizes);
         TEST_METHOD(Test_GetFilesToPrecreateUseMaxSize);
+
         TEST_METHOD(Test_GetNextFileOffsetRandom);
         TEST_METHOD(Test_GetNextFileOffsetSequential);
         TEST_METHOD(Test_GetNextFileOffsetInterlockedSequential);
         TEST_METHOD(Test_GetNextFileOffsetParallelAsyncIO);
+        TEST_METHOD(Test_SequentialWithStride);
+        TEST_METHOD(Test_SequentialWithStrideInterleaved);
+        TEST_METHOD(Test_SequentialWithStrideUneven);
+
         TEST_METHOD(Test_GetThreadBaseFileOffset);
         TEST_METHOD(Test_GetThreadBaseFileOffsetWithStride);
-        TEST_METHOD(Test_SequentialWithStrideInterleaved);
-        TEST_METHOD(Test_SequentialWithStrideNonInterleaved);
+
+        TEST_METHOD(Test_ThreadTargetStateInit);
+        TEST_METHOD(Test_ThreadTargetStateEffectiveDistPct);
+        TEST_METHOD(Test_ThreadTargetStateEffectiveDistAbs);
     };
 }
-

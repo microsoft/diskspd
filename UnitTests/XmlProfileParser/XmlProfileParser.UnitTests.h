@@ -29,6 +29,7 @@ SOFTWARE.
 
 #pragma once
 #include "WexTestClass.h"
+#include "XmlProfileParser.h"
 #include <string>
 using namespace std;
 
@@ -52,23 +53,64 @@ namespace UnitTests
         TEST_METHOD_SETUP(MethodSetup);
         TEST_METHOD_CLEANUP(MethodCleanup);
 
+        TEST_METHOD(Test_ParseDistributionAbsolute);
+        TEST_METHOD(Test_ParseDistributionPercent);
         TEST_METHOD(Test_ParseFile);
-        TEST_METHOD(Test_ParseGroupAffinity);
-        TEST_METHOD(Test_ParseNonGroupAffinity);
-        TEST_METHOD(Test_ParseFilePrecreateFilesUseMaxSize);
-        TEST_METHOD(Test_ParseFilePrecreateFilesOnlyFilesWithConstantSizes);
+        TEST_METHOD(Test_ParseFileGlobalRequestCount);
         TEST_METHOD(Test_ParseFilePrecreateFilesOnlyFilesWithConstantOrZeroSizes);
-        TEST_METHOD(Test_ParseFileWriteBufferContentSequential);
-        TEST_METHOD(Test_ParseFileWriteBufferContentZero);
+        TEST_METHOD(Test_ParseFilePrecreateFilesOnlyFilesWithConstantSizes);
+        TEST_METHOD(Test_ParseFilePrecreateFilesUseMaxSize);
         TEST_METHOD(Test_ParseFileWriteBufferContentRandom);
         TEST_METHOD(Test_ParseFileWriteBufferContentRandomNoFilePath);
         TEST_METHOD(Test_ParseFileWriteBufferContentRandomWithFilePath);
-        TEST_METHOD(Test_ParseFileGlobalRequestCount);
+        TEST_METHOD(Test_ParseFileWriteBufferContentSequential);
+        TEST_METHOD(Test_ParseFileWriteBufferContentZero);
+        TEST_METHOD(Test_ParseGroupAffinity);
+        TEST_METHOD(Test_ParseNonGroupAffinity);
+        TEST_METHOD(Test_ParseRandomSequentialMixed);
+        TEST_METHOD(Test_ParseTemplateTargets);
+        TEST_METHOD(Test_ParseThroughput);
 
-        // TODO: test what happens when parameters have suffixes (e.g. 1M)
+        //
+        // Utility wrapping the specification and validation of a given distribution.
+        //
+        // Note that % and abs distributions are represented in the same way, only
+        // differing in the relative scale of the target spans.
+        //
+
+        #pragma warning(push)
+        #pragma warning(disable:4200) // zero length array
+
+        typedef struct {
+            UINT32 size;
+            struct {
+                UINT32 io;
+                UINT64 target;
+            } range[];
+        } RangePair;
+
+        typedef struct {
+            UINT32 size;
+            struct{
+                UINT32 ioBase, ioSpan;
+                UINT64 targetBase, targetSpan;
+            } range[];
+        } DistQuad;
+        
+        #pragma warning(pop)
+
+        void ValidateDistribution(
+            const PWCHAR desc,
+            boolean expectedParseResult,
+            boolean expectedValidate,
+            DistributionType type,
+            PCHAR xmlDoc,
+            const RangePair *insert,
+            const DistQuad *dist
+            );
+
     private:
         string _sTempFilePath;
         HMODULE _hModule;
     };
 }
-
