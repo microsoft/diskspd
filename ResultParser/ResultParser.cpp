@@ -91,7 +91,7 @@ void ResultParser::_DisplayFileSize(UINT64 fsize, UINT32 align)
                 if (align)
                 {
                     // "%<align>u%s"
-                    _snprintf(fmtbuf, sizeof(fmtbuf), "%%%uu%%s", align);
+                    _snprintf_s(fmtbuf, sizeof(fmtbuf), "%%%uu%%s", align);
                     _Print(fmtbuf, f, s.name);
                 }
                 else
@@ -107,7 +107,7 @@ void ResultParser::_DisplayFileSize(UINT64 fsize, UINT32 align)
             if (align)
             {
                 // "%<align>.2f%s"
-                _snprintf(fmtbuf, sizeof(fmtbuf), "%%%u.2f%%s", align);
+                _snprintf_s(fmtbuf, sizeof(fmtbuf), "%%%u.2f%%s", align);
                 _Print(fmtbuf, f, s.name);
             }
             else
@@ -122,7 +122,7 @@ void ResultParser::_DisplayFileSize(UINT64 fsize, UINT32 align)
 }
 
 /*****************************************************************************/
-void ResultParser::_DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo) 
+void ResultParser::_DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo)
 {
     _Print("\n\n");
     _Print("          ETW Buffer Settings & Statistics\n");
@@ -153,7 +153,7 @@ void ResultParser::_DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo)
 }
 
 /*****************************************************************************/
-void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters) 
+void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters)
 {
     _Print("\n\n\nETW:\n");
     _Print("----\n\n");
@@ -211,7 +211,7 @@ void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters E
     {
         _Print("\tRegistry\n");
 
-        _Print("\t\tNtCreateKey: %I64u\n", 
+        _Print("\t\tNtCreateKey: %I64u\n",
             EtwEventCounters.ullRegCreate);
 
         _Print("\t\tNtDeleteKey: %I64u\n",
@@ -266,7 +266,7 @@ void ResultParser::_PrintDistribution(DistributionType dT, const vector<Distribu
     switch (dT)
     {
         case DistributionType::Percent:
-        for (auto r : v)
+        for (const auto &r : v)
         {
             _Print(spc);
             _Print("   %3u%% of IO => [%2I64u%% - %3I64u%%) of target\n",
@@ -282,7 +282,7 @@ void ResultParser::_PrintDistribution(DistributionType dT, const vector<Distribu
             const DistributionRange& last = *v.rbegin();
             UINT32 max = last._src + last._span;
 
-            for (auto r : v)
+            for (const auto &r : v)
             {
                 _Print(spc);
                 // If this is a trimmed distribution (target was smaller than its range)
@@ -297,7 +297,7 @@ void ResultParser::_PrintDistribution(DistributionType dT, const vector<Distribu
                 {
                     _Print("   %3u%% of IO => [", r._span);
                 }
-                
+
                 if (r._dst.first == 0)
                 {
                     // directly emit leading zero so we can align it
@@ -329,7 +329,7 @@ public:
 
     DistributionRef(
         const string &TargetPath,
-        UINT32 Thread        
+        UINT32 Thread
     )
     {
         set<UINT32> s;
@@ -445,7 +445,7 @@ void ResultParser::_PrintEffectiveDistributions(const Results& results)
             {
                 _Print(" %u", lastTh);
             }
-            
+
             _Print("]\n");
         }
         _PrintDistribution(DistributionType::Absolute, *r.first, "");
@@ -460,7 +460,7 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     }
     else
     {
-        _Print("\tpath: '%s'\n", target.GetPath().c_str());    
+        _Print("\tpath: '%s'\n", target.GetPath().c_str());
     }
     _Print("\t\tthink time: %ums\n", target.GetThinkTime());
     _Print("\t\tburst size: %u\n", target.GetBurstSize());
@@ -587,7 +587,7 @@ void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, b
     {
         _Print("\t\trelative IO weight in thread pool: %u\n", target.GetWeight());
     }
-    
+
     if (0 != target.GetBaseFileOffsetInBytes())
     {
         _Print("\t\tbase file offset: ");
@@ -781,7 +781,7 @@ void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInfo
         if (ulBaseProc >= ulProcCount) {
             break;
         }
-        
+
         for (unsigned int ulProcessor = 0; ulProcessor < pGroup->_maximumProcessorCount; ulProcessor++) {
             double idleTime;
             double userTime;
@@ -834,11 +834,11 @@ void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInfo
     if (ulActiveProcCount == 0) {
         ulActiveProcCount = 1;
     }
-    
+
     _Print("-------------------------------------------\n");
 
-    sprintf_s(szFloatBuffer, sizeof(szFloatBuffer), 
-        ulNumGroups == 1 ? 
+    sprintf_s(szFloatBuffer, sizeof(szFloatBuffer),
+        ulNumGroups == 1 ?
             "avg.| %6.2lf%%| %6.2lf%%|  %6.2lf%%| %6.2lf%%\n" :
             "        avg.| %6.2lf%%| %6.2lf%%|  %6.2lf%%| %6.2lf%%\n",
         busyTime / ulActiveProcCount,
@@ -1086,12 +1086,12 @@ void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogr
         Util::DoubleToStringHelper(writeLatencyHistogram.GetMin() / 1000) :
         "N/A";
 
-    _Print("    min | %10s | %10s | %10.3lf\n", 
+    _Print("    min | %10s | %10s | %10.3lf\n",
            readMin.c_str(), writeMin.c_str(), totalLatencyHistogram.GetMin()/1000);
 
     PercentileDescriptor percentiles[] =
     {
-        {       0.25, "25th"    }, 
+        {       0.25, "25th"    },
         {       0.50, "50th"    },
         {       0.75, "75th"    },
         {       0.90, "90th"    },
@@ -1128,7 +1128,7 @@ void ResultParser::_PrintLatencyChart(const Histogram<float>& readLatencyHistogr
     string readMax = Util::DoubleToStringHelper(readLatencyHistogram.GetMax() / 1000);
     string writeMax = Util::DoubleToStringHelper(writeLatencyHistogram.GetMax() / 1000);
 
-    _Print("    max | %10s | %10s | %10.3lf\n", 
+    _Print("    max | %10s | %10s | %10.3lf\n",
            fHasReads ? readMax.c_str() : "N/A",
            fHasWrites ? writeMax.c_str() : "N/A",
            totalLatencyHistogram.GetMax()/1000);
@@ -1138,7 +1138,7 @@ string ResultParser::ParseProfile(const Profile& profile)
 {
     _sResult.clear();
     _PrintProfile(profile);
-    return _sResult;    
+    return _sResult;
 }
 
 string ResultParser::ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults)
@@ -1226,7 +1226,7 @@ string ResultParser::ParseResults(const Profile& profile, const SystemInformatio
         UINT64 cTotalTicks = 0;
         for (auto pResults = vResults.begin(); pResults != vResults.end(); pResults++)
         {
-            double time = PerfTimer::PerfTimeToSeconds(pResults->ullTimeCount); 
+            double time = PerfTimer::PerfTimeToSeconds(pResults->ullTimeCount);
             if (time >= 0.0000001)  // skip timespans that were interrupted
             {
                 cTotalTicks += pResults->ullTimeCount;

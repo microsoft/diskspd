@@ -227,7 +227,7 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "                           pct : parameter is a combination of IO%%/%%Target separated by : (colon)\n"
         "                                 Example: -rdpct90/10:0/10:5/20 specifies 90%% of IO in 10%% of the target, no IO\n"
         "                                   next 10%%, 5%% IO in the next 20%% and the remaining 5%% of IO in the last 60%%\n"
-        "                           abs : parameter is a combination of IO%/Target Size separated by : (colon)\n"
+        "                           abs : parameter is a combination of IO%%/Target Size separated by : (colon)\n"
         "                                 If the actual target size is smaller than the distribution, the relative values of IO%%\n"
         "                                 for the valid elements define the effective distribution.\n"
         "                                 Example: -rdabs90/10G:0/10G:5/20G specifies 90%% of IO in 10GiB of the target, no IO\n"
@@ -582,8 +582,8 @@ bool CmdLineParser::_ParseRandomDistribution(const char *arg, vector<Target>& vT
     vector<DistributionRange> vOr;
     DistributionType dType;
     bool fOk = false;
-    UINT64 pctAcc = 0, targetAcc = 0;       // accumulated pct/target
-    UINT64 pctCur, targetCur;               // current tuple
+    UINT32 pctAcc = 0, pctCur;          // accumulated/cur pct io
+    UINT64 targetAcc = 0, targetCur;    // accumulated/cur target
 
     if (!strncmp(arg, "pct", 3))
     {
@@ -629,20 +629,20 @@ bool CmdLineParser::_ParseRandomDistribution(const char *arg, vector<Target>& vT
         fOk = Util::ParseUInt(arg, pctCur, arg);
         if (!fOk)
         {
-            fprintf(stderr, "Invalid integer IO%%: must be > 0 and <= %I64u\n", 100 - pctAcc);
+            fprintf(stderr, "Invalid integer IO%%: must be > 0 and <= %u\n", 100 - pctAcc);
             return false;
         }
         // hole is ok
         else if (pctCur > 100)
         {
-            fprintf(stderr, "Invalid IO%% %I64u: must be >= 0 and <= %I64u\n", pctCur, 100 - pctAcc);
+            fprintf(stderr, "Invalid IO%% %u: must be >= 0 and <= %u\n", pctCur, 100 - pctAcc);
             return false;
         }
 
         // Expect separator
         if (*arg++ != '/')
         {
-            fprintf(stderr, "Expected / separator after %I64u\n", pctCur);
+            fprintf(stderr, "Expected / separator after %u\n", pctCur);
             return false;
         }
 
@@ -888,7 +888,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     // allow for -Rp shorthand for default profile-only format
                     if (isProfileOnly != ParseState::True)
                     {
-                        fprintf(stderr, "ERROR: unspecified results format -R: use [p]<text|xml>\n", arg);
+                        fprintf(stderr, "ERROR: unspecified results format -R: use [p]<text|xml>\n");
                         return false;
                     }
                 }
