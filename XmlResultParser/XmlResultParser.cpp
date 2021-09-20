@@ -30,17 +30,45 @@ SOFTWARE.
 #include "xmlresultparser.h"
 
 // TODO: refactor to a single function shared with the ResultParser
+char printBuffer[4096] = {};
 void XmlResultParser::_Print(const char *format, ...)
 {
     assert(nullptr != format);
     va_list listArg;
     va_start(listArg, format);
-    char buffer[4096] = {};
-    vsprintf_s(buffer, _countof(buffer), format, listArg);
+    _sResult.append(_indent, ' ');
+    vsprintf_s(printBuffer, _countof(printBuffer), format, listArg);
     va_end(listArg);
-    _sResult += buffer;
+    _sResult += printBuffer;
 }
 
+void XmlResultParser::_PrintInc(const char *format, ...)
+{
+    assert(nullptr != format);
+    va_list listArg;
+    va_start(listArg, format);
+
+    // Print & Increment Indent
+    // e.g., <StartOfSection>
+
+    _Print(format, listArg);
+    _indent += 2;
+    va_end(listArg);
+}
+
+void XmlResultParser::_PrintDec(const char *format, ...)
+{
+    assert(nullptr != format);
+    va_list listArg;
+    va_start(listArg, format);
+
+    // Decrement Indent & Print
+    // e.g., </EndOfSection>
+
+    _indent -= 2;
+    _Print(format, listArg);
+    va_end(listArg);
+}
 
 void XmlResultParser::_PrintTargetResults(const TargetResults& results)
 {
@@ -55,6 +83,32 @@ void XmlResultParser::_PrintTargetResults(const TargetResults& results)
     _Print("<ReadCount>%I64u</ReadCount>\n", results.ullReadIOCount);
     _Print("<WriteBytes>%I64u</WriteBytes>\n", results.ullWriteBytesCount);
     _Print("<WriteCount>%I64u</WriteCount>\n", results.ullWriteIOCount);
+
+    if (results.vDistributionRange.size())
+    {
+        _PrintInc("<Distribution>\n");
+        _PrintInc("<Absolute>\n");
+
+        //
+        // Render hole(s) in effective distribution. Keep track of the expected base
+        // of the next range and render a hole (IO = 0) over the gap as needed.
+        //
+
+        UINT64 expectBase = 0;
+        for (auto& r : results.vDistributionRange)
+        {
+            if (r._dst.first != expectBase)
+            {
+                _Print("<Range IO=\"%u\">%I64u</Range>\n", 0, r._dst.first - expectBase);
+            }
+
+            _Print("<Range IO=\"%u\">%I64u</Range>\n", r._span, r._dst.second);
+            expectBase = r._dst.first + r._dst.second;
+        }
+
+        _PrintDec("</Absolute>\n");
+        _PrintDec("</Distribution>\n");
+    }
 }
 
 void XmlResultParser::_PrintTargetLatency(const TargetResults& results)
@@ -81,7 +135,7 @@ void XmlResultParser::_PrintTargetLatency(const TargetResults& results)
 
 void XmlResultParser::_PrintTargetIops(const IoBucketizer& readBucketizer, const IoBucketizer& writeBucketizer, UINT32 bucketTimeInMs)
 {
-    _Print("<Iops>\n");
+    _PrintInc("<Iops>\n");
 
     IoBucketizer totalIoBucketizer;
     totalIoBucketizer.Merge(readBucketizer);
@@ -100,12 +154,12 @@ void XmlResultParser::_PrintTargetIops(const IoBucketizer& readBucketizer, const
         _Print("<IopsStdDev>%.3f</IopsStdDev>\n", totalIoBucketizer.GetStandardDeviationIOPS() / (bucketTimeInMs / 1000.0));
     }
     _PrintIops(readBucketizer, writeBucketizer, bucketTimeInMs);
-    _Print("</Iops>\n");
+    _PrintDec("</Iops>\n");
 }
 
 void XmlResultParser::_PrintETWSessionInfo(struct ETWSessionInfo sessionInfo)
 {
-    _Print("<ETWSessionInfo>\n");
+    _PrintInc("<ETWSessionInfo>\n");
     _Print("<BufferSizeKB>%lu</BufferSizeKB>\n", sessionInfo.ulBufferSize);
     _Print("<MinimimBuffers>%lu</MinimimBuffers>\n", sessionInfo.ulMinimumBuffers);
     _Print("<MaximumBuffers>%lu</MaximumBuffers>\n", sessionInfo.ulMaximumBuffers);
@@ -118,18 +172,18 @@ void XmlResultParser::_PrintETWSessionInfo(struct ETWSessionInfo sessionInfo)
     _Print("<LostEvents>%lu</LostEvents>\n", sessionInfo.ulEventsLost);
     _Print("<LostLogBuffers>%lu</LostLogBuffers>\n", sessionInfo.ulLogBuffersLost);
     _Print("<LostRealTimeBuffers>%lu</LostRealTimeBuffers>\n", sessionInfo.ulRealTimeBuffersLost);
-    _Print("</ETWSessionInfo>\n");
+    _PrintDec("</ETWSessionInfo>\n");
 }
 
 void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters)
 {
-    _Print("<ETW>\n");
+    _PrintInc("<ETW>\n");
     if (ETWMask.bDiskIO)
     {
-        _Print("<DiskIO>\n");
+        _PrintInc("<DiskIO>\n");
         _Print("<Read>%I64u</Read>\n", EtwEventCounters.ullIORead);
         _Print("<Write>%I64u</Write>\n", EtwEventCounters.ullIOWrite);
-        _Print("</DiskIO>\n");
+        _PrintDec("</DiskIO>\n");
     }
     if (ETWMask.bImageLoad)
     {
@@ -137,13 +191,13 @@ void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters 
     }
     if (ETWMask.bMemoryPageFaults)
     {
-        _Print("<MemoryPageFaults>\n");
+        _PrintInc("<MemoryPageFaults>\n");
         _Print("<CopyOnWrite>%I64u</CopyOnWrite>\n", EtwEventCounters.ullMMCopyOnWrite);
         _Print("<DemandZeroFault>%I64u</DemandZeroFault>\n", EtwEventCounters.ullMMDemandZeroFault);
         _Print("<GuardPageFault>%I64u</GuardPageFault>\n", EtwEventCounters.ullMMGuardPageFault);
         _Print("<HardPageFault>%I64u</HardPageFault>\n", EtwEventCounters.ullMMHardPageFault);
         _Print("<TransitionFault>%I64u</TransitionFault>\n", EtwEventCounters.ullMMTransitionFault);
-        _Print("</MemoryPageFaults>\n");
+        _PrintDec("</MemoryPageFaults>\n");
     }
     if (ETWMask.bMemoryHardFaults && !ETWMask.bMemoryPageFaults)
     {
@@ -151,7 +205,7 @@ void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters 
     }
     if (ETWMask.bNetwork)
     {
-        _Print("<Network>\n");
+        _PrintInc("<Network>\n");
         _Print("<Accept>%I64u</Accept>\n", EtwEventCounters.ullNetAccept);
         _Print("<Connect>%I64u</Connect>\n", EtwEventCounters.ullNetConnect);
         _Print("<Disconnect>%I64u</Disconnect>\n", EtwEventCounters.ullNetDisconnect);
@@ -161,18 +215,18 @@ void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters 
         _Print("<TCPIPReceive>%I64u</TCPIPReceive>\n", EtwEventCounters.ullNetTcpReceive);
         _Print("<UDPIPSend>%I64u</UDPIPSend>\n", EtwEventCounters.ullNetUdpSend);
         _Print("<UDPIPReceive>%I64u</UDPIPReceive>\n", EtwEventCounters.ullNetUdpReceive);
-        _Print("</Network>\n");
+        _PrintDec("</Network>\n");
     }
     if (ETWMask.bProcess)
     {
-        _Print("<Process>\n");
+        _PrintInc("<Process>\n");
         _Print("<Start>%I64u</Start>\n", EtwEventCounters.ullProcessStart);
         _Print("<End>%I64u</End>\n", EtwEventCounters.ullProcessEnd);
-        _Print("</Process>\n");
+        _PrintDec("</Process>\n");
     }
     if (ETWMask.bRegistry)
     {
-        _Print("<Registry>\n");
+        _PrintInc("<Registry>\n");
         _Print("<NtCreateKey>%I64u</NtCreateKey>\n", EtwEventCounters.ullRegCreate);
         _Print("<NtDeleteKey>%I64u</NtDeleteKey>\n", EtwEventCounters.ullRegDelete);
         _Print("<NtDeleteValueKey>%I64u</NtDeleteValueKey>\n", EtwEventCounters.ullRegDeleteValue);
@@ -185,16 +239,16 @@ void XmlResultParser::_PrintETW(struct ETWMask ETWMask, struct ETWEventCounters 
         _Print("<NtQueryValueKey>%I64u</NtQueryValueKey>\n", EtwEventCounters.ullRegQueryValue);
         _Print("<NtSetInformationKey>%I64u</NtSetInformationKey>\n", EtwEventCounters.ullRegSetInformation);
         _Print("<NtSetValueKey>%I64u</NtSetValueKey>\n", EtwEventCounters.ullRegSetValue);
-        _Print("</Registry>\n");
+        _PrintDec("</Registry>\n");
     }
     if (ETWMask.bThread)
     {
-        _Print("<Thread>\n");
+        _PrintInc("<Thread>\n");
         _Print("<Start>%I64u</Start>\n", EtwEventCounters.ullThreadStart);
         _Print("<End>%I64u</End>\n", EtwEventCounters.ullThreadEnd);
-        _Print("</Thread>\n");
+        _PrintDec("</Thread>\n");
     }
-    _Print("</ETW>\n");
+    _PrintDec("</ETW>\n");
 }
 
 void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemInformation& system)
@@ -204,7 +258,7 @@ void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemI
     size_t ulActiveProcCount = 0;
     size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
 
-    _Print("<CpuUtilization>\n");
+    _PrintInc("<CpuUtilization>\n");
 
     double busyTime = 0;
     double totalIdleTime = 0;
@@ -238,14 +292,14 @@ void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemI
 
             thisTime = (krnlTime + userTime) - idleTime;
 
-            _Print("<CPU>\n");
+            _PrintInc("<CPU>\n");
             _Print("<Group>%d</Group>\n", ulGroup);
             _Print("<Id>%d</Id>\n", ulProcessor);
             _Print("<UsagePercent>%.2f</UsagePercent>\n", thisTime);
             _Print("<UserPercent>%.2f</UserPercent>\n", userTime);
             _Print("<KernelPercent>%.2f</KernelPercent>\n", krnlTime - idleTime);
             _Print("<IdlePercent>%.2f</IdlePercent>\n", idleTime);
-            _Print("</CPU>\n");
+            _PrintDec("</CPU>\n");
 
             busyTime += thisTime;
             totalIdleTime += idleTime;
@@ -262,14 +316,14 @@ void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemI
         ulActiveProcCount = 1;
     }
 
-    _Print("<Average>\n");
+    _PrintInc("<Average>\n");
     _Print("<UsagePercent>%.2f</UsagePercent>\n", busyTime / ulActiveProcCount);
     _Print("<UserPercent>%.2f</UserPercent>\n", totalUserTime / ulActiveProcCount);
     _Print("<KernelPercent>%.2f</KernelPercent>\n", (totalKrnlTime - totalIdleTime) / ulActiveProcCount);
     _Print("<IdlePercent>%.2f</IdlePercent>\n", totalIdleTime / ulActiveProcCount);
-    _Print("</Average>\n");
+    _PrintDec("</Average>\n");
 
-    _Print("</CpuUtilization>\n");
+    _PrintDec("</CpuUtilization>\n");
 }
 
 // emit the iops time series (this obviates needing perfmon counters, in common cases, and provides file level data)
@@ -358,7 +412,7 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
         }
     }
 
-    _Print("<Latency>\n");
+    _PrintInc("<Latency>\n");
     if (readLatencyHistogram.GetSampleSize() > 0)
     {
         _Print("<AverageReadMilliseconds>%.3f</AverageReadMilliseconds>\n", readLatencyHistogram.GetAvg() / 1000);
@@ -375,7 +429,7 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
         _Print("<LatencyStdev>%.3f</LatencyStdev>\n", totalLatencyHistogram.GetStandardDeviation() / 1000);
     }
 
-    _Print("<Bucket>\n");
+    _PrintInc("<Bucket>\n");
     _Print("<Percentile>0</Percentile>\n");
     if (readLatencyHistogram.GetSampleSize() > 0)
     {
@@ -389,7 +443,7 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
     {
         _Print("<TotalMilliseconds>%.3f</TotalMilliseconds>\n", totalLatencyHistogram.GetMin() / 1000);
     }
-    _Print("</Bucket>\n");
+    _PrintDec("</Bucket>\n");
 
     //  Construct vector of percentiles and decimal precision to squelch trailing zeroes.  This is more
     //  detailed than summary text output, and does not contain the decorated names (15th, etc.)
@@ -410,7 +464,7 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
 
     for (auto p : vPercentiles)
     {
-        _Print("<Bucket>\n");
+        _PrintInc("<Bucket>\n");
         _Print("<Percentile>%.*f</Percentile>\n", p.first, p.second);
         if (readLatencyHistogram.GetSampleSize() > 0)
         {
@@ -424,10 +478,10 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
         {
             _Print("<TotalMilliseconds>%.3f</TotalMilliseconds>\n", totalLatencyHistogram.GetPercentile(p.second / 100) / 1000);
         }
-        _Print("</Bucket>\n");
+        _PrintDec("</Bucket>\n");
     }
 
-    _Print("<Bucket>\n");
+    _PrintInc("<Bucket>\n");
     _Print("<Percentile>100</Percentile>\n"); 
     if (readLatencyHistogram.GetSampleSize() > 0)
     {
@@ -441,23 +495,31 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
     {
         _Print("<TotalMilliseconds>%.3f</TotalMilliseconds>\n", totalLatencyHistogram.GetMax() / 1000);
     }
-    _Print("</Bucket>\n");
-    _Print("</Latency>\n");
+    _PrintDec("</Bucket>\n");
+    _PrintDec("</Latency>\n");
 }
 
-string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults)
+string XmlResultParser::ParseProfile(const Profile& profile)
+{
+    _sResult = profile.GetXml(0);
+    return _sResult;
+}
+
+string XmlResultParser::ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults)
 {
     _sResult.clear();
 
-    _Print("<Results>\n");
-    _sResult += system.GetXml();
-    _sResult += profile.GetXml();
+    _PrintInc("<Results>\n");
+
+    _sResult += system.GetXml(_indent);
+    _sResult += profile.GetXml(_indent);
     for (size_t iResults = 0; iResults < vResults.size(); iResults++)
     {
         const Results& results = vResults[iResults];
         const TimeSpan& timeSpan = profile.GetTimeSpans()[iResults];
 
-        _Print("<TimeSpan>\n");
+        _PrintInc("<TimeSpan>\n");
+
         double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
         if (fTime >= 0.0000001)
         {
@@ -492,11 +554,11 @@ string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& 
             for (size_t iThread = 0; iThread < results.vThreadResults.size(); iThread++)
             {
                 const ThreadResults& threadResults = results.vThreadResults[iThread];
-                _Print("<Thread>\n");
+                _PrintInc("<Thread>\n");
                 _Print("<Id>%u</Id>\n", iThread);
                 for (const auto& targetResults : threadResults.vTargetResults)
                 {
-                    _Print("<Target>\n");
+                    _PrintInc("<Target>\n");
                     _PrintTargetResults(targetResults);
                     if (timeSpan.GetMeasureLatency())
                     {
@@ -506,17 +568,19 @@ string XmlResultParser::ParseResults(Profile& profile, const SystemInformation& 
                     {
                         _PrintTargetIops(targetResults.readBucketizer, targetResults.writeBucketizer, timeSpan.GetIoBucketDurationInMilliseconds());
                     }
-                    _Print("</Target>\n");
+                    _PrintDec("</Target>\n");
                 }
-                _Print("</Thread>\n");
+                _PrintDec("</Thread>\n");
             }
         }
         else
         {
             _Print("<Error>The test was interrupted before the measurements began. No results are displayed.</Error>\n");
         }
-        _Print("</TimeSpan>\n");
+
+        _PrintDec("</TimeSpan>\n");
     }
-    _Print("</Results>");
+
+    _PrintDec("</Results>");
     return _sResult;
 }

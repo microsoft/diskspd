@@ -73,7 +73,7 @@ HRESULT ReportXmlError(
 	return errorCode;
 }
 
-bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, HMODULE hModule)
+bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, vector<Target> *pvSubstTargets, HMODULE hModule)
 {
     assert(pszPath != nullptr);
     assert(pProfile != nullptr);
@@ -149,7 +149,7 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, HMODULE
                 hr = E_FAIL;
             }
         }
-		if (SUCCEEDED(hr))
+        if (SUCCEEDED(hr))
         {
             CComVariant vXmlSchema(spXmlSchema);
             CComBSTR bNull("");
@@ -176,72 +176,108 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, HMODULE
             }
         }
 
-        // now parse the specification, if correct
+        //
+        // XML has now passed basic schema validation. Bulld the target substitutions and parse the profile.
+        //
+
+        vector<pair<string, bool>> vSubsts;
+
+        if (pvSubstTargets)
+        {
+            for (auto target : *pvSubstTargets)
+            {
+                vSubsts.emplace_back(make_pair(target.GetPath(), false));
+            }
+        }
+
         if (SUCCEEDED(hr))
         {
-            bool fVerbose;
-            hr = _GetVerbose(spXmlDoc, &fVerbose);
+            bool b;
+            hr = _GetBool(spXmlDoc, "//Profile/Verbose", &b);
             if (SUCCEEDED(hr) && (hr != S_FALSE))
             {
-                pProfile->SetVerbose(fVerbose);
+                pProfile->SetVerbose(b);
             }
+        }
 
-            if (SUCCEEDED(hr))
+        if (SUCCEEDED(hr))
+        {
+            DWORD i;
+            hr = _GetDWORD(spXmlDoc, "//Profile/Progress", &i);
+            if (SUCCEEDED(hr) && (hr != S_FALSE))
             {
-                DWORD dwProgress;
-                hr = _GetProgress(spXmlDoc, &dwProgress);
-                if (SUCCEEDED(hr) && (hr != S_FALSE))
+                pProfile->SetProgress(i);
+            }
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            string sResultFormat;
+            hr = _GetString(spXmlDoc, "//Profile/ResultFormat", &sResultFormat);
+            if (SUCCEEDED(hr) && (hr != S_FALSE) && sResultFormat == "xml")
+            {
+                pProfile->SetResultsFormat(ResultsFormat::Xml);
+            }
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            string sCreateFiles;
+            hr = _GetString(spXmlDoc, "//Profile/PrecreateFiles", &sCreateFiles);
+            if (SUCCEEDED(hr) && (hr != S_FALSE))
+            {
+                if (sCreateFiles == "UseMaxSize")
                 {
-                    pProfile->SetProgress(dwProgress);
+                    pProfile->SetPrecreateFiles(PrecreateFiles::UseMaxSize);
+                }
+                else if (sCreateFiles == "CreateOnlyFilesWithConstantSizes")
+                {
+                    pProfile->SetPrecreateFiles(PrecreateFiles::OnlyFilesWithConstantSizes);
+                }
+                else if (sCreateFiles == "CreateOnlyFilesWithConstantOrZeroSizes")
+                {
+                    pProfile->SetPrecreateFiles(PrecreateFiles::OnlyFilesWithConstantOrZeroSizes);
+                }
+                else
+                {
+                    hr = E_INVALIDARG;
                 }
             }
+        }
 
-            if (SUCCEEDED(hr))
+        if (SUCCEEDED(hr))
+        {
+            hr = _ParseEtw(spXmlDoc, pProfile);
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            hr = _ParseTimeSpans(spXmlDoc, pProfile, vSubsts);
+        }
+
+        //
+        // Error on unused substitutions - user should ensure these match up.
+        //
+        // Note that no (zero) substitutions are OK at the point of parsing, which allows
+        // for -Rp forms on template profiles. Validation for executed profiles will occur
+        // later during common validation.
+        //
+        // Generate an error for each unused substitution.
+        //
+
+        if (SUCCEEDED(hr))        
+        {
+            for (size_t i = 1; i <= vSubsts.size(); ++i)
             {
-                string sResultFormat;
-                hr = _GetString(spXmlDoc, "//Profile/ResultFormat", &sResultFormat);
-                if (SUCCEEDED(hr) && (hr != S_FALSE) && sResultFormat == "xml")
+                if (!vSubsts[i - 1].second)
                 {
-                    pProfile->SetResultsFormat(ResultsFormat::Xml);
+                    fprintf(stderr, "ERROR: unused template target substitution _%u -> %s - check profile\n", (int) i, vSubsts[i - 1].first.c_str());
+                    hr = E_INVALIDARG;
                 }
-            }
-
-            if (SUCCEEDED(hr))
-            {
-                string sCreateFiles;
-                hr = _GetString(spXmlDoc, "//Profile/PrecreateFiles", &sCreateFiles);
-                if (SUCCEEDED(hr) && (hr != S_FALSE))
-                {
-                    if (sCreateFiles == "UseMaxSize")
-                    {
-                        pProfile->SetPrecreateFiles(PrecreateFiles::UseMaxSize);
-                    }
-                    else if (sCreateFiles == "CreateOnlyFilesWithConstantSizes")
-                    {
-                        pProfile->SetPrecreateFiles(PrecreateFiles::OnlyFilesWithConstantSizes);
-                    }
-                    else if (sCreateFiles == "CreateOnlyFilesWithConstantOrZeroSizes")
-                    {
-                        pProfile->SetPrecreateFiles(PrecreateFiles::OnlyFilesWithConstantOrZeroSizes);
-                    }
-                    else
-                    {
-                        hr = E_INVALIDARG;
-                    }
-                }
-            }
-
-            if (SUCCEEDED(hr))
-            {
-                hr = _ParseEtw(spXmlDoc, pProfile);
-            }
-
-            if (SUCCEEDED(hr))
-            {
-                hr = _ParseTimeSpans(spXmlDoc, pProfile);
             }
         }
     }
+
     if (fComInitialized)
     {
         CoUninitialize();
@@ -384,7 +420,7 @@ HRESULT XmlProfileParser::_ParseEtw(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile)
+HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile, vector<pair<string, bool>>& vSubsts)
 {
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
     CComVariant query("//Profile/TimeSpans/TimeSpan");
@@ -402,7 +438,7 @@ HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pP
                 if (SUCCEEDED(hr))
                 {
                     TimeSpan timeSpan;
-                    hr = _ParseTimeSpan(spNode, &timeSpan);
+                    hr = _ParseTimeSpan(spNode, &timeSpan, vSubsts);
                     if (SUCCEEDED(hr))
                     {
                         pProfile->AddTimeSpan(timeSpan);
@@ -415,7 +451,7 @@ HRESULT XmlProfileParser::_ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pP
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
+HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan, vector<pair<string, bool>>& vSubsts)
 {
     UINT32 ulDuration;
     HRESULT hr = _GetUINT32(pXmlNode, "Duration", &ulDuration);
@@ -548,12 +584,59 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeS
 
     if (SUCCEEDED(hr))
     {
-        hr = _ParseTargets(pXmlNode, pTimeSpan);
+        hr = _ParseTargets(pXmlNode, pTimeSpan, vSubsts);
     }
+
     return hr;
 }
 
-HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
+HRESULT XmlProfileParser::_SubstTarget(Target *pTarget, vector<pair<string, bool>>& vSubsts)
+{
+    auto& sPath = pTarget->GetPath();
+
+    if (sPath.length() >= 1 && sPath[0] == TEMPLATE_TARGET_PREFIX)
+    {
+        auto str = sPath.c_str();
+        char *strend;
+        ULONG i;
+
+        //
+        // Note that we will parse all template targets for correctness but allow empty substuttion lists
+        // to pass through. If this profile will be executed, validation of paths will catch unsubst template targets
+        //
+        // strtoul will accept signed integers (e.g., -1), so we need to add our explicit assertion that this is indeed a digit.
+        //
+
+        i = strtoul(str + 1, &strend, 10);
+
+        if (i == 0 || *strend != '\0' || !isdigit(*(str + 1)))
+        {
+            fprintf(stderr, "ERROR: template path '%s' is not a valid path reference - must be %c<integer> - check profile\n", str, TEMPLATE_TARGET_PREFIX);
+            return E_INVALIDARG;
+        }
+
+        if (vSubsts.size() != 0)
+        {
+            if (i > vSubsts.size())
+            {
+                fprintf(stderr, "ERROR: template path '%s' does not have a specified substitution - check profile\n", str);
+                return E_INVALIDARG;
+            }
+
+            //
+            // Substitute this target, indicating this substitution was used (for validation).
+            // Note 1 based count and 0 based index.
+            //
+
+            pTarget->SetPath(vSubsts[i - 1].first);
+            vSubsts[i - 1].second = true;
+        }
+    }
+
+    return S_OK;
+}
+
+HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan, vector<pair<string, bool>>& vSubsts)
 {
     CComVariant query("Targets/Target");
     CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
@@ -571,8 +654,20 @@ HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSp
                 if (SUCCEEDED(hr))
                 {
                     Target target;
-                    _ParseTarget(spNode, &target);
-                    pTimeSpan->AddTarget(target);
+                    hr = _ParseTarget(spNode, &target);
+                    if (SUCCEEDED(hr))
+                    {
+                        hr = _SubstTarget(&target, vSubsts);
+                    }
+                    if (SUCCEEDED(hr))
+                    {
+                        pTimeSpan->AddTarget(target);    
+                    }
+                }
+
+                if (!SUCCEEDED(hr))
+                {
+                    break;
                 }
             }
         }
@@ -658,6 +753,10 @@ HRESULT XmlProfileParser::_ParseWriteBufferContent(IXMLDOMNode *pXmlNode, Target
 
 HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
 {
+    // For enforcement of sequential/random conflicts.
+    // This is simplified for the XML since we control parse order.
+    bool fSequential = false;
+
     string sPath;
     HRESULT hr = _GetString(pXmlNode, "Path", &sPath);
     if (SUCCEEDED(hr) && (hr != S_FALSE))
@@ -672,16 +771,6 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             pTarget->SetBlockSizeInBytes(dwBlockSize);
-        }
-    }
-
-    if (SUCCEEDED(hr))
-    {
-        UINT64 ullStrideSize;
-        hr = _GetUINT64(pXmlNode, "StrideSize", &ullStrideSize);
-        if (SUCCEEDED(hr) && (hr != S_FALSE))
-        {
-            pTarget->SetBlockAlignmentInBytes(ullStrideSize);
         }
     }
     
@@ -757,12 +846,52 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
 
     if (SUCCEEDED(hr))
     {
+        UINT64 ullStrideSize;
+        hr = _GetUINT64(pXmlNode, "StrideSize", &ullStrideSize);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTarget->SetBlockAlignmentInBytes(ullStrideSize);
+            fSequential = true;
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
         UINT64 ullRandom;
         hr = _GetUINT64(pXmlNode, "Random", &ullRandom);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
-            pTarget->SetUseRandomAccessPattern(true);
-            pTarget->SetBlockAlignmentInBytes(ullRandom);
+            // conflict with sequential
+            if (fSequential)
+            {
+                fprintf(stderr, "sequential <StrideSize> conflicts with <Random>\n");
+                hr = HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER);
+            }
+            else
+            {
+                pTarget->SetRandomRatio(100);
+                pTarget->SetBlockAlignmentInBytes(ullRandom);
+            }
+        }
+    }
+
+    // now override default of 100% random?
+    if (SUCCEEDED(hr))
+    {
+        UINT32 ulRandomRatio;
+        hr = _GetUINT32(pXmlNode, "RandomRatio", &ulRandomRatio);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            // conflict with sequential
+            if (fSequential)
+            {
+                fprintf(stderr, "sequential <StrideSize> conflicts with <RandomRatio>\n");
+                hr = HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER);
+            }
+            else
+            {
+                pTarget->SetRandomRatio(ulRandomRatio);
+            }
         }
     }
 
@@ -871,12 +1000,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
 
     if (SUCCEEDED(hr))
     {
-        DWORD dwThroughput;
-        hr = _GetDWORD(pXmlNode, "Throughput", &dwThroughput);
-        if (SUCCEEDED(hr) && (hr != S_FALSE))
-        {
-            pTarget->SetThroughput(dwThroughput);
-        }
+        hr = _ParseThroughput(pXmlNode, pTarget);
     }
 
     if (SUCCEEDED(hr))
@@ -961,9 +1085,79 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
         }
     }
 
+    //
+    // Note: XSD validation ensures only one type of distribution is specified, but it as simple
+    // here to probe for each.
+    //
+
+    if  (SUCCEEDED(hr))
+    {
+        hr = _ParseDistribution(pXmlNode, pTarget);
+    }
+
     if (SUCCEEDED(hr))
     {
         hr = _ParseThreadTargets(pXmlNode, pTarget);
+    }
+    return hr;
+}
+
+HRESULT XmlProfileParser::_ParseThroughput(IXMLDOMNode *pXmlNode, Target *pTarget)
+{
+    CComPtr<IXMLDOMNode> spNode = nullptr;
+    CComVariant query("Throughput");
+    HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
+    if (SUCCEEDED(hr) && (hr != S_FALSE))
+    {
+        // get value
+        UINT32 value = 0;
+
+        BSTR bstrText;
+        hr = spNode->get_text(&bstrText);
+        if (SUCCEEDED(hr))
+        {
+            value = (UINT32) _wtoi64((wchar_t *)bstrText);  // XSD constrains s.t. cast is safe
+            SysFreeString(bstrText);
+        }
+        else
+        {
+            return hr;
+        }
+
+        // get unit - bpms default
+        bool isBpms = true;
+
+        CComPtr<IXMLDOMNamedNodeMap> spNamedNodeMap = nullptr;
+        CComBSTR attr("unit");
+        hr = spNode->get_attributes(&spNamedNodeMap);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            CComPtr<IXMLDOMNode> spAttrNode = nullptr;
+            HRESULT hr = spNamedNodeMap->getNamedItem(attr, &spAttrNode);
+            if (SUCCEEDED(hr) && (hr != S_FALSE))
+            {
+                BSTR bstrText;
+                hr = spAttrNode->get_text(&bstrText);
+                if (SUCCEEDED(hr))
+                {
+                    isBpms = wcscmp((wchar_t *)bstrText, L"IOPS");
+                    SysFreeString(bstrText);
+                }
+            }
+        }
+
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            if (isBpms)
+            {
+                pTarget->SetThroughput(value);
+            }
+            else
+            {
+                // NOTE: this depends on parse order s.t. blocksize is available
+                pTarget->SetThroughputIOPS(value);
+            }
+        }
     }
     return hr;
 }
@@ -1013,6 +1207,108 @@ HRESULT XmlProfileParser::_ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget
             pThreadTarget->SetWeight(ulWeight);
         }
     }
+    return hr;
+}
+
+struct {
+    char* xPath;
+    DistributionType t;
+} distributionTypes[] = {
+    { "Distribution/Absolute/Range",    DistributionType::Absolute },
+    { "Distribution/Percent/Range",     DistributionType::Percent }
+};
+
+HRESULT XmlProfileParser::_ParseDistribution(IXMLDOMNode *pXmlNode, Target *pTarget)
+{
+    HRESULT hr = S_OK;
+
+    for (auto& type : distributionTypes)
+    {
+        CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+        CComVariant query(type.xPath);
+        hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
+        if (SUCCEEDED(hr))
+        {
+            long cNodes;
+            hr = spNodeList->get_length(&cNodes);
+            if (SUCCEEDED(hr) && cNodes != 0)
+            {
+                UINT64 targetBase = 0, targetSpan;
+                UINT32 ioBase = 0, ioSpan;
+                vector<DistributionRange> v;
+
+                for (int i = 0; i < cNodes; i++)
+                {
+                    // target span from the element
+                    // note that this is the same 64bit int for both distribution types,
+                    // it is the interpretation at the time the effective is calculated
+                    // that makes the distinction. XSD covers range validations.
+                    CComPtr<IXMLDOMNode> spNode = nullptr;
+                    hr = spNodeList->get_item(i, &spNode);
+                    if (SUCCEEDED(hr))
+                    {
+                        BSTR bstrText;
+                        hr = spNode->get_text(&bstrText);
+                        if (SUCCEEDED(hr))
+                        {
+                            targetSpan = _wtoi64((wchar_t *)bstrText);
+                            SysFreeString(bstrText);
+                        }
+                    }
+
+                    if (SUCCEEDED(hr))
+                    {
+                        // io span from the attribute
+                        CComPtr<IXMLDOMNamedNodeMap> spNamedNodeMap = nullptr;
+                        CComBSTR attr("IO");
+                        hr = spNode->get_attributes(&spNamedNodeMap);
+                        if (SUCCEEDED(hr) && (hr != S_FALSE))
+                        {
+                            CComPtr<IXMLDOMNode> spAttrNode = nullptr;
+                            HRESULT hr = spNamedNodeMap->getNamedItem(attr, &spAttrNode);
+                            if (SUCCEEDED(hr) && (hr != S_FALSE))
+                            {
+                                BSTR bstrText;
+                                hr = spAttrNode->get_text(&bstrText);
+                                if (SUCCEEDED(hr))
+                                {
+                                    ioSpan = _wtoi((wchar_t *)bstrText);
+                                    SysFreeString(bstrText);
+                                }
+                            }
+                        }
+                    }
+
+                    if (SUCCEEDED(hr) && (hr != S_FALSE))
+                    {
+                        v.emplace_back(ioBase, ioSpan,
+                             make_pair(targetBase, targetSpan));
+                        ioBase += ioSpan;
+                        targetBase += targetSpan;
+                    }
+                    // failed during parse
+                    else
+                    {
+                        break;
+                    }
+
+                    //
+                    // Note that we are aware here whether we got to 100% IO specification.
+                    // This validation is delayed to the common path for XML/cmdline.
+                    //
+                }
+
+                if (SUCCEEDED(hr) && (hr != S_FALSE))
+                {                    
+                    pTarget->SetDistributionRange(v, type.t);
+                }
+                     
+                // if we parsed into the element, we are done (success or failure) - only one type is possible.
+                return hr;
+            }
+        }
+    }
+
     return hr;
 }
 
@@ -1179,7 +1475,7 @@ HRESULT XmlProfileParser::_GetUINT64(IXMLDOMNode *pXmlNode, const char *pszQuery
         hr = spNode->get_text(&bstrText);
         if (SUCCEEDED(hr))
         {
-            *pullValue = _wtoi64((wchar_t *)bstrText);  // TODO: make sure it works on large unsigned ints
+            *pullValue = _wtoi64((wchar_t *)bstrText);
         }
         SysFreeString(bstrText);
     }
@@ -1214,14 +1510,4 @@ HRESULT XmlProfileParser::_GetBool(IXMLDOMNode *pXmlNode, const char *pszQuery, 
         }
     }
     return hr;
-}
-
-HRESULT XmlProfileParser::_GetVerbose(IXMLDOMDocument2 *pXmlDoc, bool *pfVerbose)
-{
-    return _GetBool(pXmlDoc, "//Profile/Verbose", pfVerbose);
-}
-
-HRESULT XmlProfileParser::_GetProgress(IXMLDOMDocument2 *pXmlDoc, DWORD *pdwProgress)
-{
-    return _GetDWORD(pXmlDoc, "//Profile/Progress", pdwProgress);
 }

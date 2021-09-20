@@ -41,18 +41,26 @@ public:
     bool ParseCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch, SystemInformation *pSystem = nullptr);
 
 private:
-    bool _ReadParametersFromCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch);
-    bool _ReadParametersFromXmlFile(const char *pszPath, Profile *pProfile);
+    bool _ReadParametersFromCmdLine(const int argc, const char *argv[], Profile *pProfile, struct Synchronization *synch, bool& fXMLProfile);
+    bool _ReadParametersFromXmlFile(const char *pszPath, Profile *pProfile, vector<Target> *pvSubstTargets);
 
     bool _ParseETWParameter(const char *arg, Profile *pProfile);
     bool _ParseFlushParameter(const char *arg, MemoryMappedIoFlushMode *FlushMode );
     bool _ParseAffinity(const char *arg, TimeSpan *pTimeSpan);
+    bool _ParseRandomDistribution(const char *arg, vector<Target>& vTargets);
 
     void _DisplayUsageInfo(const char *pszFilename) const;
-    bool _GetSizeInBytes(const char *pszSize, UINT64& ullSize) const;
+    bool _GetSizeInBytes(const char *pszSize, UINT64& ullSize, const char **pszRest) const;
     bool _GetRandomDataWriteBufferData(const string& sArg, UINT64& cb, string& sPath);
 
-    // variables that used to be global
+    static bool _IsSwitchChar(const char c) { return (c == '/' || c == '-'); }
+    enum class ParseState {
+        Unknown,
+        True,
+        False,
+        Bad
+    };
+
     DWORD _dwBlockSize;         // block size; other parameters may be stated in blocks
                                 // so the block size is needed to process them
 

@@ -28,6 +28,7 @@ SOFTWARE.
 */
 
 #include "IoBucketizer.h"
+#include <stdexcept>
 
 /*
 Calculating stddev using an online algorithm:

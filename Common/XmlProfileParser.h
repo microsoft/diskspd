@@ -34,20 +34,23 @@ SOFTWARE.
 class XmlProfileParser
 {
 public:
-    bool ParseFile(const char *pszPath, Profile *pProfile, HMODULE hModule);
+    bool ParseFile(const char *pszPath, Profile *pProfile, vector<Target> *pvSubstTargets, HMODULE hModule);
 
 private:
     HRESULT _ParseEtw(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile);
-    HRESULT _ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile);
-    HRESULT _ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
-    HRESULT _ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
+    HRESULT _ParseTimeSpans(IXMLDOMDocument2 *pXmlDoc, Profile *pProfile, vector<pair<string, bool>>& vSubsts);
+    HRESULT _ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan, vector<pair<string, bool>>& vSubsts);
+    HRESULT _ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan, vector<pair<string, bool>>& vSubsts);
     HRESULT _ParseRandomDataSource(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _ParseWriteBufferContent(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget);
+    HRESULT _ParseThroughput(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget *pThreadTarget);
     HRESULT _ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
     HRESULT _ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
+    HRESULT _ParseDistribution(IXMLDOMNode *pXmlNode, Target *pTarget);
+    HRESULT _SubstTarget(Target *pTarget, vector<pair<string, bool>>& vSubsts);
 
     HRESULT _GetString(IXMLDOMNode *pXmlNode, const char *pszQuery, string *psValue) const;
     HRESULT _GetUINT32(IXMLDOMNode *pXmlNode, const char *pszQuery, UINT32 *pulValue) const;

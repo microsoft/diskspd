@@ -38,10 +38,11 @@ namespace UnitTests
 class ResultParser : public IResultParser
 {
 public:
-    string ParseResults(Profile& profile, const SystemInformation& system, vector<Results> vResults);
+    string ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults);
+    string ParseProfile(const Profile& profile);
 
 private:
-    void _DisplayFileSize(UINT64 fsize);
+    void _DisplayFileSize(UINT64 fsize, UINT32 align = 0);
     void _DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo);
     void _DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters);
     void _Print(const char *format, ...);
@@ -58,6 +59,8 @@ private:
         const Histogram<float>& totalLatencyHistogram);
     void _PrintTimeSpan(const TimeSpan &timeSpan);
     void _PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fUseRequestsPerFile, bool fCompletionRoutines);
+    void _PrintDistribution(DistributionType dT, const vector<DistributionRange>& v, char* spc);
+    void _PrintEffectiveDistributions(const Results& results);
 
     string _sResult;
 

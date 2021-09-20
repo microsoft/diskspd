@@ -34,13 +34,10 @@ SOFTWARE.
 
 
 void PrintError(const char *format, ...);
-void *ManagedMalloc(size_t size);
 namespace UnitTests
 {
     class IORequestGeneratorUnitTests;
 }
-
-#define FIRST_OFFSET 0xFFFFFFFFFFFFFFFFULL
 
 class IORequestGenerator
 {
@@ -51,8 +48,7 @@ public:
 
     }
 
-    bool GenerateRequests(Profile& profile, IResultParser& resultParser, PRINTF pPrintOut, PRINTF pPrintError, PRINTF pPrintVerbose, struct Synchronization *pSynch);
-    static UINT64 GetNextFileOffset(ThreadParameters& tp, size_t targetNum, UINT64 prevOffset);
+    bool GenerateRequests(Profile& profile, IResultParser& resultParser, struct Synchronization *pSynch);
 
 private:
 
@@ -68,7 +64,6 @@ private:
     void _CloseOpenFiles(vector<HANDLE>& vhFiles) const;
     DWORD _CreateDirectoryPath(const char *path) const;
     bool _CreateFile(UINT64 ullFileSize, const char *pszFilename, bool fZeroBuffers, bool fVerbose) const;
-    void _DisplayFileSizeVerbose(bool fVerbose, UINT64 fsize) const;
     bool _GetActiveGroupsAndProcs() const;
     struct ETWSessionInfo _GetResultETWSession(const EVENT_TRACE_PROPERTIES *pTraceProperties) const;
     bool _GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount) const;
