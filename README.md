@@ -82,7 +82,7 @@ VM Fleet 2.0 9/22/2021
 
 * major release and rewrite as a first class Powershell module
 * original script-based VM Fleet remains available at Frameworks/VMFleet1.0
-* see the [documentation]<https://github.com/microsoft/diskspd/wiki/VMFleet> in the Wiki
+* see the [documentation](https://github.com/microsoft/diskspd/wiki/VMFleet) in the Wiki
 
 Source Code
 ===========
