@@ -78,7 +78,7 @@ DISKSPD 2.0.17a 5/01/2016
 
 VM Fleet is a performance characterization and analyst framework for exploring the storage capabilities of Windows Server Hyper-Converged environments with Storage Spaces Direct.
 
-VM Fleet 2.0 9/22/2001
+VM Fleet 2.0 9/22/2021
 
 * major release and rewrite as a first class Powershell module
 * original script-based VM Fleet remains available at Frameworks/VMFleet1.0
