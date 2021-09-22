@@ -1,0 +1,82 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Configuration>
+  <ViewDefinitions>
+    <!--
+
+    //
+    // VMFLeet.VolumeEstimate
+    //
+
+    -->
+    <View>
+      <Name>StorageBusBindingTableView</Name>
+      <ViewSelectedBy>
+        <TypeName>VolumeEstimate</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader>
+            <Label>VolumeType</Label>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>MirrorSize</Label>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>MirrorTierName</Label>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>ParitySize</Label>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>ParityTierName</Label>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Size</Label>
+          </TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem>
+                <PropertyName>VolumeType</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <Alignment>Right</Alignment>
+                <ScriptBlock>
+                  $v = $_.MirrorSize;
+                  $postfixes = @( "B", "KB", "MB", "GB", "TB", "PB" )
+                  for ($i=0; $v -ge 1024 -and $i -lt $postfixes.Length; $i++) { $v /= 1024; }
+                  return "" + [System.Math]::Round($v,2) + " " + $postfixes[$i];
+                </ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>MirrorTierName</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <Alignment>Right</Alignment>
+                <ScriptBlock>
+                  $v = $_.ParitySize;
+                  $postfixes = @( "B", "KB", "MB", "GB", "TB", "PB" )
+                  for ($i=0; $v -ge 1024 -and $i -lt $postfixes.Length; $i++) { $v /= 1024; }
+                  return "" + [System.Math]::Round($v,2) + " " + $postfixes[$i];
+                </ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>ParityTierName</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <Alignment>Right</Alignment>
+                <ScriptBlock>
+                  $v = $_.Size;
+                  $postfixes = @( "B", "KB", "MB", "GB", "TB", "PB" )
+                  for ($i=0; $v -ge 1024 -and $i -lt $postfixes.Length; $i++) { $v /= 1024; }
+                  return "" + [System.Math]::Round($v,2) + " " + $postfixes[$i];
+                </ScriptBlock>
+              </TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+  </ViewDefinitions>
+</Configuration>
