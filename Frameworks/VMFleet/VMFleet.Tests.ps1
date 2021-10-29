@@ -702,4 +702,27 @@ InModuleScope VMFleet {
             $f['*1'].MaxOffset | Should Be 0
         }
     }
+
+    Describe "TimespanToString" {
+
+        BeforeAll {
+            $t0 = [datetime] '7/31/1996 12:00PM'
+        }
+
+        It "Seconds" {
+            TimespanToString ($t0.AddMilliseconds(1500) - $t0) | Should Be "01.5s"
+        }
+
+        It "Minutes" {
+            TimespanToString ($t0.AddMinutes(15) - $t0) | Should Be "15m:00.0s"
+        }
+
+        It "Hours" {
+            TimespanToString ($t0.AddHours(15) - $t0) | Should Be "15h:00m:00.0s"
+        }
+
+        It "Days" {
+            TimespanToString ($t0.AddDays(15) - $t0) | Should Be "15d.00h:00m:00.0s"
+        }
+    }
 }
