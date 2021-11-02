@@ -36,8 +36,8 @@ SOFTWARE.
 # Script module or binary module file associated with this manifest.
 RootModule = 'VMFleet.psm1'
 
-# Version number of this module. Revision < 1000 pre-release.
-ModuleVersion = '2.0.1.0'
+# Version number of this module. Even build# is release, odd pre-release (Mj.Mn.Bd.Rv)
+ModuleVersion = '2.0.2.0'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
