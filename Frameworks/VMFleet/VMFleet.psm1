@@ -87,6 +87,11 @@ class VolumeEstimate
 $vmSwitchName = 'FleetInternal'
 $vmSwitchIP = '169.254.1.1'
 
+# Note: this can be directly determined by Get-SmbClientConfiguration. Changes are not expected, but
+# since the controlling timeout is in the guest lets simply wire it down. Actual is normally 10s, use
+# +2s for margin.
+$smbInfoCacheLifetime = 12
+
 #
 # Embedded scripts for VM control/pickup
 #
@@ -324,6 +329,36 @@ function Set-FleetControlScript
         }
     }
 
+    function DisableWindowsRE
+    {
+        #
+        # Disable the Windows Recovery console. Under aggresive conditions like repeated start/stop on the part
+        # of a runner, Windows RE may get triggered and trap the VMs in the recovery console. While recoverable
+        # with Repair-Fleet, lets prevent that since RE doesn't provide value to VM Fleet ops.
+        #
+        # It would be nice if we could do this during VM provisioning.
+        #
+
+        $state = reagentc /info |% {
+
+            if ( $_ -match 'Windows RE status:\s+(\S+)')
+            {
+                $matches[1]
+            }
+        }
+
+        if ($state -eq 'Enabled')
+        {
+            $out = reagentc /disable
+            $status = $?
+            LogOutput "Disabling Windows RE: $out"
+            if (-not $status)
+            {
+                LogOutput -ForegroundColor Red "Failed to disable Windows RE - VM may enter the recovery console"
+            }
+        }
+    }
+
     function ValidateSmbMapping
     {
         param(
@@ -439,7 +474,9 @@ function Set-FleetControlScript
         Password = $connectpass
     }
 
+    # Initial configuration checks
     ValidateSmbMapping @mapParam
+    DisableWindowsRE
 
     # update tooling
     Copy-Item L:\tools\* C:\run -Force
@@ -488,9 +525,28 @@ function Set-FleetControlScript
             return $null
         }
 
-        if ($null -eq $df -or $sf.LastWriteTime -gt $df.LastWriteTime)
+        # no destination, always take source
+        if ($null -eq $df)
         {
             return $sf
+        }
+
+        if ($sf.LastWriteTime -gt $df.LastWriteTime)
+        {
+            $sfh = Get-FileHash $sf
+            $dfh = Get-FileHash $df
+
+            # files are different, indicate
+            if ($sfh.Hash -ne $dfh.Hash)
+            {
+                return $sf
+            }
+
+            # files are the same but the last write time has moved - ignore, pull
+            # up lastwrite on destination
+
+            LogOutput -ForegroundColor Green IGNORE newer last write with no source change
+            $df.LastWriteTime = $sf.LastWriteTime
         }
 
         # Have latest, indicate no new
@@ -841,6 +897,7 @@ function Set-SweepTemplateScript
 
 function Set-RunProfileTemplateScript
 {
+    # __Unique__
     $addspec = '__AddSpec__'
     $result = "result"
     if ($addspec.Length) { $result += "-$($addspec)" }
@@ -1049,17 +1106,16 @@ $CommonFunc = {
         param (
             [Parameter()]
             [string]
-            $Cluster
+            $Cluster = '.'
         )
 
-        if ($Cluster.Length -gt 0)
+        $nodes = @(Get-ClusterNode @PsBoundParameters |? State -eq Up)
+        if ($nodes.Length -eq 0)
         {
-            (Get-ClusterNode @PsBoundParameters |? State -eq Up)[0]
+            throw "No nodes of cluster $Cluster are accessible at this time"
         }
-        else
-        {
-            $env:COMPUTERNAME
-        }
+
+        $nodes[0].Name
     }
 
     #
@@ -1079,7 +1135,7 @@ $CommonFunc = {
         param(
             [Parameter()]
             [string]
-            $Cluster = "."
+            $Cluster = '.'
             )
 
         $node = Get-AccessNode @PsBoundParameters
@@ -1167,6 +1223,54 @@ $CommonFunc = {
             $path
         }
     }
+
+    function GetLogmanLocal
+    {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]
+            $Name
+            )
+
+        $raw = logman query $Name
+        if ($?)
+        {
+            $inctrs = $false
+            $ctrs = @()
+            $props = @{}
+
+            $raw |% {
+                if ($inctrs)
+                {
+                    # Trim leading spaces. Empty terminates the block.
+                    $ctr = $_ -replace '^\s+',''
+                    if ($ctr.Length -eq 0)
+                    {
+                        $inctrs = $false
+                    }
+                    else
+                    {
+                        $ctrs += $ctr
+                    }
+                }
+                elseif ($_ -match '\S+\:\s+\S+')
+                {
+                    $kv = $_ -split ':\s+',2
+                    # Basic k: v property
+                    $props[$kv[0] -replace '\s',''] = $kv[1]
+                }
+                elseif ($_ -eq 'Counters:')
+                {
+                    # Begin consuming counter names
+                    $inctrs = $true
+                }
+            }
+
+            $props['Counters'] = $ctrs
+            [pscustomobject] $props
+        }
+    }
 }
 
 # Evaluate common block into local session
@@ -1174,7 +1278,57 @@ $CommonFunc = {
 
 # Utility functions only for the local session
 
-# Start perf collection on given computer(s)/counter set with named blg
+function TimespanToString
+{
+    param(
+        [timespan] $TimeSpan
+    )
+
+    # Autoranging output
+    if ($TimeSpan.TotalDays -ge 1)
+    {
+        $TimeSpan.ToString("dd\d\.hh\h\:mm\m\:ss\.f\s")
+    }
+    elseif ($TimeSpan.TotalHours -ge 1)
+    {
+        $TimeSpan.ToString("hh\h\:mm\m\:ss\.f\s")
+    }
+    elseif ($TimeSpan.TotalMinutes -ge 1)
+    {
+        $TimeSpan.ToString("mm\m\:ss\.f\s")
+    }
+    else
+    {
+        $TimeSpan.ToString("ss\.f\s")
+    }
+}
+
+# Produce a good-enough parse of logman collector status
+function GetLogman
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(
+            Mandatory = $true
+        )]
+        [string[]]
+        $Computer,
+
+        [Parameter()]
+        [string]
+        $Name = ""
+        )
+
+    $n = "perfctr"
+    if ($Name.Length) { $n += "-$Name" }
+
+    Invoke-CommonCommand -ComputerName $Computer -InitBlock $CommonFunc -ScriptBlock {
+
+        GetLogmanLocal -Name $using:n
+    }
+}
+
+# Start/restart perf collection on given computer(s)/counter set with named blg
 function StartLogman
 {
     [CmdletBinding()]
@@ -1205,7 +1359,27 @@ function StartLogman
     if ($Name.Length) { $n += "-$Name" }
 
     Invoke-CommonCommand -ComputerName $Computer -InitBlock $CommonFunc -ScriptBlock {
+
+        # clean up any pre-existing collector & corresponding blg due to failed teardown/et.al.
+        $existing = GetLogmanLocal -Name $using:n
+        if ($null -ne $existing)
+        {
+            Write-Verbose "logman stop/delete pre-existing $($using:n)"
+            if ($existing.Status -eq 'Running')
+            {
+                $null = logman stop $using:n
+            }
+            $null = logman delete $using:n
+            if (Test-Path $existing.OutputLocation)
+            {
+                Remove-Item $existing.OutputLocation -Force
+            }
+        }
+
         $f = Join-Path $env:TEMP "$($using:n)-$($env:COMPUTERNAME).blg"
+
+        # clean up any stale pre-existing blg
+        if (Test-Path $f) { Remove-Item $f -Force }
 
         $o = logman create counter $using:n -o $f -f bin -si $using:SampleInterval --v -c $using:Counters 2>&1
         $s = $?
@@ -1316,35 +1490,66 @@ function Invoke-CommonCommand
         $JobName
     )
 
-	if ($ComputerName.Count -eq 0)
-	{
-		$Sessions = New-PSSession -Cn localhost -EnableNetworkAccess
-	}
-	else
-	{
-		$Sessions = New-PSSession -ComputerName $ComputerName
-	}
-
-    # Replay the verbose preference onto the seesions so logging is passed
-    Invoke-Command -Session $Sessions { $VerbosePreference = $using:VerbosePreference }
-
-    if ($null -ne $InitBlock)
+    $Sessions = @()
+    if ($ComputerName.Count -eq 0)
     {
-        Invoke-Command -Session $Sessions $InitBlock
+        $Sessions = New-PSSession -Cn localhost -EnableNetworkAccess
+    }
+    else
+    {
+        $Sessions = New-PSSession -ComputerName $ComputerName
     }
 
-    switch($PSCmdlet.ParameterSetName)
+    # Guarantee session cleanup if exception thrown w/o either attaching to job
+    # for later removal or synch completion of work.
+    try
     {
-        "AsJob"
+        # Replay the verbose preference onto the seesions so logging is passed
+        Invoke-Command -Session $Sessions { $VerbosePreference = $using:VerbosePreference }
+
+        if ($null -ne $InitBlock)
         {
-            Invoke-Command -Session $Sessions -AsJob -JobName $JobName -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList |
-                Add-Member -NotePropertyName Session -NotePropertyValue $Sessions.Id -PassThru
+            Invoke-Command -Session $Sessions $InitBlock
         }
 
-        default
+        switch($PSCmdlet.ParameterSetName)
         {
-            Invoke-Command -Session $Sessions -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
-            $Sessions | Remove-PSSession
+            "AsJob"
+            {
+                Invoke-Command -Session $Sessions -AsJob -JobName $JobName -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList |
+                    Add-Member -NotePropertyName ActiveSession -NotePropertyValue $Sessions.Id -PassThru
+
+                # Attached, no cleanup here.
+                $Sessions = @()
+            }
+
+            default
+            {
+                Invoke-Command -Session $Sessions -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+                $Sessions | Remove-PSSession
+            }
+        }
+    }
+    finally
+    {
+        $Sessions | Remove-PSSession
+    }
+}
+
+function RemoveCommonJobSession
+{
+    param (
+        [Parameter(ValueFromPipeline = $true)]
+        [object]
+        $j
+        )
+
+    # Remove sessions from completed CommonCommand jobs
+
+    process {
+        if (Get-Member -InputObject $j ActiveSession)
+        {
+             Remove-PSSession -Id $j.ActiveSession
         }
     }
 }
@@ -1362,9 +1567,9 @@ function Get-FleetVersion
 
     $path = Get-FleetPath -PathType Tools @PSBoundParameters
 
-    $vmfleet = Get-Module -Name VMFleet
+    $vmfleet = Get-Command Get-FleetVersion
     [PSCustomObject]@{
-        Component = $vmfleet.Name
+        Component = $vmfleet.Source
         Version = $vmfleet.Version
     }
 
@@ -1407,7 +1612,7 @@ function Get-FleetPauseEpoch
 }
 
 #
-# Get-Pause
+# Get-FleetPause
 #
 function Get-FleetPause
 {
@@ -1452,40 +1657,10 @@ function Show-FleetPause
         return
     }
 
-    # accumulate hash of pause flags mapped to current/stale state
-    $h = @{}
-
-    Get-ChildItem "$($pausePath)-*" |% {
-
-        $thisPause = Get-Content $_ -ErrorAction SilentlyContinue
-        if ($thisPause -eq $pauseEpoch)
-        {
-            $pauseType = [PauseState]::Current
-        }
-        else
-        {
-            $pauseType = [PauseState]::Stale
-        }
-
-        if ($_.name -match 'pause-(vm.+)')
-        {
-            # VM Name
-            $h[$matches[1]] = $pauseType
-        }
-        else
-        {
-            Write-Warning "malformed pause $($_.Name) present"
-        }
-    }
-
     # Now correlate to online vms and see if we agree all online are paused.
-    # Note that if we shutdown some vms and then check pause the current flags
-    # will be higher than online, so we need to verify individually to not
-    # spoof ourselves.
 
     $vms = @(Get-ClusterGroup |? GroupType -eq VirtualMachine |? Name -like 'vm-*' |? State -eq Online)
-
-    $pausedVMs = @($vms |? { $h[$_.Name] -eq [PauseState]::Current })
+    $pausedVMs = @($vms | FilterPausedVMs -Path $pausePath)
 
     if ($pausedVMs.Count -eq $vms.Count)
     {
@@ -1496,6 +1671,60 @@ function Show-FleetPause
         Write-Host -fore red "WARNING: of $($vms.Count), still waiting on $($vms.Count - $pausedVMs.Count) to acknowledge pause"
 
         Compare-Object $vms $pausedVMs -Property Name -PassThru | Sort-Object -Property Name | Format-Table -AutoSize Name,OwnerNode | Out-Host
+    }
+}
+
+function FilterPausedVMs
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(ParameterSetName = "ByPath")]
+        [string]
+        $Path,
+
+        [Parameter(ValueFromPipeline = $true)]
+        [Microsoft.FailoverClusters.PowerShell.ClusterGroup[]]
+        $VM
+    )
+
+    begin
+    {
+        $pauseEpoch = Get-FleetPauseEpoch -Path $Path -ErrorAction SilentlyContinue
+
+        # accumulate hash of pause flags mapped to current/stale state
+        $h = @{}
+
+        Get-ChildItem "$($Path)-*" |% {
+
+            $thisPause = Get-Content $_ -ErrorAction SilentlyContinue
+            if ($thisPause -eq $pauseEpoch)
+            {
+                $pauseType = [PauseState]::Current
+            }
+            else
+            {
+                $pauseType = [PauseState]::Stale
+            }
+
+            if ($_.name -match 'pause-(vm.+)')
+            {
+                # VM Name
+                $h[$matches[1]] = $pauseType
+            }
+            else
+            {
+                Write-Warning "malformed pause $($_.Name) present"
+            }
+        }
+    }
+
+    process
+    {
+        # Pass through all VMs which have responsed to the current pause.
+        if ($h[$VM.Name] -eq [PauseState]::Current)
+        {
+            $VM
+        }
     }
 }
 
@@ -1512,14 +1741,20 @@ function Set-FleetPause
         $Path,
 
         [Parameter()]
+        [ValidateRange(0,120)]
+        [int]
+        $Timeout = 120,
+
+        [Parameter()]
         [switch]
         $Force
     )
 
-    # Remove the bound Force parameter if present so we can simply re-pass our params
-    # downstack without further modification. Don't care if present or not (return).
-    $null = $PSBoundParameters.Remove('Force')
-    $pausePath = Get-FleetPath -PathType Pause @PSBoundParameters
+    # Parameter set specifying cluster only
+    $clusterParam = @{}
+    CopyKeyIf $PSBoundParameters $clusterParam 'Cluster'
+
+    $pausePath = Get-FleetPath @clusterParam -PathType Pause
 
     if ((-not $Force) -and (Get-FleetPause -Path $pausePath))
     {
@@ -1538,6 +1773,36 @@ function Set-FleetPause
     } until ($false)
 
     LogOutput -IsVb "pause set @ $((Get-Item $pausePath).LastWriteTime)"
+
+    # Wait for pause to settle?
+    if ($Timeout -gt 0)
+    {
+        $t0 = Get-Date
+        $vms = @(Get-ClusterGroup @clusterParam |? GroupType -eq VirtualMachine |? Name -like 'vm-*' |? State -eq Online)
+
+        do {
+
+            $td = (Get-Date) - $t0
+
+            $pausedVMs = @($vms | FilterPausedVMs -Path $pausePath)
+            if ($pausedVMs.Count -eq $vms.Count)
+            {
+                break
+            }
+
+            if ($td.TotalSeconds -gt $Timeout)
+            {
+                Write-Error "Wait for pause ack timed out - only $($pausedVMs.Count)/$($vms.Count) pause responses. Check fleet health with Get-FleetVM -ControlResponse and Repair-Fleet if needed."
+                return
+            }
+
+            LogOutput -IsVb "WAIT pause ack @ $($pausedVMs.Count)/$($vms.Count) paused"
+            Start-Sleep 2
+
+        } while ($true)
+
+        LogOutput -IsVb "pause ack $($vms.Count) total ($('{0:0.0}' -f $td.TotalSeconds)s to ack)"
+    }
 }
 
 function Clear-FleetPause
@@ -1676,7 +1941,7 @@ function Install-Fleet
     }
 
     # Set fleet pause so that VMs come up idle
-    Set-FleetPause
+    Set-FleetPause -Timeout 0
 
     #
     # Unwrap VM scripts (control, run*)
@@ -2393,7 +2658,7 @@ function Start-Fleet
     $numNode = $node.Count
 
     # Pause and clear fleet run state so that VMs arrive as a coordinated group
-    Set-FleetPause @clusterParam
+    Set-FleetPause @clusterParam -Timeout 0
     Clear-FleetRunState @clusterParam
 
     Invoke-CommonCommand ($node |? State -eq Up) -InitBlock $CommonFunc -ScriptBlock {
@@ -2817,7 +3082,7 @@ function Get-FleetVM
         # create its pause for the first time - must enumerate on each check.
         #
 
-        Set-FleetPause @clusterParam -Force
+        Set-FleetPause @clusterParam -Force -Timeout 0
         $pauseEpoch = Get-FleetPauseEpoch @clusterParam
 
         do {
@@ -2969,12 +3234,14 @@ function Show-Fleet
 
     $node = Get-AccessNode @clusterParam
 
-    Get-StorageQoSFlow -CimSession $node |% {
+    # Note: group all vm disks together and bucket sum of IOPS
+    Get-StorageQoSFlow -CimSession $node | Group-Object -Property InitiatorName |% {
 
+        $initiatorIops = ($_.Group | Measure-Object -Sum InitiatorIops).Sum
         $found = $false
         foreach ($step in $logs) {
 
-            if ($_.InitiatorIops -lt $step) {
+            if ($initiatorIops -lt $step) {
                 $qosbuckets[$step] += 1;
                 $found = $true
                 break
@@ -3199,133 +3466,139 @@ function Move-Fleet
             $groups = GetDistributedShift -Group $groups -N $n
         }
 
-        #
-        # Strip out VMs already in the correct location and farm out movement
-        # to the respective host node.
-        #
-
-        $j = @()
-        for ($i = 0; $i -lt $groups.Count; ++$i)
+        try
         {
-            $moveList = @(foreach ($vm in $groups[$i])
-            {
-                if ($vm.OwnerNode -ne $nodes[$i])
-                {
-                    $vm
-                }
-            })
+            #
+            # Strip out VMs already in the correct location and farm out movement
+            # to the respective host node.
+            #
 
-            if ($moveList.Count -eq 0)
+            $j = @()
+            for ($i = 0; $i -lt $groups.Count; ++$i)
             {
-                continue
+                $moveList = @(foreach ($vm in $groups[$i])
+                {
+                    if ($vm.OwnerNode -ne $nodes[$i])
+                    {
+                        $vm
+                    }
+                })
+
+                if ($moveList.Count -eq 0)
+                {
+                    continue
+                }
+
+                $target = $nodes[$i].Name
+                LogOutput Moving $moveList.Count VMs to $target
+
+                #
+                # Carefully quote the movelist so that it passes as a single parameter (list of a single element, a list)
+                #
+
+                $j += Invoke-CommonCommand -AsJob -InitBlock $CommonFunc -ArgumentList @(,$moveList) -ScriptBlock {
+
+                    [CmdletBinding()]
+                    param(
+                        [object[]]
+                        $vms
+                    )
+
+                    foreach ($vm in $vms)
+                    {
+                        LogOutput "Moving $($vm.Name): $($vm.OwnerNode) -> $using:target"
+
+                        $expectedState = $vm.State
+
+                        try
+                        {
+                            # The default move type is live, but live does not degenerately handle offline vms yet.
+                            # Discard the warning stream - if an issue occurs the cluster will offer a generic comment
+                            # about credential remoting (in addition to the error) which is not going to be relevant in
+                            # our cases.
+                            if ($vm.State -eq 'Offline')
+                            {
+                                $null = Move-ClusterVirtualMachineRole @using:clusterParam -Name $vm.Name -Node $using:target -MigrationType Quick -ErrorAction Stop 3> $null
+                            }
+                            else
+                            {
+                                $null = Move-ClusterVirtualMachineRole @using:clusterParam -Name $vm.Name -Node $using:target -ErrorAction Stop 3> $null
+                            }
+                        }
+                        catch
+                        {
+                            #
+                            # Workaround false failure of VM quick/offline migration - sink the error if VM appears to land, otherwise propagate it.
+                            #
+
+                            $checkVM = Get-ClusterGroup @using:clusterParam -Name $vm.Name
+
+                            $await = 0
+                            if ($expectedState -eq 'Offline')
+                            {
+                                $await = 5
+                                do {
+
+                                    if ($checkVM.State -eq $expectedState -and $checkVM.OwnerNode -eq $using:target)
+                                    {
+                                        LogOutput "Verified VM quick migration on retry $(5 - $await + 1) $($vm.Name) -> $using:target"
+                                        break
+                                    }
+
+                                    if (-not --$await)
+                                    {
+                                        break
+                                    }
+
+                                    Start-Sleep 1
+                                    $checkVM = Get-ClusterGroup @using:clusterParam -Name $vm.Name
+
+                                } while ($true)
+                            }
+
+                            if ($await -eq 0)
+                            {
+                                if ($checkVM.State -ne $expectedState)      { LogOutput "Verify $($vm.Name) $($checkVM.State) != $expectedState" }
+                                if ($checkVM.OwnerNode -ne $using:target)   { LogOutput "Verify $($vm.Name) $($checkVM.OwnerNode) != $($using:target)" }
+                                LogOutput -ForegroundColor Red "Error moving $($vm.Name)"
+
+                                $errorObject = CreateErrorRecord -ErrorId $_.FullyQualifiedErrorId `
+                                    -ErrorMessage $null `
+                                    -ErrorCategory $_.CategoryInfo.Category `
+                                    -Exception $_.Exception `
+                                    -TargetObject $_.TargetObject
+
+                                $psCmdlet.WriteError($errorObject)
+                            }
+                        }
+                    }
+                }
             }
 
-            $target = $nodes[$i].Name
-            LogOutput Moving $moveList.Count VMs to $target
-
             #
-            # Carefully quote the movelist so that it passes as a single parameter (list of a single element, a list)
+            # And await completion (errors flow through)
             #
 
-            $j += Invoke-CommonCommand -AsJob -InitBlock $CommonFunc -ArgumentList @(,$moveList) -ScriptBlock {
-
-                [CmdletBinding()]
-                param(
-                    [object[]]
-                    $vms
-                )
-
-                foreach ($vm in $vms)
+            $jobErrors = @()
+            while ($true)
+            {
+                $done = @($j | Wait-Job -Timeout 1)
+                try {
+                    $j | Receive-Job
+                } catch {
+                    $jobErrors += $_
+                }
+                if ($done.Count -eq $j.Count)
                 {
-                    LogOutput "Moving $($vm.Name): $($vm.OwnerNode) -> $using:target"
-
-                    $expectedState = $vm.State
-
-                    try
-                    {
-                        # The default move type is live, but live does not degenerately handle offline vms yet.
-                        # Discard the warning stream - if an issue occurs the cluster will offer a generic comment
-                        # about credential remoting (in addition to the error) which is not going to be relevant in
-                        # our cases.
-                        if ($vm.State -eq 'Offline')
-                        {
-                            $null = Move-ClusterVirtualMachineRole @using:clusterParam -Name $vm.Name -Node $using:target -MigrationType Quick -ErrorAction Stop 3> $null
-                        }
-                        else
-                        {
-                            $null = Move-ClusterVirtualMachineRole @using:clusterParam -Name $vm.Name -Node $using:target -ErrorAction Stop 3> $null
-                        }
-                    }
-                    catch
-                    {
-                        #
-                        # Workaround false failure of VM quick/offline migration - sink the error if VM appears to land, otherwise propagate it.
-                        #
-
-                        $checkVM = Get-ClusterGroup @using:clusterParam -Name $vm.Name
-
-                        $await = 0
-                        if ($expectedState -eq 'Offline')
-                        {
-                            $await = 5
-                            do {
-
-                                if ($checkVM.State -eq $expectedState -and $checkVM.OwnerNode -eq $using:target)
-                                {
-                                    LogOutput "Verified VM quick migration on retry $(5 - $await + 1) $($vm.Name) -> $using:target"
-                                    break
-                                }
-
-                                if (-not --$await)
-                                {
-                                    break
-                                }
-
-                                Start-Sleep 1
-                                $checkVM = Get-ClusterGroup @using:clusterParam -Name $vm.Name
-
-                            } while ($true)
-                        }
-
-                        if ($await -eq 0)
-                        {
-                            if ($checkVM.State -ne $expectedState)      { LogOutput "Verify $($vm.Name) $($checkVM.State) != $expectedState" }
-                            if ($checkVM.OwnerNode -ne $using:target)   { LogOutput "Verify $($vm.Name) $($checkVM.OwnerNode) != $($using:target)" }
-                            LogOutput -ForegroundColor Red "Error moving $($vm.Name)"
-
-                            $errorObject = CreateErrorRecord -ErrorId $_.FullyQualifiedErrorId `
-                                -ErrorMessage $null `
-                                -ErrorCategory $_.CategoryInfo.Category `
-                                -Exception $_.Exception `
-                                -TargetObject $_.TargetObject
-
-                            $psCmdlet.WriteError($errorObject)
-                        }
-                    }
+                    break
                 }
             }
         }
-
-        #
-        # And await completion (errors flow through)
-        #
-
-        $jobErrors = @()
-        while ($true)
+        finally
         {
-            $done = @($j | Wait-Job -Timeout 1)
-            try {
-                $j | Receive-Job
-            } catch {
-                $jobErrors += $_
-            }
-            if ($done.Count -eq $j.Count)
-            {
-                break
-            }
+            $j | RemoveCommonJobSession
+            $j | Remove-Job
         }
-
-        $j | Remove-Job
 
         if ($jobErrors.Count)
         {
@@ -3913,7 +4186,7 @@ function Get-FleetVolumeEstimate
     # For estimation take the largest such device - if there is variance it should be within a very narrow
     # band (e.g., all 10TB devices plus or minus some small amount).
     $nodeCount = @(Get-ClusterNode -Cluster $Cluster).Count
-    $capDevice = $pool | Get-PhysicalDisk |? Usage -eq Auto-Select | Sort-Object -Property Size -Descending | Select-Object -First 1
+    $capDevice = $pool | Get-PhysicalDisk -CimSession $Cluster |? Usage -eq Auto-Select | Sort-Object -Property Size -Descending | Select-Object -First 1
 
     if ($null -eq $capDevice)
     {
@@ -4555,8 +4828,8 @@ function GetDoneFlags
         [Parameter(
             Mandatory = $true
         )]
-        [int]
-        $VMs,
+        [Microsoft.FailoverClusters.PowerShell.ClusterGroup[]]
+        $VM,
 
         [Parameter()]
         [double]
@@ -4571,6 +4844,14 @@ function GetDoneFlags
         $Tag = ''
     )
 
+    # Hash of VMs to wait on. false indicates not done, true done. Prepopulate to filter flags.
+    $vmDone = @{}
+    foreach ($v in $VM)
+    {
+        $vmDone[$v.Name] = $false
+    }
+
+    $done = 0
     $tries = 0
     $t0 = Get-Date
     $t1 = $t2 = $null
@@ -4584,35 +4865,46 @@ function GetDoneFlags
         # increment attempts and capture start of the iteration
         $tries += 1
         $t1 = Get-Date
-        $done = 0
 
         # count number of done flags which agree with completion of the current go epoch
         Get-ChildItem "$DonePath-*" |% {
-            $thisdone = [int](Get-Content $_ -ErrorAction SilentlyContinue)
-            if ($thisdone -eq $GoEpoch) {
-                # if asserting that none should be complete, this is an error!
-                if ($AssertNone) {
-                    LogOutput -ForegroundColor red ERROR: $_.basename is already done
+
+            # Now split the VM name from the flag file name (done-vm-xyz); ignore malformed,
+            # ones which are not in our expected set, and ones already done.
+            $names = $_.Name -split '-',2
+            if ($names.Count -eq 2 -and
+                $vmDone.ContainsKey($names[1]) -and
+                $vmDone[$names[1]] -eq 0)
+            {
+                $thisDone = [int](Get-Content $_.FullName -ErrorAction SilentlyContinue)
+                if ($thisDone -eq $GoEpoch) {
+
+                    # if asserting that none should be complete, this is an error!
+                    if ($AssertNone) {
+                        LogOutput -ForegroundColor Red "ERROR: $($names[1]) is already done"
+                    }
+
+                    $done += 1
+                    $vmDone[$names[1]] = $true
                 }
-                $done += 1
             }
         }
 
         # color status message per condition
-        if (($AssertNone -and $done -ne 0) -or $done -ne $VMs) {
-            $color = 'yellow'
+        if (($AssertNone -and $done -ne 0) -or $done -ne $VM.Count) {
+            $color = [System.ConsoleColor]::Yellow
         } else {
-            $color = 'green'
+            $color = [System.ConsoleColor]::Green
         }
 
         $t2 = Get-Date
         $itdur = $t2 - $t1
         $totdur = $t2 - $t0
 
-        LogOutput -ForegroundColor $color $Tag CHECK $tries : "$done/$vms" done $('({0:F2}s, total {1:F2}s)' -f $itdur.TotalSeconds, $totdur.TotalSeconds)
+        LogOutput -ForegroundColor $color $Tag CHECK $tries : "$done/$($VM.Count)" done $('({0:F2}s, total {1:F2}s)' -f $itdur.TotalSeconds, $totdur.TotalSeconds)
 
     # loop if not asserting, not all vms are done, and still have timeout to use
-    } while ((-not $AssertNone) -and $done -ne $VMs -and $totdur.TotalSeconds -lt $Timeout)
+    } while ((-not $AssertNone) -and $done -ne $VM.Count -and $totdur.TotalSeconds -lt $Timeout)
 
     # asserting that none should be complete?
     if ($AssertNone)
@@ -4621,8 +4913,18 @@ function GetDoneFlags
     }
 
     # return incomplete run failure
-    elseif ($done -ne $VMs) {
-        LogOutput -ForegroundColor red ABORT: only received "$done/$vms" completions in $tries attempts
+    elseif ($done -ne $VM.Count) {
+        LogOutput -ForegroundColor Red ABORT: only received "$done/$($VM.Count)" completions in $tries attempts
+
+        # log out VMs not done
+        $en = $vmDone.GetEnumerator()
+        while ($en.MoveNext())
+        {
+            if ($en.Value -eq $false) {
+                LogOutput -ForegroundColor Yellow NOT DONE: $en.Key
+            }
+        }
+
         return $false
     }
 
@@ -4845,7 +5147,13 @@ function Start-FleetRun
     # Place profile in the control area?
     switch ($psCmdlet.ParameterSetName)
     {
-        "ByPrePlaced" { break }
+        "ByPrePlaced"
+        {
+            # Pause for SMB dir/info cache to expire and surface preplaced file.
+            # Dropping go flag will release the run.
+            Start-Sleep $smbInfoCacheLifetime
+            break
+        }
         "ByProfileXml"
         {
             $runProfileFilePath = Join-Path $controlPath $RunProfileFile
@@ -4866,8 +5174,8 @@ function Start-FleetRun
         $nodes = Get-ClusterNode @clusterParam |? State -eq Up | Sort-Object -Property Name
     }
 
-    # Number of VMs expected to participate
-    $vms = @(Get-ClusterGroup @clusterParam |? GroupType -eq VirtualMachine |? Name -like "vm-*" |? State -eq Online).Count
+    # VMs expected to participate
+    $vms = @(Get-ClusterGroup @clusterParam |? GroupType -eq VirtualMachine |? Name -like "vm-*" |? State -eq Online)
 
     if (Get-FleetPause @clusterParam)
     {
@@ -4888,7 +5196,12 @@ function Start-FleetRun
     # Create templated run script to inject this profile?
     if ($psCmdlet.ParameterSetName -ne "ByPrePlaced")
     {
+         # Pause for SMB dir/info cache to expire and surface go flag.
+         # Runner will wait for new content - note unique guid.
+         Start-Sleep $smbInfoCacheLifetime
+
         $vmprof = "L:\control\$RunProfileFile"
+        $guid = [System.Guid]::NewGuid().Guid
 
         $f = Join-Path $controlPath $RunFile
         $(Get-Command Set-RunProfileTemplateScript).ScriptBlock |% {
@@ -4897,6 +5210,7 @@ function Start-FleetRun
             $line = $_
             $line = $line -replace '__AddSpec__',$AddSpec
             $line = $line -replace '__Profile__',$vmprof
+            $line = $line -replace '__Unique__',$guid
             $line
 
         } | Out-File "$($f).tmp" -Encoding ascii -Width ([int32]::MaxValue)
@@ -4952,13 +5266,16 @@ function Start-FleetRun
             LogOutput RUN CHECK Go Epoch: $goepoch
 
             # Calculate effective time to check flags: how far into the timeout interval
-            # are we already.
+            # are we already. Note that this may wind up missing early completion if the run
+            # is very short. TBD positive successful completion ack as opposed to job completion.
             $fastFailCheckTimeout = $fastFailCheckWindow - ($td.TotalSeconds - $fastFailCheckAt)
 
-            if ($fastFailCheckTimeout -gt 0 -and
-                -not (GetDoneFlags -DonePath $donePath -GoEpoch $goepoch -VMs $vms -AssertNone -Tag 'RUN' -Timeout $fastFailCheckTimeout))
+            if ($fastFailCheckTimeout -gt 0)
             {
-                throw "Unexpected early completion of load, please check profile and virtual machines for errors"
+                if (-not (GetDoneFlags -DonePath $donePath -GoEpoch $goepoch -VM $vms -AssertNone -Tag 'RUN' -Timeout $fastFailCheckTimeout))
+                {
+                    throw "Unexpected early completion of load, please check profile and virtual machines for errors"
+                }
             }
             LogOutput -ForegroundColor green RUN CHECK PASS Go Epoch: $goepoch
         }
@@ -4988,7 +5305,7 @@ function Start-FleetRun
             $stopLogman = $false
         }
 
-        if (-not (GetDoneFlags -DonePath $donePath -GoEpoch $goepoch -VMs $vms -Tag COMPLETION))
+        if (-not (GetDoneFlags -DonePath $donePath -GoEpoch $goepoch -VM $vms -Tag COMPLETION))
         {
             throw "Load did not fully complete, please check profile and virtual machines for errors"
         }
@@ -5370,7 +5687,7 @@ function Start-FleetWriteWarmup
     }
 
     $td = (Get-Date) - $t0
-    LogOutput "WRITE WARMUP COMPLETE: took $($td.ToString("dd\d\.hh\h\:mm\m\:ss\s"))"
+    LogOutput "WRITE WARMUP COMPLETE: took $(TimespanToString $td)"
 }
 
 function Start-FleetReadCacheWarmup
@@ -5415,7 +5732,7 @@ function Start-FleetReadCacheWarmup
     }
 
     $pool = @(Get-StorageSubsystem -CimSession $sess |? AutomaticClusteringEnabled | Get-StoragePool |? IsPrimordial -eq $false)
-    $poold = @($pool | Get-PhysicalDisk)
+    $poold = @($pool | Get-PhysicalDisk -CimSession $sess)
 
     # Compare capacity devices against cache mode - any operating with read cache require warmup
     $capg = @($poold |? Usage -ne Journal | Group-Object -NoElement -Property MediaType)
@@ -5505,7 +5822,8 @@ function Start-FleetReadCacheWarmup
     #
     # Now warm up. Build read profile with two threads, each thread warming half of the target: one on even numbered
     # blocks and one on odd via one thread starting at ThreadStride 1/2 way around the target + blocksize.
-    # This sidesteps sequential IO detection.
+    # This sidesteps sequential IO detection. Blocksize must be small enough to meet cache criteria even when L1
+    # age is under threshold goal (just > ~1 day).
     #
     # Time is a placeholder; in practice, the run will be failed if we loop the workingset more times than expected
     # without converging. An explicitly indefinite runtime would be preferable.
@@ -5513,7 +5831,7 @@ function Start-FleetReadCacheWarmup
 
     $t0 = $null
     $warmupRun = 3600 * 24 * 7
-    $blockSize = 128KB
+    $blockSize = 56KB
 
     # Now align the base/max to our warmup block size. The difference between this and the actual range is not material
     # at the scale of GiB of workingset; if this assumption does not hold it could be reasonable to autoscale the blocksize
@@ -5540,7 +5858,8 @@ function Start-FleetReadCacheWarmup
     {
         # Trigger temporary change to cache on first read miss, avoiding time which might be
         # required to pass the cache aging and multiple-hit requirements, among others.
-        SetCacheBehavior -Cluster $Cluster -PopulateOnFirstMiss
+        # Sink warnings (2019 does not support this).
+        SetCacheBehavior -Cluster $Cluster -PopulateOnFirstMiss 3>$null
 
         $t0 = Get-Date
         Start-FleetRun -ProfileXml $dynamicProfile -Async
@@ -5705,11 +6024,12 @@ function Start-FleetReadCacheWarmup
         Set-FleetPause
 
         # Clear cache behavior change
-        SetCacheBehavior -Cluster $Cluster -PopulateOnFirstMiss:$false
+        # Sink warnings (2019 does not support this).
+        SetCacheBehavior -Cluster $Cluster -PopulateOnFirstMiss:$false 3>$null
     }
 
     $td = (Get-Date) - $t0
-    LogOutput "READ CACHE WARMUP COMPLETE: $completeMsg, took $($td.ToString("dd\d\.hh\h\:mm\m\:ss\s"))"
+    LogOutput "READ CACHE WARMUP COMPLETE: $completeMsg, took $(TimespanToString $td)"
 }
 
 function GetIndexOfSample
@@ -5881,17 +6201,18 @@ function ReduceDISKSPDResultToRowResult
         $rw = @("Read", "Write")
         $ms = "Milliseconds"
         $av = "Average"
+
+        $badFile = @()
     }
 
     process {
 
-        # LogOutput -IsVb "reducing DISKPD $ResultFile"
         try {
             $x = [xml](Get-Content $ResultFile)
         }
         catch
         {
-            throw "Invalid XML result, cannot post process: $ResultFile"
+            $badFile += $ResultFile
         }
 
         # Use ordered table to produce a predictable column layout if exported.
@@ -5945,6 +6266,14 @@ function ReduceDISKSPDResultToRowResult
         }
 
         [PsCustomObject] $props
+    }
+
+    end {
+
+        if ($badFile.Count)
+        {
+            throw "Invalid XML results, cannot post process: $($badFile.Name -join ', ')"
+        }
     }
 }
 function ReduceRowResultToSummary
@@ -6530,6 +6859,9 @@ function Measure-FleetCoreWorkload
 
     try
     {
+        $originalEAP = $null
+        $originalPowerScheme = $null
+
         Start-Transcript -Path $LogFile -Append
 
         $originalEAP = $ErrorActionPreference
@@ -6579,8 +6911,8 @@ function Measure-FleetCoreWorkload
     }
     finally
     {
-        $ErrorActionPreference = $originalEAP
-        Set-FleetPowerScheme @clusterParam -Scheme $originalPowerScheme
+        if ($null -ne $originalEAP)         { $ErrorActionPreference = $originalEAP }
+        if ($null -ne $originalPowerScheme) { Set-FleetPowerScheme @clusterParam -Scheme $originalPowerScheme }
         Stop-Transcript
     }
 
@@ -7196,7 +7528,7 @@ function Start-FleetResultRun
         }
         elseif (-not $PSBoundParameters.ContainsKey('RunLabel') -and $orderedKeyColumn.Count)
         {
-            $RunLabel = [System.Guid]::NewGuid()
+            $RunLabel = [System.Guid]::NewGuid().Guid
         }
 
         #
@@ -7477,7 +7809,10 @@ function Start-FleetResultRun
             if ($itf.Count)
             {
                 LogOutput "Iteration file content saved to $errd for triage"
-                $itf | Move-Item -Destination $errd
+
+                # Force continue - we don't want a stacked error trying to move content to lose
+                # the error which threw us into this condition.
+                $itf | Move-Item -Destination $errd -ErrorAction Continue
             }
         }
 
@@ -8196,10 +8531,18 @@ function SetCacheBehavior
 
             $r = Invoke-Command -session $s {
 
+                # Get control object. If RefreshRegParams is not available, issue warning.
+                # This is only available with Server 2022+.
+                $dm = Get-WmiObject -namespace "root\wmi" ClusBfltDeviceMethods
+                if ($null -eq $dm -or -not (Get-Member -InputObject $dm -Name RefreshRegParams))
+                {
+                    Write-Warning "S2D Cache on $($env:COMPUTERNAME) does not support dynamic cache behavior refresh"
+                    return $null
+                }
+
                 Set-ItemProperty @using:property -Value ([uint32] $using:newValue) -Type ([Microsoft.Win32.RegistryValueKind]::DWord)
 
                 # Trigger refresh - object returned indicating reboot required (or not)
-                $dm = Get-WmiObject -namespace "root\wmi" ClusBfltDeviceMethods
                 $dm.RefreshRegParams()
 
                 # If value is now zero, remove it to keep the registry clean
@@ -8210,7 +8553,7 @@ function SetCacheBehavior
             }
 
             # Reboot should never be required when updating cache behavior flags, but check
-            if ($r.fRebootRequired)
+            if ($null -ne $r -and $r.fRebootRequired)
             {
                 Write-Error "Unexpected reboot required when updating cache behavior flags: $node"
             }

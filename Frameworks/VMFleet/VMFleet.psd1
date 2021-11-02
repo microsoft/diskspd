@@ -36,8 +36,8 @@ SOFTWARE.
 # Script module or binary module file associated with this manifest.
 RootModule = 'VMFleet.psm1'
 
-# Version number of this module.
-ModuleVersion = '2.0.0.0'
+# Version number of this module. Even build# is release, odd pre-release (Mj.Mn.Bd.Rv)
+ModuleVersion = '2.0.2.0'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -55,7 +55,7 @@ CompanyName = 'Microsoft Corporation'
 Copyright = '(c) 2021 Microsoft Corporation. All rights reserved.'
 
 # Description of the functionality provided by this module
-Description = 'VM Fleet'
+Description = 'VM Fleet is a performance characterization and analyst framework for exploring the storage capabilities of Windows Server Hyper-Converged environments with Storage Spaces Direct'
 
 # Minimum version of the Windows PowerShell engine required by this module
 PowerShellVersion = '5.1'
@@ -173,7 +173,7 @@ PrivateData = @{
         # LicenseUri = ''
 
         # A URL to the main website for this project.
-        # ProjectUri = ''
+        ProjectUri = 'https://www.github.com/microsoft/diskspd'
 
         # A URL to an icon representing this module.
         # IconUri = ''
