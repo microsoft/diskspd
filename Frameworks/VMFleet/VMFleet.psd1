@@ -37,7 +37,7 @@ SOFTWARE.
 RootModule = 'VMFleet.psm1'
 
 # Version number of this module. Even build# is release, odd pre-release (Mj.Mn.Bd.Rv)
-ModuleVersion = '2.0.2.0'
+ModuleVersion = '2.0.2.1'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()

@@ -824,6 +824,7 @@ function Set-FleetControlScript
 
 function Set-SweepTemplateScript
 {
+    # __Unique__
     # buffer size/alighment, threads/target, outstanding/thread, write%
     $b = __b__; $t = __t__; $o = __o__; $w = __w__
 
@@ -3392,7 +3393,7 @@ function Move-Fleet
         # will build on the moves for 50%, and so forth.
         #
 
-        $vms = Get-ClusterGroup |? GroupType -eq VirtualMachine
+        $vms = Get-ClusterGroup @clusterParam |? GroupType -eq VirtualMachine
 
         #
         # Only rotate online VMs? This allows one model of composing partial startup with rotation - start
@@ -4386,6 +4387,9 @@ function Get-FleetDataDiskEstimate
         $VMPercent
         )
 
+        $clusterParam = @{}
+        CopyKeyIf $PSBoundParameters $clusterParam 'Cluster'
+
         if (-not $PSBoundParameters.ContainsKey('CachePercent') -and
             -not $PSBoundParameters.ContainsKey('CapacityPercent'))
         {
@@ -4428,7 +4432,7 @@ function Get-FleetDataDiskEstimate
             $cacheCapacity = 0
         }
 
-        $nodes = @(Get-ClusterNode -Cluster $Cluster)
+        $nodes = @(Get-ClusterNode @clusterParam)
 
         if ($nodes |? State -ne Up)
         {
@@ -4446,8 +4450,8 @@ function Get-FleetDataDiskEstimate
         # Get total/data space available in fleet volumes
         #
 
-        $nodes = Get-ClusterNode
-        $volumes = Get-Volume
+        $nodes = Get-ClusterNode @clusterParam
+        $volumes = Get-Volume -CimSession $Cluster
 
         foreach ($volume in $volumes)
         {
@@ -4469,7 +4473,7 @@ function Get-FleetDataDiskEstimate
         #
 
         $curDataDiskCapacity = 0
-        $dataDisk = @(Get-FleetDisk -Cluster $Cluster)
+        $dataDisk = @(Get-FleetDisk @clusterParam)
 
         if ($dataDisk.Count)
         {
@@ -4507,7 +4511,7 @@ function Get-FleetDataDiskEstimate
 
         if (-not $PSBoundParameters.ContainsKey('VMs'))
         {
-            $vmGroups = @(Get-ClusterGroup -Cluster $Cluster |? GroupType -eq VirtualMachine |? Name -like 'vm-*')
+            $vmGroups = @(Get-ClusterGroup @clusterParam |? GroupType -eq VirtualMachine |? Name -like 'vm-*')
 
             #
             # Limit estimate to VMs currently running? Allows for at-a-distance dynamic resizing of fleet (e.g., start
@@ -5451,6 +5455,8 @@ function Start-FleetSweep
             $runtemplate
             )
 
+        $guid = [System.Guid]::NewGuid().Guid
+
         # Use template script if offered, else builtin
         $(if ($runtemplate.Length -gt 0)
         {
@@ -5475,6 +5481,7 @@ function Start-FleetSweep
                 $line = $line -replace "__$($v.label())__",$vsub
             }
 
+            $line = $line -replace '__Unique__',$guid
             $line
 
         } | Out-File "$($RunFilePath).tmp" -Encoding ascii -Width ([int32]::MaxValue)
@@ -5507,7 +5514,10 @@ function Start-FleetSweep
 
     #############
 
-    Clear-FleetRunState -Cluster $Cluster
+    # Start paused so that when run state is cleared VMs do not enter free run
+    # and begin executing the first run file for this sweep pass.
+    Set-FleetPause @clusterParam
+    Clear-FleetRunState @clusterParam
 
     # construct the Variable list describing the sweep
 
@@ -5548,7 +5558,7 @@ function Start-FleetSweep
             ShowRun $sweep
             NewRunFile $sweep $RunTemplate
 
-            Start-FleetRun -PrePlaced -Cluster $Cluster -AddSpec ($sweep.label($LabelTemplate)) -Duration (GetRunDuration $sweep) -pc $pc -SampleInterval $SampleInterval -ErrorVariable e
+            Start-FleetRun -PrePlaced @clusterParam -AddSpec ($sweep.label($LabelTemplate)) -Duration (GetRunDuration $sweep) -pc $pc -SampleInterval $SampleInterval -ErrorVariable e
 
             if ($e.Count)
             {
