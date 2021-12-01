@@ -78,6 +78,11 @@ What's New?
 
 VM Fleet is a performance characterization and analyst framework for exploring the storage capabilities of Windows Server Hyper-Converged environments with Storage Spaces Direct.
 
+# VM Fleet 2.0.2.2 12/1/2021
+
+* Fix cluster remoting issue during New-Fleet caused by 2.0.2.1 work
+* Use timestamped logging in New-Fleet, simplify and de-colorize default output
+
 # VM Fleet 2.0.2.1 11/9/2021
 
 * Fix cluster remoting issues in Move-Fleet and Get-FleetDataDiskEstimate

@@ -1133,6 +1133,7 @@ $CommonFunc = {
     #
     function GetMappedCSV
     {
+        [CmdletBinding()]
         param(
             [Parameter()]
             [string]
@@ -2237,12 +2238,13 @@ function New-Fleet
     }
 
     # Create the fleet vmswitches with a fixed IP at the base of the APIPA range
-    Invoke-Command $nodes {
+    Invoke-CommonCommand $nodes -InitBlock $CommonFunc -ScriptBlock {
 
         if (-not (Get-VMSwitch -Name $using:vmSwitchName -ErrorAction SilentlyContinue)) {
 
             $null = New-VMSwitch -name $using:vmSwitchName -SwitchType Internal
             $null = Get-NetAdapter |? DriverDescription -eq 'Hyper-V Virtual Ethernet Adapter' |? Name -eq "vEthernet ($($using:vmSwitchName))" | New-NetIPAddress -PrefixLength 16 -IPAddress $using:vmSwitchIP
+            LogOutput "CREATE internal vmswitch $($using:vmSwitchName) @ $($env:COMPUTERNAME)"
         }
     }
 
@@ -2254,7 +2256,16 @@ function New-Fleet
     # create $vms vms per each csv named as <nodename><group prefix>
     # vm name is vm-<group prefix><$group>-<hostname>-<number>
 
-    Invoke-CommonCommand $nodes -InitBlock $CommonFunc -ScriptBlock {
+    # note that this would pass as a shallow copy of the object; this is why they are unpacked
+    # into a (flat) custom object
+    $csvs = GetMappedCSV @clusterParam |% { [PSCustomObject]@{
+        VDName = $_.VDName
+        FriendlyVolumeName = $_.SharedVolumeInfo.FriendlyVolumeName
+    }}
+
+    Invoke-CommonCommand $nodes -InitBlock $CommonFunc -ArgumentList @(,$csvs) -ScriptBlock {
+
+        param($csvs)
 
         function ApplySpecialization( $path, $vmspec )
         {
@@ -2371,7 +2382,7 @@ function New-Fleet
             return $ok
         }
 
-        foreach ($csv in GetMappedCSV) {
+        foreach ($csv in $csvs) {
 
             if ($($using:groups).Length -eq 0) {
                 $groups = @( 'base' )
@@ -2381,124 +2392,125 @@ function New-Fleet
 
             # identify the CSvs for which this node should create its VMs
             # the trailing characters (if any) are the group prefix
-            if ($csv.VDName -match "^$env:COMPUTERNAME(?:-.+){0,1}") {
+            if ($csv.VDName -notmatch "^$env:COMPUTERNAME(?:-.+){0,1}") {
+                continue
+            }
 
-                foreach ($group in $groups) {
+            foreach ($group in $groups) {
 
-                    if ($csv.VDName -match "^$env:COMPUTERNAME-([^-]+)$") {
-                        $g = $group+$matches[1]
-                    } else {
-                        $g = $group
-                    }
+                if ($csv.VDName -match "^$env:COMPUTERNAME-([^-]+)$") {
+                    $g = $group+$matches[1]
+                } else {
+                    $g = $group
+                }
 
-                    foreach ($vm in 1..$using:vms) {
+                foreach ($vm in 1..$using:vms) {
 
-                        $stop = $false
+                    $stop = $false
 
-                        $newvm = $false
-                        $name = ("vm-$g-$env:COMPUTERNAME-{0:000}" -f $vm)
+                    $newvm = $false
+                    $name = ("vm-$g-$env:COMPUTERNAME-{0:000}" -f $vm)
 
-                        $placePath = $csv.SharedVolumeInfo.FriendlyVolumeName
-                        $vmPath = Join-Path $placePath $name
-                        $vhdPath = Join-Path $vmPath "$name.vhdx"
+                    $placePath = $csv.FriendlyVolumeName
+                    $vmPath = Join-Path $placePath $name
+                    $vhdPath = Join-Path $vmPath "$name.vhdx"
 
-                        # if the vm cluster group exists, we are already deployed
-                        if (-not (Get-ClusterGroup -Name $name -ErrorAction SilentlyContinue)) {
+                    # if the vm cluster group exists, we are already deployed
+                    if (-not (Get-ClusterGroup -Name $name -ErrorAction SilentlyContinue)) {
 
-                            if (-not $stop) {
-                                $stop = Stop-After "AssertComplete"
-                            }
+                        if (-not $stop) {
+                            $stop = Stop-After "AssertComplete"
+                        }
 
-                            if ($stop) {
+                        if ($stop) {
 
-                                Write-Host -ForegroundColor Red "vm $name not deployed"
-
-                            } else {
-
-                                Write-Host -ForegroundColor Yellow "create vm $name @ path $vmPath with vhd $vhdPath"
-
-                                # always specialize new vms
-                                $newvm = $true
-
-                                # We're on the canonical node to create the vm; if the vm exists, tear it down and refresh
-                                $o = Get-VM -Name $name -ErrorAction SilentlyContinue
-
-                                if ($null -ne $o) {
-
-                                    # interrupted between vm creation and role creation; redo it
-                                    Write-Host "REMOVING vm $name for re-creation"
-
-                                    if ($o.State -ne 'Off') {
-                                        Stop-VM -Name $name -TurnOff -Force -Confirm:$false
-                                    }
-                                    Remove-VM -Name $name -Force -Confirm:$false
-                                }
-
-                                # scrub and re-create the vm metadata path and vhd
-                                if (Test-Path $vmPath)
-                                {
-                                    Remove-Item -Recurse $vmPath
-                                }
-
-                                $null = New-Item -ItemType Directory $vmPath
-                                Copy-Item $using:BaseVHD $vhdPath
-
-                                #### STOPAFTER
-                                if (-not $stop) {
-                                    $stop = Stop-After "CopyVHD" $using:stopafter
-                                }
-
-                                if (-not $stop) {
-
-                                    # Create A1 VM. use set-vmfleet to alter fleet sizing post-creation.
-                                    # Do not monitor the internal switch connection; this allows live migration
-                                    # despite the internal switch.
-                                    $o = New-VM -VHDPath $vhdPath -Generation 2 -SwitchName $using:vmSwitchName -Path $placePath -Name $name
-                                    if ($null -ne $o)
-                                    {
-                                        $o | Set-VM -ProcessorCount 1 -MemoryStartupBytes 1.75GB -StaticMemory
-                                        $o | Get-VMNetworkAdapter | Set-VMNetworkAdapter -NotMonitoredInCluster $true
-                                    }
-                                }
-
-                                #### STOPAFTER
-                                if (-not $stop) {
-                                    $stop = Stop-After "CreateVM" $using:stopafter
-                                }
-
-                                if (-not $stop) {
-
-                                    # Create clustered vm role (don't emit) and assign default owner node.
-                                    # Swallow the (expected) warning that will be referring to the internal
-                                    # vmswitch as being a local-only resource. Since we replicate the vswitch
-                                    # with the same IP on each cluster node, it does work.
-                                    #
-                                    # If an error occurs, it will emit per normal.
-                                    $null = $o | Add-ClusterVirtualMachineRole -WarningAction SilentlyContinue
-                                    Set-ClusterOwnerNode -Group $o.VMName -Owners $env:COMPUTERNAME
-                                }
-                            }
+                            LogOutput -ForegroundColor Red "vm $name not deployed"
 
                         } else {
-                            Write-Host -ForegroundColor Green "vm $name already deployed"
-                        }
 
-                        #### STOPAFTER
-                        if (-not $stop) {
-                            $stop = Stop-After "CreateVMGroup" $using:stopafter
-                        }
+                            LogOutput "CREATE vm $name @ path $vmPath"
 
-                        if (-not $stop -or ($using:specialize -eq 'Force')) {
-                            # specialize as needed
-                            # auto only specializes new vms; force always; none skips it
-                            if (($using:specialize -eq 'Auto' -and $newvm) -or ($using:specialize -eq 'Force')) {
-                                Write-Host -fore yellow specialize $vhdPath
-                                if (-not (SpecializeVhd $vhdPath)) {
-                                    Write-Host -fore red "Failed specialize of $vhdPath, halting."
+                            # always specialize new vms
+                            $newvm = $true
+
+                            # We're on the canonical node to create the vm; if the vm exists, tear it down and refresh
+                            $o = Get-VM -Name $name -ErrorAction SilentlyContinue
+
+                            if ($null -ne $o) {
+
+                                # interrupted between vm creation and role creation; redo it
+                                LogOutput "REMOVE vm $name for re-creation"
+
+                                if ($o.State -ne 'Off') {
+                                    Stop-VM -Name $name -TurnOff -Force -Confirm:$false
                                 }
-                            } else {
-                                Write-Host -fore green skip specialize $vhdPath
+                                Remove-VM -Name $name -Force -Confirm:$false
                             }
+
+                            # scrub and re-create the vm metadata path and vhd
+                            if (Test-Path $vmPath)
+                            {
+                                Remove-Item -Recurse $vmPath
+                            }
+
+                            $null = New-Item -ItemType Directory $vmPath
+                            Copy-Item $using:BaseVHD $vhdPath
+
+                            #### STOPAFTER
+                            if (-not $stop) {
+                                $stop = Stop-After "CopyVHD" $using:stopafter
+                            }
+
+                            if (-not $stop) {
+
+                                # Create A1 VM. use set-vmfleet to alter fleet sizing post-creation.
+                                # Do not monitor the internal switch connection; this allows live migration
+                                # despite the internal switch.
+                                $o = New-VM -VHDPath $vhdPath -Generation 2 -SwitchName $using:vmSwitchName -Path $placePath -Name $name
+                                if ($null -ne $o)
+                                {
+                                    $o | Set-VM -ProcessorCount 1 -MemoryStartupBytes 1.75GB -StaticMemory
+                                    $o | Get-VMNetworkAdapter | Set-VMNetworkAdapter -NotMonitoredInCluster $true
+                                }
+                            }
+
+                            #### STOPAFTER
+                            if (-not $stop) {
+                                $stop = Stop-After "CreateVM" $using:stopafter
+                            }
+
+                            if (-not $stop) {
+
+                                # Create clustered vm role (don't emit) and assign default owner node.
+                                # Swallow the (expected) warning that will be referring to the internal
+                                # vmswitch as being a local-only resource. Since we replicate the vswitch
+                                # with the same IP on each cluster node, it does work.
+                                #
+                                # If an error occurs, it will emit per normal.
+                                $null = $o | Add-ClusterVirtualMachineRole -WarningAction SilentlyContinue
+                                Set-ClusterOwnerNode -Group $o.VMName -Owners $env:COMPUTERNAME
+                            }
+                        }
+
+                    } else {
+                        LogOutput -ForegroundColor Green "vm $name already deployed"
+                    }
+
+                    #### STOPAFTER
+                    if (-not $stop) {
+                        $stop = Stop-After "CreateVMGroup" $using:stopafter
+                    }
+
+                    if (-not $stop -or ($using:specialize -eq 'Force')) {
+                        # specialize as needed
+                        # auto only specializes new vms; force always; none skips it
+                        if (($using:specialize -eq 'Auto' -and $newvm) -or ($using:specialize -eq 'Force')) {
+                            LogOutput "SPECIALIZE vm $name"
+                            if (-not (SpecializeVhd $vhdPath)) {
+                                LogOutput -ForegroundColor red "Failed specialize of vm $name @ $vhdPath, halting."
+                            }
+                        } else {
+                            LogOutput -ForegroundColor green skip specialize $vhdPath
                         }
                     }
                 }
