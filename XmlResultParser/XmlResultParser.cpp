@@ -31,15 +31,22 @@ SOFTWARE.
 
 // TODO: refactor to a single function shared with the ResultParser
 char printBuffer[4096] = {};
+
+void XmlResultParser::_PrintV(const char *format, va_list listArg)
+{
+    _sResult.append(_indent, ' ');
+    vsprintf_s(printBuffer, _countof(printBuffer), format, listArg);
+    _sResult += printBuffer;
+}
+
 void XmlResultParser::_Print(const char *format, ...)
 {
     assert(nullptr != format);
     va_list listArg;
     va_start(listArg, format);
-    _sResult.append(_indent, ' ');
-    vsprintf_s(printBuffer, _countof(printBuffer), format, listArg);
+
+    _PrintV(format, listArg);
     va_end(listArg);
-    _sResult += printBuffer;
 }
 
 void XmlResultParser::_PrintInc(const char *format, ...)
@@ -51,7 +58,7 @@ void XmlResultParser::_PrintInc(const char *format, ...)
     // Print & Increment Indent
     // e.g., <StartOfSection>
 
-    _Print(format, listArg);
+    _PrintV(format, listArg);
     _indent += 2;
     va_end(listArg);
 }
@@ -66,7 +73,7 @@ void XmlResultParser::_PrintDec(const char *format, ...)
     // e.g., </EndOfSection>
 
     _indent -= 2;
-    _Print(format, listArg);
+    _PrintV(format, listArg);
     va_end(listArg);
 }
 
@@ -272,7 +279,7 @@ void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemI
         if (ulBaseProc >= ulProcCount) {
             break;
         }
-        
+
         for (unsigned int ulProcessor = 0; ulProcessor < pGroup->_maximumProcessorCount; ulProcessor++) {
             double idleTime;
             double userTime;
@@ -368,7 +375,7 @@ void XmlResultParser::_PrintIops(const IoBucketizer& readBucketizer, const IoBuc
         {
             _Print("<Bucket SampleMillisecond=\"%lu\" Read=\"%.0f\" Write=\"%.0f\" Total=\"%.0f\" "
                    "ReadMinLatencyMilliseconds=\"%.3f\" ReadMaxLatencyMilliseconds=\"%.3f\" ReadAvgLatencyMilliseconds=\"%.3f\" ReadLatencyStdDev=\"%.3f\" "
-                   "WriteMinLatencyMilliseconds=\"%.3f\" WriteMaxLatencyMilliseconds=\"%.3f\" WriteAvgLatencyMilliseconds=\"%.3f\" WriteLatencyStdDev=\"%.3f\"/>\n", 
+                   "WriteMinLatencyMilliseconds=\"%.3f\" WriteMaxLatencyMilliseconds=\"%.3f\" WriteAvgLatencyMilliseconds=\"%.3f\" WriteLatencyStdDev=\"%.3f\"/>\n",
                    bucketTimeInMs*(i + 1), r, w, r + w,
                    r_min, r_max, r_avg, r_stddev,
                    w_min, w_max, w_avg, w_stddev);
@@ -412,7 +419,11 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
         }
     }
 
-    _PrintInc("<Latency>\n");
+    _PrintInc("<Latency ReadHistoBuckets=\"%lu\" WriteHistoBuckets=\"%lu\" TotalHistoBuckets=\"%lu\">\n",
+                readLatencyHistogram.GetSampleBuckets(),
+                writeLatencyHistogram.GetSampleBuckets(),
+                totalLatencyHistogram.GetSampleBuckets());
+
     if (readLatencyHistogram.GetSampleSize() > 0)
     {
         _Print("<AverageReadMilliseconds>%.3f</AverageReadMilliseconds>\n", readLatencyHistogram.GetAvg() / 1000);
@@ -482,7 +493,7 @@ void XmlResultParser::_PrintLatencyPercentiles(const Results& results)
     }
 
     _PrintInc("<Bucket>\n");
-    _Print("<Percentile>100</Percentile>\n"); 
+    _Print("<Percentile>100</Percentile>\n");
     if (readLatencyHistogram.GetSampleSize() > 0)
     {
         _Print("<ReadMilliseconds>%.3f</ReadMilliseconds>\n", readLatencyHistogram.GetMax() / 1000);

@@ -55,12 +55,12 @@ TRACELOGGING_DECLARE_PROVIDER(g_hEtwProvider);
 //
 //      Monday, June 16, 2014 12:00:00 AM
 
-#define DISKSPD_RELEASE_TAG "-dev"
+#define DISKSPD_RELEASE_TAG "-prerelease"
 #define DISKSPD_REVISION    ""
 
 #define DISKSPD_MAJOR       2
 #define DISKSPD_MINOR       1
-#define DISKSPD_BUILD       0
+#define DISKSPD_BUILD       2
 #define DISKSPD_QFE         0
 
 #define DISKSPD_MAJORMINOR_VER_STR(x,y,z) #x "." #y "." #z
@@ -68,7 +68,7 @@ TRACELOGGING_DECLARE_PROVIDER(g_hEtwProvider);
 #define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
 
 #define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2021/7/1"
+#define DISKSPD_DATE_VERSION_STRING "2023/3/30"
 
 #define DISKSPD_TRACE_INFO      0x00000000
 #define DISKSPD_TRACE_RESERVED  0x00000001
@@ -275,13 +275,13 @@ public:
     inline UINT64 Rand64()
     {
         UINT64 e;
-        
+
         e =           _ulState[0] - _rotl64(_ulState[1], 7);
         _ulState[0] = _ulState[1] ^ _rotl64(_ulState[2], 13);
         _ulState[1] = _ulState[2] + _rotl64(_ulState[3], 37);
         _ulState[2] = _ulState[3] + e;
         _ulState[3] = e + _ulState[0];
-        
+
         return _ulState[3];
     }
 
@@ -317,7 +317,7 @@ public:
     //  100 will always occur (always true)
 
     static bool BooleanRatio(Random *pRand, UINT32 ulRatio)
-    {   
+    {
         return ((pRand->Rand32() % 100 + 1) <= ulRatio);
     }
 
@@ -365,7 +365,7 @@ public:
 
         //
         // Return if string was consumed
-        // 
+        //
         //
 
         if (parsed)
@@ -412,7 +412,7 @@ public:
         double lfDurationUsec = 0;
         UINT64 ullEndTime = 0;
         UINT64 ullDuration = 0;
-        
+
         // assume it is worthwhile to stay off of the time query path unless needed (micro-overhead)
         if (fMeasureLatency || fCalculateIopsStdDev)
         {
@@ -506,7 +506,7 @@ typedef void (*CALLBACK_TEST_FINISHED)();   //callback function to notify that t
 class ProcessorGroupInformation
 {
 public:
-    WORD _groupNumber; 
+    WORD _groupNumber;
     BYTE _maximumProcessorCount;
     BYTE _activeProcessorCount;
     KAFFINITY _activeProcessorMask;
@@ -597,7 +597,7 @@ public:
     vector<ProcessorNumaInformation> _vProcessorNumaInformation;
     vector<ProcessorSocketInformation> _vProcessorSocketInformation;
     vector<ProcessorHyperThreadInformation> _vProcessorHyperThreadInformation;
-    
+
     DWORD _ulProcCount;
     DWORD _ulActiveProcCount;
 
@@ -690,7 +690,7 @@ public:
             while (ReturnedLength != 0)
             {
                 ProcessorSocketInformation socket;
-                
+
                 assert(ReturnedLength >= cur->Size);
 
                 if (cur->Size > ReturnedLength)
@@ -883,7 +883,7 @@ public:
         AddXml(sXml,"<Version>" DISKSPD_NUMERIC_VERSION_STRING "</Version>\n");
         AddXml(sXml, "<VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n");
         AddXmlDec(sXml, "</Tool>\n");
-        
+
         AddXml(sXml, "<RunTime>");
         if (StartTime.wYear) {
 
@@ -1151,7 +1151,7 @@ public:
     UINT64 GetBaseFileOffsetInBytes() const { return _ullBaseFileOffset; }
     UINT64 GetThreadBaseRelativeOffsetInBytes(UINT32 ulThreadNo) const { return ulThreadNo * _ullThreadStride; }
     UINT64 GetThreadBaseFileOffsetInBytes(UINT32 ulThreadNo) const { return _ullBaseFileOffset + GetThreadBaseRelativeOffsetInBytes(ulThreadNo); }
-    
+
 
     void SetSequentialScanHint(bool fBool) { _fSequentialScanHint = fBool; }
     bool GetSequentialScanHint() const { return _fSequentialScanHint; }
@@ -1218,7 +1218,7 @@ public:
 
     void SetUseParallelAsyncIO(bool fBool) { _fParallelAsyncIO = fBool; }
     bool GetUseParallelAsyncIO() const { return _fParallelAsyncIO; }
-    
+
     void SetUseInterlockedSequential(bool fBool) { _fInterlockedSequential = fBool; }
     bool GetUseInterlockedSequential() const { return _fInterlockedSequential; }
 
@@ -1241,7 +1241,7 @@ public:
     void SetWeight(UINT32 ulWeight) { _ulWeight = ulWeight; }
     UINT32 GetWeight() const { return _ulWeight; }
 
-    void AddThreadTarget(const ThreadTarget &threadTarget) 
+    void AddThreadTarget(const ThreadTarget &threadTarget)
     {
         _vThreadTargets.push_back(threadTarget);
     }
@@ -1271,7 +1271,7 @@ public:
     BYTE* GetRandomDataWriteBuffer(Random *pRand);
 
     void SetDistributionRange(const vector<DistributionRange>& v, DistributionType t)
-    { 
+    {
         _vDistributionRange = v; _distributionType = t;
 
         // Now place final element if IO% is < 100.
@@ -1286,7 +1286,7 @@ public:
         // TBD this should be moved to a proper Distribution class.
 
         const DistributionRange& last = *_vDistributionRange.rbegin();
-        
+
         UINT32 ioCur = last._src + last._span;
         if (ioCur < 100)
         {
@@ -1351,7 +1351,7 @@ private:
     UINT64 _ullBlockAlignment;
     UINT32 _ulWriteRatio;
     UINT32 _ulRandomRatio;
- 
+
     UINT64 _ullBaseFileOffset;
 
     TargetCacheMode _cacheMode;
@@ -1394,7 +1394,7 @@ private:
 
     UINT32 _ulWeight;
     vector<ThreadTarget> _vThreadTargets;
-    
+
     vector<DistributionRange> _vDistributionRange;
     DistributionType _distributionType;
 
@@ -1480,7 +1480,7 @@ public:
 
     void SetCompletionRoutines(bool fCompletionRoutines) { _fCompletionRoutines = fCompletionRoutines; }
     bool GetCompletionRoutines() const { return _fCompletionRoutines; }
-    
+
     void SetMeasureLatency(bool fMeasureLatency) { _fMeasureLatency = fMeasureLatency; }
     bool GetMeasureLatency() const { return _fMeasureLatency; }
 
@@ -1489,7 +1489,7 @@ public:
 
     void SetIoBucketDurationInMilliseconds(UINT32 ulIoBucketDurationInMilliseconds) { _ulIoBucketDurationInMilliseconds = ulIoBucketDurationInMilliseconds; }
     UINT32 GetIoBucketDurationInMilliseconds() const { return _ulIoBucketDurationInMilliseconds; }
-    
+
     string GetXml(UINT32 indent) const;
     void MarkFilesAsPrecreated(const vector<string> vFiles);
 
@@ -1665,10 +1665,10 @@ public:
     }
 
     OVERLAPPED *GetOverlapped() { return &_overlapped; }
-    
+
     void AddTarget(Target *pTarget, UINT32 ulWeight)
-    { 
-        _vTargets.push_back(pTarget); 
+    {
+        _vTargets.push_back(pTarget);
         _vulTargetWeights.push_back(ulWeight);
         _ullTotalWeight += ulWeight;
 
@@ -1691,13 +1691,13 @@ public:
         }
         else {
             ullWeight = _pRand->Rand64() % _ullTotalWeight;
-            
+
             for (size_t iTarget = 0; iTarget < _vTargets.size(); iTarget++) {
                 if (ullWeight < _vulTargetWeights[iTarget]) {
                     _pCurrentTarget = _vTargets[iTarget];
                     break;
                 }
-            
+
                 ullWeight -= _vulTargetWeights[iTarget];
             }
         }
@@ -1793,7 +1793,7 @@ public:
 
     // TODO: check how it's used
     HANDLE hEndEvent;        //used only in case of completion routines (not for IO Completion Ports)
-    
+
     bool AllocateAndFillBufferForTarget(const Target& target);
     BYTE* GetReadBuffer(size_t iTarget, size_t iRequest);
     BYTE* GetWriteBuffer(size_t iTarget, size_t iRequest);
@@ -2151,7 +2151,7 @@ class ThreadTargetState
             default:
             break;
         }
-        
+
         _lastIO = NextIOType(true);
     }
 
@@ -2218,7 +2218,7 @@ class ThreadTargetState
 
         nextOffset %= _relTargetSizeAligned;
         return nextOffset;
-    }    
+    }
 
     UINT64 NextRelativeParaSeqOffset(IORequest& ioRequest)
     {
@@ -2256,7 +2256,7 @@ class ThreadTargetState
         if (_vDistributionRange.size())
         {
             auto r = DistributionRange::find(_vDistributionRange, _tp->pRand->Rand64() % _ioDistributionSpan);
-            nextOffset %= r->_dst.second;   // trim to range length (already aligned)    
+            nextOffset %= r->_dst.second;   // trim to range length (already aligned)
             nextOffset += r->_dst.first;    // bump by range base
         }
         // Full width.
@@ -2301,7 +2301,7 @@ class ThreadTargetState
             // repeat last IO if not needing a new choice (e.g., random)
             ioType = _lastIO;
         }
-        else 
+        else
         {
             ioType = Util::BooleanRatio(_tp->pRand, _target->GetWriteRatio()) ? IOOperation::WriteIO : IOOperation::ReadIO;
             _lastIO = ioType;
@@ -2370,7 +2370,7 @@ class ThreadTargetState
     // Offsets/sizes are zero-based relative to target base offset, not absolute file offset.
     // Relative size is trimmed with respect to block alignment, if specified.
     //
-    
+
     UINT64 _relTargetSize;              // relative target size for IO v. base/max
     UINT64 _relTargetSizeAligned;       // relative target size for zero-base aligned IO (applies to: Random, InterlockedSequential)
     UINT64 _nextSeqOffset;              // next IO offset to issue sequential IO at (applies to: Sequential & Mixed)

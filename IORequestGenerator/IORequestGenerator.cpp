@@ -483,6 +483,29 @@ static void PrintVerbose(bool fVerbose, const char *format, ...)
 
     if(fVerbose )
     {
+        SYSTEMTIME now;
+        char szBuffer[64]; // enough for timestamp+null
+        int nWritten;
+
+        GetLocalTime(&now);
+
+        if (now.wYear) {
+
+            // Mimic .NET 's' sortable time pattern
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer),
+                "%u-%02u-%02uT%02u:%02u:%02u",
+                now.wYear,
+                now.wMonth,
+                now.wDay,
+                now.wHour,
+                now.wMinute,
+                now.wSecond);
+            assert(nWritten && nWritten < _countof(szBuffer));
+
+            // no newline
+            printf("%s: ",szBuffer);
+        }
+
         va_list argList;
         va_start(argList, format);
         vprintf(format, argList);
@@ -1090,7 +1113,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     {
         GROUP_AFFINITY GroupAffinity;
 
-        PrintVerbose(p->pProfile->GetVerbose(), "affinitizing thread %u to Group %u / CPU %u\n", p->ulThreadNo, p->wGroupNum, p->bProcNum);
+        PrintVerbose(p->pProfile->GetVerbose(), "thread %u: affinitizing to Group %u / CPU %u\n", p->ulThreadNo, p->wGroupNum, p->bProcNum);
         SetProcGroupMask(p->wGroupNum, p->bProcNum, &GroupAffinity);
 
         HANDLE hThread = GetCurrentThread();
@@ -1328,19 +1351,22 @@ DWORD WINAPI threadFunc(LPVOID cookie)
                 goto cleanup;
             }
 
-            PrintVerbose(p->pProfile->GetVerbose(), "thread %u starting: file '%s' relative thread %u",
+            PrintVerbose(p->pProfile->GetVerbose(), "thread %u: starting, file '%s' relative thread %u\n",
                 p->ulThreadNo,
                 pTarget->GetPath().c_str(),
                 p->ulRelativeThreadNo);
 
             if (pTarget->GetRandomRatio() > 0)
             {
-                PrintVerbose(p->pProfile->GetVerbose(), ", %u% random pattern\n",
+                PrintVerbose(p->pProfile->GetVerbose(), "thread %u: %u%% random IO\n",
+                    p->ulThreadNo,
                     pTarget->GetRandomRatio());
             }
             else
             {
-                PrintVerbose(p->pProfile->GetVerbose(), ", %ssequential file offset\n", pTarget->GetUseInterlockedSequential() ? "interlocked ":"");
+                PrintVerbose(p->pProfile->GetVerbose(), "thread %u: %ssequential IO\n",
+                    p->ulThreadNo,
+                    pTarget->GetUseInterlockedSequential() ? "interlocked ":"");
             }
         }
 
@@ -1402,7 +1428,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     // TODO: copy parameters for better memory locality?
     // TODO: tell the main thread we're ready
 
-    PrintVerbose(p->pProfile->GetVerbose(), "thread %u started (random seed: %u)\n", p->ulThreadNo, p->ulRandSeed);
+    PrintVerbose(p->pProfile->GetVerbose(), "thread %u: started (random seed: %u)\n", p->ulThreadNo, p->ulRandSeed);
 
     p->pResults->vTargetResults.clear();
     p->pResults->vTargetResults.resize(p->vTargets.size());
@@ -2313,7 +2339,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     BOOL bBreak = FALSE;
     PEVENT_TRACE_PROPERTIES pETWSession = NULL;
 
-    PrintVerbose(profile.GetVerbose(), "starting warm up...\n");
     //
     // send start signal
     //
@@ -2332,6 +2357,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     {
         TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> WarmActivity;
         TraceLoggingWriteStart(WarmActivity, "Warm Up");
+        PrintVerbose(profile.GetVerbose(), "starting warm up for %us...\n", timeSpan.GetWarmup());
 
         if (bSynchStop)
         {
@@ -2382,8 +2408,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             PrintVerbose(profile.GetVerbose(), "tracing events\n");
         }
 
-        PrintVerbose(profile.GetVerbose(), "starting measurements...\n");
-
         //
         // notify the front-end that the test is about to start;
         // do it before starting timing in order not to perturb measurements
@@ -2407,13 +2431,11 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> RunActivity;
         TraceLoggingWriteStart(RunActivity, "Run Time");
 
+        PrintVerbose(profile.GetVerbose(), "starting measurements for %us...\n", timeSpan.GetDuration());
+
         //get cycle count (it will be used to calculate actual work time)
         ullStartTime = PerfTimer::GetTime();
-
-#pragma warning( push )
-#pragma warning( disable : 28931 )
         fAccountingOn = true;
-#pragma warning( pop )
 
         assert(timeSpan.GetDuration() > 0);
         if (bSynchStop)
@@ -2434,10 +2456,10 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             Sleep(1000 * timeSpan.GetDuration());
         }
 
-        fAccountingOn = false;
-
         //get cycle count and perf counters
+        fAccountingOn = false;
         ullTimeDiff = PerfTimer::GetTime() - ullStartTime;
+        PrintVerbose(profile.GetVerbose(), "stopped measurements, total measured time %.2lfs...\n", PerfTimer::PerfTimeToSeconds(ullTimeDiff));
 
         TraceLoggingWriteStop(RunActivity, "Run Time");
 
@@ -2477,11 +2499,11 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         ullTimeDiff = 0; // mark that no test was run
     }
 
-    PrintVerbose(profile.GetVerbose(), "starting cool down...\n");
     if ((timeSpan.GetCooldown() > 0) && !bBreak)
     {
         TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> CoolActivity;
         TraceLoggingWriteStart(CoolActivity, "Cool Down");
+        PrintVerbose(profile.GetVerbose(), "starting cool down for %us...\n", timeSpan.GetCooldown());
 
         if (bSynchStop)
         {
