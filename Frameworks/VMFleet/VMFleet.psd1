@@ -125,6 +125,7 @@ FunctionsToExport = @(
     'Set-FleetPowerScheme',
     'Set-FleetProfile',
     'Set-FleetQoS',
+    'Set-FleetRunProfileScript',
     'Show-Fleet',
     'Show-FleetCpuSweep',
     'Show-FleetPause',

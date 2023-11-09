@@ -5050,6 +5050,45 @@ function Clear-FleetRunState
     Write-Output 0 > $goPath
 }
 
+function Create-TemplateRunScript
+{
+    [CmdletBinding()]
+    param(
+        [string]
+        $AddSpec = "",
+
+        [string]
+        $controlPath,
+
+        [string]
+        $RunFile = "sweep.ps1",
+
+        [string]
+        $RunProfileFile = "sweep.xml"
+    )
+
+     # Pause for SMB dir/info cache to expire and surface go flag.
+     # Runner will wait for new content - note unique guid.
+     Start-Sleep $smbInfoCacheLifetime
+
+    $vmprof = "L:\control\$RunProfileFile"
+    $guid = [System.Guid]::NewGuid().Guid
+
+    $f = Join-Path $controlPath $RunFile
+    $(Get-Command Set-RunProfileTemplateScript).ScriptBlock |% {
+
+        # apply subsitutions to produce a new run file
+        $line = $_
+        $line = $line -replace '__AddSpec__',$AddSpec
+        $line = $line -replace '__Profile__',$vmprof
+        $line = $line -replace '__Unique__',$guid
+        $line
+
+    } | Out-File "$($f).tmp" -Encoding ascii -Width ([int32]::MaxValue)
+    if (Test-Path $f) { Remove-Item $f -Force }
+    Rename-Item "$($f).tmp" $RunFile
+}
+
 function Start-FleetRun
 {
     [CmdletBinding()]
@@ -5212,26 +5251,7 @@ function Start-FleetRun
     # Create templated run script to inject this profile?
     if ($psCmdlet.ParameterSetName -ne "ByPrePlaced")
     {
-         # Pause for SMB dir/info cache to expire and surface go flag.
-         # Runner will wait for new content - note unique guid.
-         Start-Sleep $smbInfoCacheLifetime
-
-        $vmprof = "L:\control\$RunProfileFile"
-        $guid = [System.Guid]::NewGuid().Guid
-
-        $f = Join-Path $controlPath $RunFile
-        $(Get-Command Set-RunProfileTemplateScript).ScriptBlock |% {
-
-            # apply subsitutions to produce a new run file
-            $line = $_
-            $line = $line -replace '__AddSpec__',$AddSpec
-            $line = $line -replace '__Profile__',$vmprof
-            $line = $line -replace '__Unique__',$guid
-            $line
-
-        } | Out-File "$($f).tmp" -Encoding ascii -Width ([int32]::MaxValue)
-        if (Test-Path $f) { Remove-Item $f -Force }
-        Rename-Item "$($f).tmp" $RunFile
+        Create-TemplateRunScript $AddSpec $controlPath $RunFile $RunProfileFile
     }
 
     # capture time zero
@@ -7102,6 +7122,97 @@ function Test-FleetResultRun
 
     # If any - there may be a ? if we match multiple (incomplete keys?), but there may be utility there.
     return ($n -ne 0)
+}
+
+# Generates and sets up the run profile XML file for a given workload profile
+# Can be used for free runs
+function Set-FleetRunProfileScript
+{
+    param(
+        [string]
+        $Cluster = ".",
+
+        [Parameter(Mandatory=$true)] 
+        [xml]
+        $ProfileXml,
+
+        [switch]
+        $CpuSweep,
+
+        [switch]
+        $UseStorageQos,
+
+        [uint32]
+        $SearchWarmup = 0,
+
+        [string]
+        $RunFile = "sweep.ps1",
+
+        [string]
+        $RunProfileFile = "sweep.xml"
+        )
+             
+        $clusterParam = @{}
+        CopyKeyIf $PSBoundParameters $clusterParam 'Cluster'
+
+        if ($CpuSweep -and -not (IsProfileSingleTimespan -ProfileXml $ProfileXml))
+        {
+            Write-Error "Profile for a CpuSweep can only contain a single timespan"
+            return
+        }
+
+        $QoS = 0 
+        $IsBaseline = $false
+        $IsSearch = $false
+        if (IsProfileThroughputLimited -ProfileXml $ProfileXml)
+        {
+            $addspec = "baseline"
+            if ($CpuSweep)
+            {
+                if(IsProfileSingleTarget -ProfileXml $ProfileXml -and $SearchWarmup)
+                {              
+                $ProfileXml = $ProfileXml | Set-FleetProfile -Warmup $SearchWarmup      
+                }
+            }
+        }
+        else
+        {
+            $addspec = "qos$qos"
+            if ($CpuSweep)
+            {
+                if ($UseStorageQos)
+                {
+                    Set-StorageQosPolicy -Name SweepQoS -MaximumIops $QoS @cimParam
+                }
+                else
+                {
+                    $ProfileXml = $ProfileXml | Set-FleetProfile -Throughput $QoS -ThroughputUnit IOPS
+                }
+            }
+        }
+
+        $accessNode = Get-AccessNode @clusterParam
+        $cimParam = @{ CimSession = $accessNode }
+
+        if ($VerbosePreference)
+        {
+            $ProfileXml | Convert-FleetXmlToString |% { LogOutput -IsVb $_ }
+        }
+
+        $Duration = GetProfileDuration -ProfileXml $ProfileXml -Total
+
+        if ($null -eq $Duration -or $Duration -eq 0)
+        {
+            Write-Error "Run duration could not be determined, cannot continue"
+            return
+        }
+
+        $controlPath = Get-FleetPath -PathType Control @clusterParam
+        $runProfileFilePath = Join-Path $controlPath $RunProfileFile
+        Remove-Item $runProfileFilePath -Force -ErrorAction SilentlyContinue
+        $ProfileXml | Convert-FleetXmlToString | Out-File $runProfileFilePath -Encoding ascii -Width ([int32]::MaxValue) -Force
+           
+        Create-TemplateRunScript $addspec $controlPath $RunFile $RunProfileFile
 }
 
 function Start-FleetResultRun
