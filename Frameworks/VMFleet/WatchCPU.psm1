@@ -36,6 +36,10 @@ function Watch-FleetCPU
         $ComputerName = $env:COMPUTERNAME,
 
         [Parameter()]
+        [switch]
+        $Guest,
+
+        [Parameter()]
         [int]
         $SampleInterval = 2
         )
@@ -62,6 +66,7 @@ function Watch-FleetCPU
     }
 
     function get-legend(
+        [string] $label,
         [int] $width,
         [int] $div
         )
@@ -75,7 +80,7 @@ function Watch-FleetCPU
         #     0
 
         $lines = @()
-        $lines += ,('-' * $width)
+        $lines += '-' * $width
 
         foreach ($dig in 0..2) {
             $o = foreach ($pos in 0..($width - 1)) {
@@ -90,13 +95,11 @@ function Watch-FleetCPU
                 } else { ' ' }
             }
 
-            $lines += ,($o -join '')
+            $lines += $o -join ''
         }
 
         # trailing comments (horizontal scale name)
-        'Percent CPU Utilization' |% {
-            $lines += ,(center-pad $_ $width)
-        }
+        $lines += center-pad $label $width
 
         $lines
     }
@@ -123,7 +126,12 @@ function Watch-FleetCPU
 
     # get the constant legend; use the remaining height for the vertical cpu core bars.
     # note total height includes variable label line at bottom (instance + aggregagte)
-    $legend = get-legend $width $div
+    if ($Guest) {
+        $legend = get-legend "Percent Guest VCPU Utilization" $width $div
+    } else {
+        $legend = get-legend "Percent Host LP Utilization" $width $div
+    }
+
     $clip = [console]::WindowHeight - $legend.Count - 1
 
     # insist on a clip no lower than 10
@@ -143,12 +151,24 @@ function Watch-FleetCPU
     $m = [array]::CreateInstance([int],$width)
 
     # which processor counterset should we use?
-    # pi is only the root partition if hv is active
-    # hvlp is the host physical processors when hv is active
+    # pi is only the root partition if hv is active; when hv is active:
+    #     hvlp is the host physical processors
+    #     hvvp is the guest virtual processors
     # via ctrs, hv is active iff hvlp is present and has multiple instances
     $cs = get-counter -ComputerName $ComputerName -ListSet 'Hyper-V Hypervisor Logical Processor' -ErrorAction SilentlyContinue
-    if ($null -ne $cs -and $cs.CounterSetType -eq [Diagnostics.PerformanceCounterCategoryType]::MultiInstance) {
-        $cpuset = '\Hyper-V Hypervisor Logical Processor(*)\% Total Run Time'
+    $hvactive = $null -ne $cs -and $cs.CounterSetType -eq [Diagnostics.PerformanceCounterCategoryType]::MultiInstance
+
+    if ($Guest -and -not $hvactive) {
+        Write-Error "Hyper-V is not active on $ComputerName"
+        return
+    }
+
+    if ($hvactive) {
+        if ($Guest) {
+            $cpuset = "\Hyper-V Hypervisor Virtual Processor(*)\% Guest Run Time"
+        } else {
+            $cpuset = '\Hyper-V Hypervisor Logical Processor(*)\% Total Run Time'
+        }
     } else {
         $cpuset = '\Processor Information(*)\% Processor Time'
     }
@@ -173,7 +193,7 @@ function Watch-FleetCPU
 
         # get all specific instances and count them into appropriate measurement bucket
         $samp |% {
-        
+
             if ($_.Path -like "*$ppset") { # scaling factor for total utility
                 $pperf = $_.CookedValue/100
             } elseif ($_.InstanceName -notlike '*_Total') { # per cpu: ignore total and per-numa total
