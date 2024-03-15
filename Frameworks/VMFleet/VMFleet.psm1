@@ -2322,7 +2322,7 @@ function New-Fleet
 
                 while ($true) {
                     Write-Host -fore Green Launching $script `@ $(Get-Date)
-                    try { & $script -connectuser __CONNECTUSER__ -connectpass __CONNECTPASS__ } catch {}
+                    try { & $script -connectuser __CONNECTUSER__ -connectpass '__CONNECTPASS__' } catch {}
                     Start-Sleep -Seconds 1
                 }
             }
@@ -4871,6 +4871,9 @@ function GetDoneFlags
     $tries = 0
     $t0 = Get-Date
     $t1 = $t2 = $null
+    $itdur = $totdur = New-TimeSpan -Seconds 0
+
+    $timedOut = $false
 
     do {
 
@@ -4882,17 +4885,18 @@ function GetDoneFlags
         $tries += 1
         $t1 = Get-Date
 
-        # count number of done flags which agree with completion of the current go epoch
-        Get-ChildItem "$DonePath-*" |% {
+        $doneFile = Get-ChildItem "$DonePath-*"
 
+        foreach ($f in $doneFile)
+        {
             # Now split the VM name from the flag file name (done-vm-xyz); ignore malformed,
             # ones which are not in our expected set, and ones already done.
-            $names = $_.Name -split '-',2
+            $names = $f.Name -split '-',2
             if ($names.Count -eq 2 -and
                 $vmDone.ContainsKey($names[1]) -and
-                $vmDone[$names[1]] -eq 0)
+                $vmDone[$names[1]] -eq $false)
             {
-                $thisDone = [int](Get-Content $_.FullName -ErrorAction SilentlyContinue)
+                $thisDone = [int](Get-Content $f.FullName -ErrorAction SilentlyContinue)
                 if ($thisDone -eq $GoEpoch) {
 
                     # if asserting that none should be complete, this is an error!
@@ -4904,27 +4908,50 @@ function GetDoneFlags
                     $vmDone[$names[1]] = $true
                 }
             }
+
+            $t2 = Get-Date
+            $itdur = $t2 - $t1
+            $totdur = $t2 - $t0
+
+            if ((-not $timedOut) -and $Timeout -ne 0 -and $totdur.TotalSeconds -ge $Timeout)
+            {
+                $timedOut = $true
+
+                # Detail - time out early for the assertion test so that we don't run the risk of
+                # this running past the total iteration time and being spoofed into failure by
+                # seeing actual completions.
+                #
+                # Normally these sweeps take O(1)s even for large numbers of VMs.
+                #
+                # In the completion test we want to finish the full sweep so we can provide
+                # the correct counts.
+                if ($AssertNone)
+                {
+                    break
+                }
+            }
         }
 
         # color status message per condition
-        if (($AssertNone -and $done -ne 0) -or $done -ne $VM.Count) {
+        if ($AssertNone -and $timedOut) {
+            $color = [System.ConsoleColor]::Yellow
+            $Tag = $Tag + " TIMED OUT "
+        } elseif (($AssertNone -and $done -ne 0) -or $done -ne $VM.Count) {
             $color = [System.ConsoleColor]::Yellow
         } else {
             $color = [System.ConsoleColor]::Green
         }
 
-        $t2 = Get-Date
-        $itdur = $t2 - $t1
-        $totdur = $t2 - $t0
-
-        LogOutput -ForegroundColor $color $Tag CHECK $tries : "$done/$($VM.Count)" done $('({0:F2}s, total {1:F2}s)' -f $itdur.TotalSeconds, $totdur.TotalSeconds)
+        LogOutput -ForegroundColor $color "$Tag CHECK $tries : $done/$($VM.Count) done " $('({0:F2}s, total {1:F2}s)' -f $itdur.TotalSeconds, $totdur.TotalSeconds)
 
     # loop if not asserting, not all vms are done, and still have timeout to use
-    } while ((-not $AssertNone) -and $done -ne $VM.Count -and $totdur.TotalSeconds -lt $Timeout)
+    } while ((-not $AssertNone) -and $done -ne $VM.Count -and (-not $timedOut))
 
     # asserting that none should be complete?
     if ($AssertNone)
     {
+        # this is the right regardless of whether the check timed out
+        # timeout is not ideal but is also not failure
         return ($done -eq 0)
     }
 
@@ -5733,7 +5760,7 @@ function Start-FleetReadCacheWarmup
     $s2d = Get-ClusterS2D -CimSession $sess
     $nodes = Get-ClusterNode -Cluster $Cluster |? State -eq Up
 
-    # Cache disabled is probably an unexpected condition, but also requires no warmup.
+    # Cache disabled is normal for flat configurations, no read warmup.
     if ($s2d.CacheState -ne 'Enabled')
     {
         LogOutput "READ CACHE WARMUP: cache not enabled, no warmup to perform"
@@ -5760,6 +5787,14 @@ function Start-FleetReadCacheWarmup
     $capg = @($poold |? Usage -ne Journal | Group-Object -NoElement -Property MediaType)
     $cached = @($poold |? Usage -eq Journal)
 
+    # Although an administrator is encouraged to bring up a flat configuration with CacheState = Disabled,
+    # it is not required. Assume this is as-intended.
+    if ($cached.Count -eq 0)
+    {
+        LogOutput "READ CACHE WARMUP: no cache devices in cache-ready configuration, no warmup to perform"
+        return
+    }
+
     if ($capg.Count)
     {
         $reasons = 0
@@ -5781,11 +5816,6 @@ function Start-FleetReadCacheWarmup
     else
     {
         return
-    }
-
-    if ($cached.Count -eq 0)
-    {
-        throw 'No cache devices found'
     }
 
     $vm = @(Get-FleetVM -Cluster $Cluster |? State -eq Ok)
@@ -6054,39 +6084,6 @@ function Start-FleetReadCacheWarmup
     LogOutput "READ CACHE WARMUP COMPLETE: $completeMsg, took $(TimespanToString $td)"
 }
 
-function GetIndexOfSample
-{
-    [CmdletBinding()]
-    param(
-        [Parameter()]
-        [Microsoft.PowerShell.Commands.GetCounter.PerformanceCounterSampleSet[]]
-        $pc,
-
-        [Parameter()]
-        [int]
-        $Second
-    )
-
-    # Return the index of the element in the counter list which covers the indicated
-    # second-hand mark. E.g., if we have samples at 0, 5, 10, 15 and 20s and are asked
-    # to find 12s, we return 2 (the index for 10).
-    #
-    # This is used to adapt to jittery sample gathering, which can vary significantly
-    # from the intended sample interval.
-
-    $i = 1
-    for (; $i -lt $pc.Count; ++$i)
-    {
-        $d = $pc[$i].Timestamp - $pc[0].Timestamp
-        if ($d.TotalSeconds -gt $Second)
-        {
-            return $i
-        }
-    }
-
-    return $i - 1
-}
-
 function Get-PerformanceCounter
 {
     [CmdletBinding()]
@@ -6120,25 +6117,15 @@ function Get-PerformanceCounter
         $Ctrs
     )
 
-    $pc = @(Import-Counter -Path $Blg -Counter ($Ctrs |% { "\\*\$_" }) -ErrorVariable e)
+    # import, extending the counter names with the required computername wildcard
+    # swallow all errors - we'll handle per-sample/countersample issues individually as long as we get data
+    $sample = @(Import-Counter -Path $Blg -Counter ($Ctrs |% { "\\*\$_" }) -ErrorAction SilentlyContinue -ErrorVariable e)
 
-    # PDH_INVALID_DATA = c0000bc6
-    # If we see this on countersamples ($pc[nnn].CounterSamples[mmm].Status) it may be reasonable to retry the run a limited
-    # number of times. In order to address this, will need module-scoped ErrorActionPreference = Stop to avoid incrementalist
-    # modification like Measure-FleetCoreWorkload currently does. And this becomes a try/catch/rethrow as opposed to assuming
-    # EAP = Continue as it does now.
-    if ($e.Count -ne 0)
+    # if we got nothing, something fatal has occured; throw the first error received
+    if (-not $sample.Count)
     {
-        Write-Error "error $Blg : $Ctrs"
-        $e
-        return $null
+        throw $e[0]
     }
-
-    # Extract measured duration (exclude warmup)
-    $t0 = GetIndexOfSample $pc $Warmup
-    $t1 = GetIndexOfSample $pc ($Warmup + $Duration)
-
-    # LogOutput -IsVb "counter bounds: $Blg warm $Warm d $d indices $t0 - $t1 $('{0:N2}' -f ($pc[$t1].Timestamp - $pc[$t0].Timestamp).TotalSeconds)"
 
     # !sumproduct: return average of individual counters, multiple values
     # sumproduct : return average of sumproduct of counters, single value
@@ -6148,35 +6135,134 @@ function Get-PerformanceCounter
     # this is transposing the list from time-major order (the samples) to
     # counter-major order.
 
+    $nctr = $nresult = $sample[0].CounterSamples.Count
     if ($SumProduct)
     {
-        $vals = [object[]]::new(1)
+        $nresult = 1
+    }
 
-        foreach ($s in $pc[$t0 .. $t1])
+    # vector of counter vectors - all empty to start
+    $result = [object[]]::new($nresult)
+    $result = ,@() * $nresult
+
+    # vector of running counts of good samples to track baseline status (i.e., is it valid)
+    # all imported relative counters are invalid until the *second* status = 0 sample present in the
+    # stream. as a result all start off invalid. on sample failure, they go invalid again.
+    #
+    # all counters must be good to produce a sumproduct sample
+
+    $ngood = @(0) * $nctr
+
+    # check individual counter status
+
+    $t0 = $null
+    foreach ($s in $sample)
+    {
+        # number of counters that don't have usable values this sample
+        # " with bad data
+        # these are different states - the first sample with valid data
+        # for a relative counter is not usable since its delta cannot
+        # be computed yet; this is why we have to wait for the second
+        $skip = 0
+        $nbad = 0
+
+        # Pass 1 - check individual counter status
+        for ($i = 0; $i -lt $s.CounterSamples.Count; $i++)
+        {
+            # save status based on this sample ...
+            if ($s.CounterSamples[$i].Status -ne 0)
+            {
+                # ... bad, skip
+                # in practice we expect all to be PDH_INVALID_DATA = c0000bc6
+                $ngood[$i] = 0
+                $skip++
+                $nbad++
+            }
+            elseif (-not $ngood[$i])
+            {
+                # ... now good, next will be ok
+                $ngood[$i] = 1
+                $skip++
+            }
+            else
+            {
+                # ... baselined, good
+                $ngood[$i]++
+            }
+        }
+
+        # entire row bad?
+        # detail: import-counter returns current time if all counters are bad (!)
+        # so we have to completely drop the sample
+        if ($nbad -eq $s.CounterSamples.Count)
+        {
+            continue
+        }
+
+        # save time zero from the first valid sample
+        if ($null -eq $t0)
+        {
+            $t0 = $s.Timestamp
+        }
+
+        # figure out how far into the sample this is - done? skip warmup?
+        # note that sample/counter validity is why its easier to roll through
+        # all rows to know when the first sample of interest is in hand. timestamp
+        # jitter and drops make things more complicated than simply indexing.
+        $td = ($s.Timestamp - $t0).TotalSeconds
+        if ($td -ge $Warmup + $Duration)
+        {
+            break
+        }
+
+        if ($td -lt $Warmup)
+        {
+            continue
+        }
+
+
+        # Pass 2 - extend result
+
+        if ($SumProduct)
         {
             $x = 1
-            $s.CounterSamples.CookedValue |% { $x *= $_ }
-            $vals[0] += ,$x
-        }
-    }
-    else
-    {
-        $nctrs = $pc[0].CounterSamples.Count
-        $vals = [object[]]::new($nctrs)
 
-        foreach ($s in $pc[$t0 .. $t1])
-        {
-            for ($i = 0; $i -lt $nctrs; ++$i)
+            for ($i = 0; $i -lt $nctr; $i++)
             {
-                $vals[$i] += ,$s.CounterSamples[$i].CookedValue
+                # any unusable value skips the sumproduct
+                if ($ngood[$i] -le 1)
+                {
+                    $x = $null
+                    break
+                }
+
+                $x *= $s.CounterSamples[$i].CookedValue
+            }
+
+            if ($null -ne $x)
+            {
+                $result[0] += ,$x
+            }
+        }
+        else
+        {
+            for ($i = 0; $i -lt $nctr; $i++)
+            {
+                # any unusable value skips just this counter
+                if ($ngood[$i] -le 1)
+                {
+                    continue
+                }
+
+                $result[$i] += ,$s.CounterSamples[$i].CookedValue
             }
         }
     }
 
-    # Average each counter strip (sumproduct or individual) to output
-    $vals |% {
-
-        ($_ | Measure-Object -Average).Average
+    # Average each counter strip (single sumproduct or individual) to output
+    foreach ($r in $result)
+    {
+        ($r | Measure-Object -Average).Average
     }
 }
 
@@ -8551,7 +8637,7 @@ function SetCacheBehavior
                 continue
             }
 
-            $r = Invoke-Command -session $s {
+            Invoke-Command -session $s {
 
                 # Get control object. If RefreshRegParams is not available, issue warning.
                 # This is only available with Server 2022+.
@@ -8564,20 +8650,14 @@ function SetCacheBehavior
 
                 Set-ItemProperty @using:property -Value ([uint32] $using:newValue) -Type ([Microsoft.Win32.RegistryValueKind]::DWord)
 
-                # Trigger refresh - object returned indicating reboot required (or not)
-                $dm.RefreshRegParams()
+                # Trigger refresh - informational object returned which we can discard
+                $null = $dm.RefreshRegParams()
 
                 # If value is now zero, remove it to keep the registry clean
                 if ($using:newValue -eq 0)
                 {
                     Remove-ItemProperty @using:property
                 }
-            }
-
-            # Reboot should never be required when updating cache behavior flags, but check
-            if ($null -ne $r -and $r.fRebootRequired)
-            {
-                Write-Error "Unexpected reboot required when updating cache behavior flags: $node"
             }
         }
         finally
