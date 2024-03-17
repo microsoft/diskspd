@@ -2174,6 +2174,7 @@ function New-Fleet
     switch ($psCmdlet.ParameterSetName)
     {
         "ByCluster" { $Nodes = @(Get-ClusterNode @clusterParam) }
+        "ByNode"    { $Nodes = @(Get-ClusterNode -Name $node) }
     }
 
     # convert to fixed vhd(x) if needed
