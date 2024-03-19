@@ -1734,7 +1734,7 @@ DWORD IORequestGenerator::_CreateDirectoryPath(const char *pszPath) const
 //
 bool IORequestGenerator::_CreateFile(UINT64 ullFileSize, const char *pszFilename, bool fZeroBuffers, bool fVerbose) const
 {
-    bool fSlowWrites = false;
+    bool fSlowWrites = true;
     PrintVerbose(fVerbose, "Creating file '%s' of size %I64u.\n", pszFilename, ullFileSize);
 
     //enable SE_MANAGE_VOLUME_NAME privilege, required to set valid size of a file
@@ -1832,7 +1832,7 @@ bool IORequestGenerator::_CreateFile(UINT64 ullFileSize, const char *pszFilename
             vector<BYTE> vBuf(ulBufSize);
             for (UINT32 i=0; i<ulBufSize; ++i)
             {
-                vBuf[i] = fZeroBuffers ? 0 : (BYTE)(i&0xFF);
+                vBuf[i] = (BYTE)(i&0xFF);
             }
 
             ullRemainSize = ullFileSize;
