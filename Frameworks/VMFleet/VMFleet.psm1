@@ -1287,11 +1287,11 @@ $CommonFunc = {
         try{
            $groupResult = az group show --name $resourceGroup | ConvertFrom-Json
             if ($groupResult.properties.provisioningState -eq "Succeeded") {
-                Write-Host "Resource group $resourceGroup already exists"
+                LogOutput "Resource group $resourceGroup already exists"
             }
             else {
-                 Write-Host "Creating new Resource group $resourceGroup ..."
-                 az group create --name $resourceGroup --location $location             
+                LogOutput "Creating new Resource group $resourceGroup ..."
+                az group create --name $resourceGroup --location $location             
             }
         $rbResourceGroup = ((Get-AzureStackHCI | select AzureResourceUri).AzureResourceUri).Split("/")[4]
         $customLocationResult = az customlocation list --resource-group $rbResourceGroup  | ConvertFrom-Json
@@ -2468,13 +2468,16 @@ function New-Fleet
 
                     $spId = $null
                     $spResult = az stack-hci-vm storagepath list --resource-group $using:resourceGroup --query "[?name=='$($using:storagePath)' && properties.provisioningState=='Succeeded'].id"  --output tsv
-                    if (-not $spResult) {
-                        LogOutput "Creating storage path $storagePath..."
-                        $spResult = az stack-hci-vm storagepath create --name $using:storagePath --resource-group $using:resourceGroup --custom-location $extendedLocation --path $using:storagePathCsv --location $location | ConvertFrom-Json
+                    if ($null -ne $spResult) {
+                        LogOutput "Storage path $using:storagePath already exists"
                     }
                     elseif (az stack-hci-vm storagepath list --resource-group $using:resourceGroup --query "[?name=='$($using:storagePath)' && properties.provisioningState=='Failed'].id"  --output tsv) {
                         LogOutput "$using:storagePath exists with provision status Failed. Deleting existing storage path and recreating..."
                         az stack-hci-vm storagepath delete --name $using:storagePath --resource-group $using:resourceGroup --yes
+                        $spResult = az stack-hci-vm storagepath create --name $using:storagePath --resource-group $using:resourceGroup --custom-location $extendedLocation --path $using:storagePathCsv --location $location | ConvertFrom-Json
+                    }
+                    else {
+                        LogOutput "Creating storage path $storagePath..."
                         $spResult = az stack-hci-vm storagepath create --name $using:storagePath --resource-group $using:resourceGroup --custom-location $extendedLocation --path $using:storagePathCsv --location $location | ConvertFrom-Json
                     }
 
@@ -2490,15 +2493,18 @@ function New-Fleet
                     LogOutput "Initialized storage path: $using:storagePath, creating image with $vhdPath..."
 
                     $imgResult = az stack-hci-vm image list --resource-group $using:resourceGroup  --query "[?name=='$($using:image)' && properties.provisioningState=='Succeeded'].id" --output tsv
-                    if (-not $imgResult) {
-                        LogOutput "Creating image $using:image..."
-                        $imgResult = az stack-hci-vm image create --name $using:image --resource-group $using:resourceGroup --location $location --custom-location $extendedLocation --os-type Windows --storage-path-id $spId --image-path $vhdPath | ConvertFrom-Json
+                    if ($null -ne $imgResult) {
+                        LogOutput "Image $using:image already exists."
                     }
                     elseif (az stack-hci-vm image list --resource-group $using:resourceGroup  --query "[?name=='$($using:image)' && properties.provisioningState=='Failed'].id" --output tsv) {
                         LogOutput "$using:image exists with provision status Failed. Deleting existing image and recreating..."
                         az stack-hci-vm image delete --name $using:image --resource-group $using:resourceGroup --yes
                         $imgResult = az stack-hci-vm image create --name $using:image --resource-group $using:resourceGroup --location $location --custom-location $extendedLocation --os-type Windows --storage-path-id $spId --image-path $vhdPath | ConvertFrom-Json
                     }
+                    else {
+                        LogOutput "Creating image $using:image..."
+                        $imgResult = az stack-hci-vm image create --name $using:image --resource-group $using:resourceGroup --location $location --custom-location $extendedLocation --os-type Windows --storage-path-id $spId --image-path $vhdPath | ConvertFrom-Json
+                    }                    
 
                     if (-not $imgResult) {
                         throw "Failed to create image $using:image"
@@ -2672,17 +2678,16 @@ function New-Fleet
                                                }
                                                else {
                                                   LogOutput "Creation of vm completed at hyperv level"
-                                                   $Stoploop = $true
+                                                  $Stoploop = $true
                                                }
                                            }
                                            catch {
                                                if ($Retrycount -gt 10) {
-                                                   LogOutput "Could not get VM $vmname after 10 retries using Get-ClusterResource"
+                                                   LogOutput -ForegroundColor Red "Could not get VM $vmname after 10 retries using Get-ClusterResource"
                                                    $Stoploop = $true
                                                }
                                                else {
-                                                   Write-Host "Could not get VM $vmname at $RetryCount retry count. Retrying in 6 minutes..."
-                                                   LogOutput "Starting with some sleep time"
+                                                   LogOutput -ForegroundColor Yellow "Could not get VM $vmname at $RetryCount retry count. Retrying in 6 minutes..."
                                                    Start-Sleep -Seconds 360
                                                    $Retrycount += 1
                                                }
@@ -9140,7 +9145,7 @@ function SetCacheBehavior
 
 function Get-Salt {
     $salt = ([char]'a'..[char]'z' + [char]'A'..[char]'Z' + [char]'0'..[char]'9' | Get-Random -Count 4 |% { [char]$_ }) -join ''
-    Write-Host "Generated Salt: $salt"
+    Write-Verbose "Generated Salt: $salt"
     return $salt;
 }
 
@@ -9155,7 +9160,7 @@ function Get-ArcConfig {
     $controlPath = Get-FleetPath -PathType Control $Cluster
     $f = Join-Path $controlPath "arc.json"
     if (-not (Test-Path $f)) {
-        Write-Host "arc.json does not exist. Current Arc mode: Disabled."
+        Write-Verbose "arc.json does not exist. Current Arc mode: Disabled."
         return $null
     }
 
@@ -9198,7 +9203,7 @@ function Set-ArcConfig {
     )
 
     if($PSBoundParameters.Count -eq 0){
-        Write-Host "Set atleast one property."
+        Write-Error "Set atleast one property."
         return;
     }
     if($PSBoundParameters.ContainsKey("ResetSalt")) {
@@ -9241,14 +9246,16 @@ function Set-ArcConfig {
             }
             $nodes = @(Get-ClusterNode)
             $isValidSalt = Invoke-CommonCommand $nodes[0] -InitBlock $CommonFunc -ScriptBlock {
-               InitializeAndGetArcHCIExtendedLoc $using:arcConfig.AzureRegistrationUser $using:arcConfig.AzureRegistrationPassword $using:arcConfig.ResourceGroup
+               InitializeAndGetArcHCIExtendedLoc $using:arcConfig.AzureRegistrationUser $using:arcConfig.AzureRegistrationPassword $using:arcConfig.ResourceGroup | Out-Null
                $vmList = az stack-hci-vm list --resource-group $using:arcConfig.ResourceGroup | ConvertFrom-Json
                $reg = "^vm-.{1,}-" + $using:salt + "-\d{3}$"
                $vms = $vmList | Where-Object { $_.name -match $reg}
-               if(!$vms) { return $true }
-               return false;
+               if($null -eq $vms) { return $true }
+               return $false;
             }
+
             if(!$isValidSalt) {
+                $generateSalt = $true
                 $retry++
             }
             else {               
