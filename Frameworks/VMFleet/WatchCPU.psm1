@@ -104,58 +104,37 @@ function Watch-FleetCPU
         $lines
     }
 
+    # minimum clip, the vertical height available for the cpu core bars
+    $minClip = 10
+
     # these are the valid divisions, in units of percentage width.
     # they must evenly divide 100% and either 10% or 20% for scale markings.
     # determine which is the best fit based on window width.
 
     $div = 0
-    foreach ($i in 1,2,4,5) {
+    $divs = 1,2,4,5
+    foreach ($i in $divs) {
         if ((div-to-width $i) -le [console]::WindowWidth) {
             $div = $i
             break
         }
     }
 
-    # if nothing fit, widen to 4% divisions
-
+    # if nothing fit ... ask for minimum
+    # in practice this is not possible, but we check anyway
     if ($div -eq 0) {
-        $div = 4
+        Write-Error "Window width must be at least $(div-to-width $divs[-1]) columns"
+        return
     }
 
     $width = div-to-width $div
-
-    # get the constant legend; use the remaining height for the vertical cpu core bars.
-    # note total height includes variable label line at bottom (instance + aggregagte)
-    if ($Guest) {
-        $legend = get-legend "Percent Guest VCPU Utilization" $width $div
-    } else {
-        $legend = get-legend "Percent Host LP Utilization" $width $div
-    }
-
-    $clip = [console]::WindowHeight - $legend.Count - 1
-
-    # insist on a clip no lower than 10
-
-    if ($clip -lt 10) {
-        $clip = 10
-    }
-
-    # set window and buffer size simultaneously so we don't have extra scrollbars
-    cls
-    [console]::SetWindowSize($width,$clip + $legend.Count + 1)
-    [console]::BufferWidth = [console]::WindowWidth
-    [console]::BufferHeight = [console]::WindowHeight
-
-    # scale divisions at x%
-    # this should evenly divide 100%
-    $m = [array]::CreateInstance([int],$width)
 
     # which processor counterset should we use?
     # pi is only the root partition if hv is active; when hv is active:
     #     hvlp is the host physical processors
     #     hvvp is the guest virtual processors
     # via ctrs, hv is active iff hvlp is present and has multiple instances
-    $cs = get-counter -ComputerName $ComputerName -ListSet 'Hyper-V Hypervisor Logical Processor' -ErrorAction SilentlyContinue
+    $cs = Get-Counter -ComputerName $ComputerName -ListSet 'Hyper-V Hypervisor Logical Processor' -ErrorAction SilentlyContinue
     $hvactive = $null -ne $cs -and $cs.CounterSetType -eq [Diagnostics.PerformanceCounterCategoryType]::MultiInstance
 
     if ($Guest -and -not $hvactive) {
@@ -166,75 +145,138 @@ function Watch-FleetCPU
     if ($hvactive) {
         if ($Guest) {
             $cpuset = "\Hyper-V Hypervisor Virtual Processor(*)\% Guest Run Time"
+            $legend = get-legend "Percent Guest VCPU Utilization" $width $div
         } else {
             $cpuset = '\Hyper-V Hypervisor Logical Processor(*)\% Total Run Time'
+            $legend = get-legend "Percent Host LP Utilization" $width $div
         }
     } else {
         $cpuset = '\Processor Information(*)\% Processor Time'
+        $legend = get-legend "Percent Processor Utilization" $width $div
     }
 
     # processor performance counter (turbo/speedstep)
+    # this is used to normalize the total cpu utilization (can be > 100%)
     $ppset = '\Processor Information(_Total)\% Processor Performance'
+
+    # account for the constant legend in the window height
+    # use the remaining height for the vertical cpu core bars.
+    $clip = [console]::WindowHeight - ($legend.Count + 1)
+
+    # insist on a minimum amount of space
+    if ($clip -lt $minClip) {
+        $minWindowHeight = $minClip + $legend.Count + 1
+        Write-Error "Window height must be at least $minWindowHeight lines"
+        return
+    }
+
+    # set window and buffer size simultaneously so we don't have extra scrollbars
+    Clear-Host
+    [console]::SetWindowSize($width, [console]::WindowHeight)
+    [console]::BufferWidth = [console]::WindowWidth
+    [console]::BufferHeight = [console]::WindowHeight
+
+    # common params for Get-Counter
+    $gcParam = @{
+        SampleInterval = $SampleInterval
+        Counter = $cpuset,$ppset
+        ErrorAction = 'SilentlyContinue'
+    }
 
     while ($true) {
 
-        # reset measurements & the lines to output
-        $lines = @()
-        foreach ($i in 0..($m.length - 1)) {
-            $m[$i] = 0
-        }
+        # reset measurements
+        # these are the vertical height of a cpu bar in each column, e.g. 2 = 2 cpus
+        $m = @([int] 0) * $width
 
         # avoid remoting for the local case
         if ($ComputerName -eq $env:COMPUTERNAME) {
-            $samp = (get-counter -SampleInterval $SampleInterval -Counter $cpuset,$ppset).Countersamples
+            $ctrs = Get-Counter @gcParam
         } else {
-            $samp = (get-counter -SampleInterval $SampleInterval -Counter $cpuset,$ppset -ComputerName $ComputerName).Countersamples
+            $ctrs = Get-Counter @gcParam -ComputerName $ComputerName
         }
 
-        # get all specific instances and count them into appropriate measurement bucket
-        $samp |% {
+        # if more than one countersample was returned (ppset + something more), we have data
+        if ($null -ne $ctrs -and $ctrs.Countersamples.Count -gt 1)
+        {
+            # get all specific instances and count them into appropriate measurement bucket
+            $ctrs.Countersamples |% {
 
-            if ($_.Path -like "*$ppset") { # scaling factor for total utility
-                $pperf = $_.CookedValue/100
-            } elseif ($_.InstanceName -notlike '*_Total') { # per cpu: ignore total and per-numa total
-                $m[[math]::Floor($_.CookedValue/$div)] += 1
-            } elseif ($_.InstanceName -eq '_Total') { # get total
-                $total = $_.CookedValue
-            }
-        }
-
-        # work down the veritical altitude of each strip, starting at vclip
-        $altitude = $clip
-        do {
-            $lines += ,($($m |% {
-
-                # if we are potentially clipped, handle
-                if ($altitude -eq $clip) {
-
-                    # clipped?
-                    # unclipped but at clip?
-                    # nothing, less than altitude
-
-                    if ($_ -gt $altitude) { 'x' }
-                    elseif ($_ -eq $altitude) { '*' }
-                    else { ' ' }
-
-                } else {
-                    # normal
-                    # >=, output
-                    # <, nothing
-                    if ($_ -ge $altitude) { '*' }
-                    else { ' ' }
+                # get scaling factor for total utility
+                if ($_.Path -like "*$ppset") {
+                    $pperf = $_.CookedValue/100
                 }
-            }) -join '')
-        } while (--$altitude)
 
-        cls
-        write-host -NoNewline ($lines + $legend -join "`n")
-        write-host -NoNewLine ("`n" + (center-pad ("{2} Total: {0:0.0}% Normalized: {1:0.0}%" -f $total,($total*$pperf),$ComputerName) $width))
+                # a cpu: count into appropriate measurement bucket
+                # (ignore total and/or and per-numa total)
+                elseif ($_.InstanceName -notlike '*_Total') {
+                    $m[[math]::Floor($_.CookedValue/$div)] += 1
+                }
+
+                # get total
+                #
+                elseif ($_.InstanceName -eq '_Total') {
+                    $total = $_.CookedValue
+                }
+            }
+
+            # now produce the bar area as a series of lines
+            # work down the veritical altitude of each strip, starting at the clip/top
+            $altitude = $clip
+            $lines = do {
+                $($m |% {
+
+                    # top line - if we are potentially clipped, handle
+                    if ($altitude -eq $clip) {
+
+                        # clipped?
+                        if ($_ -gt $altitude) { 'x' }
+                        # unclipped but at clip?
+                        elseif ($_ -eq $altitude) { '*' }
+                        # nothing, bar less than altitude
+                        else { ' ' }
+
+                    } else {
+
+                        # below top line
+                        # >=, output bar
+                        if ($_ -ge $altitude) { '*' }
+                        # <, nothing
+                        else { ' ' }
+                    }
+                }) -join ''
+            } while (--$altitude)
+
+            $totalStr = "{0:0.0}%" -f $total
+            $normalStr = "{0:0.0}%" -f ($total*$pperf)
+
+            # move the cursor to indicate average utilization
+            # column number is zero based, width is 1-based
+            $cpos = [math]::Floor(($width - 1)*$total/100)
+        }
+        else
+        {
+            # Center no data message vertically and horizontally in the frame
+
+            $vpre = [math]::Floor($clip/2) - 1
+            $vpost = [math]::Floor($clip/2)
+
+            $lines  = @('') * $vpre
+            $lines += center-pad "No Data Available" $width
+            $lines += @('') * $vpost
+
+            $totalStr = $normalStr = "---"
+
+            # zero cursor
+            $cpos = 0
+        }
+
+        Clear-Host
+        Write-Host -NoNewline ($lines + $legend -join "`n")
+        Write-Host -NoNewLine ("`n" + (center-pad "$ComputerName Total: $totalStr Normalized: $normalStr" $width))
 
         # move the cursor to indicate average utilization
         # column number is zero based, width is 1-based
-        [console]::SetCursorPosition([math]::Floor(($width - 1)*$total/100),[console]::CursorTop-$legend.Count)
+        [console]::SetCursorPosition($cpos,[console]::CursorTop-$legend.Count)
     }
 }
