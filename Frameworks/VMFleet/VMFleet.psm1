@@ -7121,7 +7121,11 @@ function Measure-FleetCoreWorkload
 
         [Parameter()]
         [switch]
-        $UseStorageQos
+        $UseStorageQos,
+
+        [Parameter(Mandatory = $false)]
+        [array]
+        $alignmentsToTest = @(100,70)
     )
 
     # Remoting parametersets
@@ -7380,7 +7384,7 @@ function Measure-FleetCoreWorkload
         ApplyVMTemplate -KeyColumn A1v2 100
         ApplyVMDataDisk -KeyColumn
 
-        foreach ($alignment in 100,70)
+        foreach ($alignment in $alignmentsToTest)
         {
             $myKeyColumn.VMAlignmentPct = $alignment
             AlignVM -IfStarted
@@ -7396,7 +7400,7 @@ function Measure-FleetCoreWorkload
         ApplyVMTemplate -KeyColumn A4v2 25
         ApplyVMDataDisk -KeyColumn
 
-        foreach ($alignment in 100,70)
+        foreach ($alignment in $alignmentsToTest)
         {
             $myKeyColumn.VMAlignmentPct = $alignment
             AlignVM -IfStarted
