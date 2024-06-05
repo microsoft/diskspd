@@ -78,6 +78,15 @@ What's New?
 
 VM Fleet is a performance characterization and analyst framework for exploring the storage capabilities of Windows Server Hyper-Converged environments with Storage Spaces Direct.
 
+# VM Fleet 2.1.0.0 4/3/2024
+
+* Support for Arc VM management (only applicable to clusters managed by Arc)
+* `Set-FleetRunProfileScript` - produce a free-run script based on one of the defined workload profiles
+* `Watch-FleetCPU` - new support for monitoring guest VCPU utilization (-Guest); can handle data outages
+* Fix: performance counter handling now manages intermittent data dropouts (per conventional relog.exe)
+* Fix: mid-run vm health check now handles the possibility of many vms taking longer than intended runtime to validate; early exit to avoid false failures
+* Fix: ignore reboot required indication from cache layer when changing cache behavior; avoid false failure
+
 # VM Fleet 2.0.2.2 12/1/2021
 
 * Fix cluster remoting issue during New-Fleet caused by 2.0.2.1 work

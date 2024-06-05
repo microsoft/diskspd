@@ -37,7 +37,7 @@ SOFTWARE.
 RootModule = 'VMFleet.psm1'
 
 # Version number of this module. Even build# is release, odd pre-release (Mj.Mn.Bd.Rv)
-ModuleVersion = '2.0.2.2'
+ModuleVersion = '2.1.0.0'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -120,11 +120,13 @@ FunctionsToExport = @(
     'New-Fleet',
     'Remove-Fleet',
     'Repair-Fleet',
+    'Set-ArcConfig',
     'Set-Fleet',
     'Set-FleetPause',
     'Set-FleetPowerScheme',
     'Set-FleetProfile',
     'Set-FleetQoS',
+    'Set-FleetRunProfileScript',
     'Show-Fleet',
     'Show-FleetCpuSweep',
     'Show-FleetPause',
@@ -138,7 +140,8 @@ FunctionsToExport = @(
     'Test-FleetResultRun',
     'Use-FleetPolynomialFit',
     'Watch-FleetCluster',
-    'Watch-FleetCPU'
+    'Watch-FleetCPU',
+    'Initialize-ArcVMs'
 )
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
