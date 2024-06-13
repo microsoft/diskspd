@@ -117,8 +117,14 @@ namespace UnitTests
         TEST_CLASS(ThreadParametersUnitTests);
         TEST_METHOD(Test_AllocateAndFillBufferForTarget);
     };
+
+    class TopologyUnitTests : public WEX::TestClass<TopologyUnitTests>
+    {
+    public:
+        TEST_CLASS(TopologyUnitTests);
+        TEST_METHOD(Test_MaskCount);
+    };
 }
 
 // TODO: ThreadParameters::GetWriteBuffer
 // TODO: Target::GetRandomDataWriteBuffer();
-

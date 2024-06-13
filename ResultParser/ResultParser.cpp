@@ -730,6 +730,11 @@ void ResultParser::_PrintProfile(const Profile& profile)
 {
     _Print("\nCommand Line: %s\n", profile.GetCmdLine().c_str());
     _Print("\n");
+    if (g_ExperimentFlags)
+    {
+        _Print("Experiment Flags: 0x%x (%u)\n", g_ExperimentFlags, g_ExperimentFlags);
+        _Print("\n");
+    }
     _Print("Input parameters:\n\n");
     if (profile.GetVerbose())
     {
@@ -754,98 +759,114 @@ void ResultParser::_PrintSystemInfo(const SystemInformation& system)
 
 void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInformation& system)
 {
-    size_t ulProcCount = results.vSystemProcessorPerfInfo.size();
-    size_t ulBaseProc = 0;
-    size_t ulActiveProcCount = 0;
-    size_t ulNumGroups = system.processorTopology._vProcessorGroupInformation.size();
+    const auto& topo = system.processorTopology;
+    size_t procCount = results.vSystemProcessorPerfInfo.size();
+    size_t baseProc = 0;
+    BYTE efficiencyClass = 0;
+    BYTE processorCore = 0;
 
-    char szFloatBuffer[1024];
+    bool fMultiSocket = topo._vProcessorSocketInformation.size() > 1;
+    bool fMultiNode = topo._vProcessorNumaInformation.size() > 1;
+    bool fMultiGroup = topo._vProcessorGroupInformation.size() > 1;
 
-    if (ulNumGroups == 1) {
-        _Print("\nCPU |  Usage |  User  |  Kernel |  Idle\n");
-    }
-    else {
-        _Print("\nGroup | CPU |  Usage |  User  |  Kernel |  Idle\n");
-    }
-    _Print("-------------------------------------------\n");
+    //
+    // Columns dynamically expand based on whether the system has multiple of the following,
+    // in hierarchical order, followed by CPU #:
+    //
+    //      Socket NUMA Group Core Class
+    //
+    // Note that core & cpu number are group-relative, not absolute (or NUMA or socket relative)
+    //
+
+    _Print("\n");
+    if (fMultiSocket)    { _Print("Socket | "); }
+    if (fMultiNode)      { _Print("Node | "); }
+    if (fMultiGroup) { _Print("Group | "); }
+    if (topo._fSMT)      { _Print("Core | "); }
+    if (topo._ubPerformanceEfficiencyClass) { _Print("Class | "); }
+    _Print("CPU |  Usage |  User  | Kernel |  Idle\n");
+    if (fMultiSocket)    { _Print("---------"); }
+    if (fMultiNode)      { _Print("-------"); }
+    if (fMultiGroup) { _Print("--------"); }
+    if (topo._fSMT)      { _Print("-------"); }
+    if (topo._ubPerformanceEfficiencyClass) { _Print("--------"); }
+    _Print("----------------------------------------\n");
 
     double busyTime = 0;
     double totalIdleTime = 0;
     double totalUserTime = 0;
     double totalKrnlTime = 0;
 
-    for (unsigned int ulGroup = 0; ulGroup < ulNumGroups; ulGroup++) {
-        const ProcessorGroupInformation *pGroup = &system.processorTopology._vProcessorGroupInformation[ulGroup];
+    for (const auto& group : topo._vProcessorGroupInformation) {
 
-        // System has multiple groups but we only have counters for the first one
-        if (ulBaseProc >= ulProcCount) {
-            break;
-        }
+        // Sanity assert - results are sized to the sum of active processors
+        assert(baseProc + group._activeProcessorCount <= procCount);
 
-        for (unsigned int ulProcessor = 0; ulProcessor < pGroup->_maximumProcessorCount; ulProcessor++) {
-            double idleTime;
-            double userTime;
-            double krnlTime;
-            double thisTime;
+        for (BYTE processor = 0; processor < group._activeProcessorCount; processor++) {
 
-            if (!pGroup->IsProcessorActive((BYTE)ulProcessor)) {
-                continue;
+            long long fTime = results.vSystemProcessorPerfInfo[baseProc + processor].KernelTime.QuadPart +
+                              results.vSystemProcessorPerfInfo[baseProc + processor].UserTime.QuadPart;
+
+            double idleTime = 100.0 * results.vSystemProcessorPerfInfo[baseProc + processor].IdleTime.QuadPart / fTime;
+            double krnlTime = 100.0 * results.vSystemProcessorPerfInfo[baseProc + processor].KernelTime.QuadPart / fTime;
+            double userTime = 100.0 * results.vSystemProcessorPerfInfo[baseProc + processor].UserTime.QuadPart / fTime;
+            double usedTime = (krnlTime - idleTime) + userTime;
+
+            if (fMultiSocket) {
+                _Print("%7u| ", topo.GetSocketOfProcessor(group._groupNumber, processor));
+            }
+            if (fMultiNode) {
+                _Print("%5u| ", topo.GetNumaOfProcessor(group._groupNumber, processor));
+            }
+            if (fMultiGroup) {
+                _Print("%6u| ", group._groupNumber);
+            }
+            processorCore = topo.GetCoreOfProcessor(group._groupNumber, processor, efficiencyClass);
+            if (topo._fSMT){
+                _Print("%5u| ", processorCore);
+            }
+            if (topo._ubPerformanceEfficiencyClass) {
+                _Print("%5u%c| ",
+                    efficiencyClass,
+                    efficiencyClass == topo._ubPerformanceEfficiencyClass ? 'P' : ' ');
             }
 
-            long long fTime = results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart +
-                              results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart;
+            _Print("%4u| %6.2lf%%| %6.2lf%%| %6.2lf%%| %6.2lf%%\n",
+                processor,
+                usedTime,
+                userTime,
+                krnlTime - idleTime,
+                idleTime);
 
-            idleTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].IdleTime.QuadPart / fTime;
-            krnlTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].KernelTime.QuadPart / fTime;
-            userTime = 100.0 * results.vSystemProcessorPerfInfo[ulBaseProc + ulProcessor].UserTime.QuadPart / fTime;
-
-            thisTime = (krnlTime + userTime) - idleTime;
-
-            if (ulNumGroups == 1) {
-                sprintf_s(szFloatBuffer, sizeof(szFloatBuffer), "%4u| %6.2lf%%| %6.2lf%%|  %6.2lf%%| %6.2lf%%\n",
-                    ulProcessor,
-                    thisTime,
-                    userTime,
-                    krnlTime - idleTime,
-                    idleTime);
-            }
-            else {
-                sprintf_s(szFloatBuffer, sizeof(szFloatBuffer), "%6u| %4u| %6.2lf%%| %6.2lf%%|  %6.2lf%%| %6.2lf%%\n",
-                    ulGroup,
-                    ulProcessor,
-                    thisTime,
-                    userTime,
-                    krnlTime - idleTime,
-                    idleTime);
-            }
-
-            _Print("%s", szFloatBuffer);
-
-            busyTime += thisTime;
+            busyTime += usedTime;
             totalIdleTime += idleTime;
             totalUserTime += userTime;
             totalKrnlTime += krnlTime;
-            ulActiveProcCount += 1;
         }
 
-        ulBaseProc += pGroup->_maximumProcessorCount;
+        baseProc += group._activeProcessorCount;
     }
 
-    if (ulActiveProcCount == 0) {
-        ulActiveProcCount = 1;
-    }
+    assert(baseProc == procCount);
 
-    _Print("-------------------------------------------\n");
+    if (fMultiSocket)    { _Print("---------"); }
+    if (fMultiNode)      { _Print("-------"); }
+    if (fMultiGroup) { _Print("--------"); }
+    if (topo._fSMT)      { _Print("-------"); }
+    if (topo._ubPerformanceEfficiencyClass) { _Print("--------"); }
+    _Print("----------------------------------------\n");
 
-    sprintf_s(szFloatBuffer, sizeof(szFloatBuffer),
-        ulNumGroups == 1 ?
-            "avg.| %6.2lf%%| %6.2lf%%|  %6.2lf%%| %6.2lf%%\n" :
-            "        avg.| %6.2lf%%| %6.2lf%%|  %6.2lf%%| %6.2lf%%\n",
-        busyTime / ulActiveProcCount,
-        totalUserTime / ulActiveProcCount,
-        (totalKrnlTime - totalIdleTime) / ulActiveProcCount,
-        totalIdleTime / ulActiveProcCount);
-    _Print("%s", szFloatBuffer);
+    if (fMultiSocket)    { _Print("         "); }
+    if (fMultiNode)      { _Print("       "); }
+    if (fMultiGroup) { _Print("        "); }
+    if (topo._fSMT)      { _Print("       "); }
+    if (topo._ubPerformanceEfficiencyClass) { _Print("        "); }
+
+    _Print("avg.| %6.2lf%%| %6.2lf%%| %6.2lf%%| %6.2lf%%\n",
+        busyTime / procCount,
+        totalUserTime / procCount,
+        (totalKrnlTime - totalIdleTime) / procCount,
+        totalIdleTime / procCount);
 }
 
 void ResultParser::_PrintSectionFieldNames(const TimeSpan& timeSpan)
@@ -935,8 +956,7 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
 
             if (timeSpan.GetMeasureLatency())
             {
-                double avgLat = latencyHistogram.GetAvg()/1000;
-                _Print(" | %8.3f", avgLat);
+                _Print(" | %8.3f", latencyHistogram.GetAvg()/1000);
             }
 
             if (timeSpan.GetCalculateIopsStdDev())
@@ -970,13 +990,6 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
 
     _PrintSectionBorderLine(timeSpan);
 
-    double totalAvgLat = 0;
-
-    if (timeSpan.GetMeasureLatency())
-    {
-        totalAvgLat = totalLatencyHistogram.GetAvg()/1000;
-    }
-
     _Print("total:   %15llu | %12llu | %10.2f | %10.2f",
            ullTotalBytesCount,
            ullTotalIOCount,
@@ -985,7 +998,7 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
 
     if (timeSpan.GetMeasureLatency())
     {
-        _Print(" | %8.3f", totalAvgLat);
+        _Print(" | %8.3f", totalLatencyHistogram.GetAvg()/1000);
     }
 
     if (timeSpan.GetCalculateIopsStdDev())
@@ -1037,7 +1050,7 @@ void ResultParser::_PrintLatencyPercentiles(const Results& results)
         for (auto i : perTargetTotalHistogram)
         {
             std::string path = i.first;
-            _Print("\n%s\n", path.c_str());
+            _Print("\nLatency distribution: %s\n", path.c_str());
             _PrintLatencyChart(perTargetReadHistogram[path],
                 perTargetWriteHistogram[path],
                 perTargetTotalHistogram[path]);
@@ -1062,7 +1075,7 @@ void ResultParser::_PrintLatencyPercentiles(const Results& results)
         }
     }
 
-    _Print("\ntotal:\n");
+    _Print("\nTotal latency distribution:\n");
     _PrintLatencyChart(readLatencyHistogram, writeLatencyHistogram, totalLatencyHistogram);
 }
 
@@ -1141,6 +1154,32 @@ string ResultParser::ParseProfile(const Profile& profile)
     return _sResult;
 }
 
+void ResultParser::_PrintWaitStats(const Results &results)
+{
+    _Print("Wait Statistics\n");
+    _Print("thread | completion wait | throttle wait  -  sleep | lookaside | 0 - 7+ complete per lookaside\n");
+    _Print("-----------------------------------------------------------------------------------------------\n");
+    for (unsigned int iThread = 0; iThread < results.vThreadResults.size(); ++iThread)
+    {
+        const ThreadResults& threadResults = results.vThreadResults[iThread];
+        _Print(
+            "%6u | %15llu | %13llu  - %6llu | %9llu | %llu %llu %llu %llu %llu %llu %llu %llu\n",
+            iThread,
+            threadResults.WaitStats.Wait,
+            threadResults.WaitStats.ThrottleWait,
+            threadResults.WaitStats.ThrottleSleep,
+            threadResults.WaitStats.Lookaside,
+            threadResults.WaitStats.LookasideCompletion[0],
+            threadResults.WaitStats.LookasideCompletion[1],
+            threadResults.WaitStats.LookasideCompletion[2],
+            threadResults.WaitStats.LookasideCompletion[3],
+            threadResults.WaitStats.LookasideCompletion[4],
+            threadResults.WaitStats.LookasideCompletion[5],
+            threadResults.WaitStats.LookasideCompletion[6],
+            threadResults.WaitStats.LookasideCompletion[7]);
+    }
+}
+
 string ResultParser::ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults)
 {
     _sResult.clear();
@@ -1150,13 +1189,12 @@ string ResultParser::ParseResults(const Profile& profile, const SystemInformatio
 
     for (size_t iResult = 0; iResult < vResults.size(); iResult++)
     {
-        _Print("\n\nResults for timespan %d:\n", iResult + 1);
+        _Print("\nResults for timespan %d:\n", iResult + 1);
         _Print("*******************************************************************************\n");
 
         const Results& results = vResults[iResult];
         const TimeSpan& timeSpan = profile.GetTimeSpans()[iResult];
 
-        unsigned int ulProcCount = system.processorTopology._ulActiveProcCount;
         double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount); //test duration
 
         char szFloatBuffer[1024];
@@ -1182,9 +1220,7 @@ string ResultParser::ParseResults(const Profile& profile, const SystemInformatio
                 _Print("request count:\t\t%u\n", timeSpan.GetRequestCount());
             }
 
-            _Print("proc count:\t\t%u\n", ulProcCount);
             _PrintCpuUtilization(results, system);
-
             _PrintEffectiveDistributions(results);
 
             _Print("\nTotal IO\n");
@@ -1198,7 +1234,6 @@ string ResultParser::ParseResults(const Profile& profile, const SystemInformatio
 
             if (timeSpan.GetMeasureLatency())
             {
-                _Print("\n\n");
                 _PrintLatencyPercentiles(results);
             }
 
@@ -1207,6 +1242,13 @@ string ResultParser::ParseResults(const Profile& profile, const SystemInformatio
             {
                 _DisplayETW(results.EtwMask, results.EtwEventCounters);
                 _DisplayETWSessionInfo(results.EtwSessionInfo);
+            }
+
+            // wait stats
+            if (profile.GetVerboseStats())
+            {
+                _Print("\n");
+                _PrintWaitStats(results);
             }
         }
     }

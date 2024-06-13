@@ -30,45 +30,28 @@ SOFTWARE.
 #pragma once
 
 #include <windows.h>
+#include <powersetting.h>
+#include <powrprof.h>
+#include <VersionHelpers.h>
 #include <TraceLoggingProvider.h>
 #include <TraceLoggingActivity.h>
 #include <evntrace.h>
 #include <ctime>
 #include <vector>
+#include <algorithm>
 #include <set>
+#include <locale>
+#include <codecvt>
 #include <Winternl.h>   //ntdll.dll
 #include <assert.h>
 #include "Histogram.h"
 #include "IoBucketizer.h"
 #include "ThroughputMeter.h"
+#include "Version.h"
 
 using namespace std;
 
 TRACELOGGING_DECLARE_PROVIDER(g_hEtwProvider);
-
-// versioning material. for simplicity in consumption, please ensure that the date string
-// parses via the System.Datetime constructor as follows (in Powershell):
-//
-//      [datetime] "string"
-//
-// this should result in a valid System.Datetime object, rendered like:
-//
-//      Monday, June 16, 2014 12:00:00 AM
-
-#define DISKSPD_RELEASE_TAG "-dev"
-#define DISKSPD_REVISION    ""
-
-#define DISKSPD_MAJOR       2
-#define DISKSPD_MINOR       1
-#define DISKSPD_BUILD       0
-#define DISKSPD_QFE         0
-
-#define DISKSPD_MAJORMINOR_VER_STR(x,y,z) #x "." #y "." #z
-#define DISKSPD_MAJORMINOR_VERSION_STRING(x,y,z) DISKSPD_MAJORMINOR_VER_STR(x,y,z)
-#define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
-
-#define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2021/7/1"
 
 #define DISKSPD_TRACE_INFO      0x00000000
 #define DISKSPD_TRACE_RESERVED  0x00000001
@@ -86,6 +69,9 @@ typedef void (WINAPI *PRINTF)(const char*, va_list);                            
 #define GB (((UINT64)1)<<30)
 #define MB (((UINT64)1)<<20)
 #define KB (((UINT64)1)<<10)
+
+#define EXPERIMENT_TPUT_CALC        0x1 // precise ms sleep calculation for low rate throughput control
+extern ULONG g_ExperimentFlags;
 
 struct ETWEventCounters
 {
@@ -275,13 +261,13 @@ public:
     inline UINT64 Rand64()
     {
         UINT64 e;
-        
+
         e =           _ulState[0] - _rotl64(_ulState[1], 7);
         _ulState[0] = _ulState[1] ^ _rotl64(_ulState[2], 13);
         _ulState[1] = _ulState[2] + _rotl64(_ulState[3], 37);
         _ulState[2] = _ulState[3] + e;
         _ulState[3] = e + _ulState[0];
-        
+
         return _ulState[3];
     }
 
@@ -317,7 +303,7 @@ public:
     //  100 will always occur (always true)
 
     static bool BooleanRatio(Random *pRand, UINT32 ulRatio)
-    {   
+    {
         return ((pRand->Rand32() % 100 + 1) <= ulRatio);
     }
 
@@ -365,7 +351,7 @@ public:
 
         //
         // Return if string was consumed
-        // 
+        //
         //
 
         if (parsed)
@@ -401,53 +387,16 @@ public:
 
     }
 
-    void Add(DWORD dwBytesTransferred,
-             IOOperation type,
-             UINT64 ullIoStartTime,
-             UINT64 ullSpanStartTime,
-             bool fMeasureLatency,
-             bool fCalculateIopsStdDev
-             )
+    void Add(
+        DWORD dwBytesTransferred,
+        IOOperation type,
+        UINT64 ullIoStartTime,
+        UINT64 ullIoEndTime,
+        UINT64 ullSpanStartTime,
+        bool fMeasureLatency,
+        bool fCalculateIopsStdDev
+        )
     {
-        double lfDurationUsec = 0;
-        UINT64 ullEndTime = 0;
-        UINT64 ullDuration = 0;
-        
-        // assume it is worthwhile to stay off of the time query path unless needed (micro-overhead)
-        if (fMeasureLatency || fCalculateIopsStdDev)
-        {
-            ullEndTime = PerfTimer::GetTime();
-            ullDuration = ullEndTime - ullIoStartTime;
-            lfDurationUsec = PerfTimer::PerfTimeToMicroseconds(ullDuration);
-        }
-
-        if (fMeasureLatency)
-        {
-            if (type == IOOperation::ReadIO)
-            {
-                readLatencyHistogram.Add(static_cast<float>(lfDurationUsec));
-            }
-            else
-            {
-                writeLatencyHistogram.Add(static_cast<float>(lfDurationUsec));
-            }
-        }
-
-        UINT64 ullRelativeCompletionTime = 0;
-        if (fCalculateIopsStdDev)
-        {
-            ullRelativeCompletionTime = ullEndTime - ullSpanStartTime;
-
-            if (type == IOOperation::ReadIO)
-            {
-                readBucketizer.Add(ullRelativeCompletionTime, lfDurationUsec);
-            }
-            else
-            {
-                writeBucketizer.Add(ullRelativeCompletionTime, lfDurationUsec);
-            }
-        }
-
         if (type == IOOperation::ReadIO)
         {
             ullReadBytesCount += dwBytesTransferred;    // update read bytes counter
@@ -461,6 +410,44 @@ public:
 
         ullBytesCount += dwBytesTransferred;            // update bytes counter
         ullIOCount++;                                   // update completed I/O operations counter
+
+        // end time is 0 if we're not measuring latency
+        assert(((fMeasureLatency || fCalculateIopsStdDev) && ullIoEndTime != 0) ||
+               (!fMeasureLatency && !fCalculateIopsStdDev));
+
+        if (ullIoEndTime == 0)
+        {
+            return;
+        }
+
+        UINT64 ullDuration = ullIoEndTime - ullIoStartTime;;
+        double lfDurationUsec = PerfTimer::PerfTimeToMicroseconds(ullDuration);
+
+        if (fMeasureLatency)
+        {
+            if (type == IOOperation::ReadIO)
+            {
+                readLatencyHistogram.Add(static_cast<float>(lfDurationUsec));
+            }
+            else
+            {
+                writeLatencyHistogram.Add(static_cast<float>(lfDurationUsec));
+            }
+        }
+
+        if (fCalculateIopsStdDev)
+        {
+            UINT64 ullRelativeCompletionTime = ullIoEndTime - ullSpanStartTime;
+
+            if (type == IOOperation::ReadIO)
+            {
+                readBucketizer.Add(ullRelativeCompletionTime, lfDurationUsec);
+            }
+            else
+            {
+                writeBucketizer.Add(ullRelativeCompletionTime, lfDurationUsec);
+            }
+        }
     }
 
     string sPath;
@@ -482,9 +469,23 @@ public:
     vector<DistributionRange> vDistributionRange;
 };
 
+typedef struct _WAIT_STATS {
+    ULONGLONG Wait;
+    ULONGLONG ThrottleWait;
+    ULONGLONG ThrottleSleep;
+    ULONGLONG Lookaside;
+    ULONGLONG LookasideCompletion[8]; // 0 == none, 1 == 1, ... 7 = 7+
+} WAIT_STATS;
+
 class ThreadResults
 {
 public:
+    ThreadResults()
+    {
+        WaitStats = { 0 };
+    }
+
+    WAIT_STATS WaitStats;
     vector<TargetResults> vTargetResults;
 };
 
@@ -506,80 +507,73 @@ typedef void (*CALLBACK_TEST_FINISHED)();   //callback function to notify that t
 class ProcessorGroupInformation
 {
 public:
-    WORD _groupNumber; 
+    WORD _groupNumber;
     BYTE _maximumProcessorCount;
     BYTE _activeProcessorCount;
     KAFFINITY _activeProcessorMask;
 
     ProcessorGroupInformation() = delete;
     ProcessorGroupInformation(
+        WORD Group,
         BYTE MaximumProcessorCount,
         BYTE ActiveProcessorCount,
-        WORD Group,
         KAFFINITY ActiveProcessorMask) :
+        _groupNumber(Group),
         _maximumProcessorCount(MaximumProcessorCount),
         _activeProcessorCount(ActiveProcessorCount),
-        _groupNumber(Group),
         _activeProcessorMask(ActiveProcessorMask)
     {
     }
 
+    ProcessorGroupInformation(
+        WORD Group,
+        PROCESSOR_GROUP_INFO& GroupInfo) :
+        _groupNumber(Group),
+        _maximumProcessorCount(GroupInfo.MaximumProcessorCount),
+        _activeProcessorCount(GroupInfo.ActiveProcessorCount),
+        _activeProcessorMask(GroupInfo.ActiveProcessorMask)
+    {
+    }
+
+    // This logic is strictly unaware that sparse processor masks are not possible;
+    // address this later, not important. See comments around RelationGroup query.
     bool IsProcessorActive(BYTE Processor) const
     {
-        if (IsProcessorValid(Processor) &&
-            (((KAFFINITY)1 << Processor) & _activeProcessorMask) != 0)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+        return (IsProcessorValid(Processor) &&
+                (((KAFFINITY)1 << Processor) & _activeProcessorMask) != 0);
     }
 
     bool IsProcessorValid(BYTE Processor) const
     {
-        if (Processor < _maximumProcessorCount)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+        return (Processor < _maximumProcessorCount);
     }
 };
 
 class ProcessorNumaInformation
 {
 public:
+    DWORD _ulProcCount;
     DWORD _nodeNumber;
-    WORD _groupNumber;
-    KAFFINITY _processorMask;
-
-    ProcessorNumaInformation() = delete;
-    ProcessorNumaInformation(
-        DWORD Node,
-        WORD Group,
-        KAFFINITY ProcessorMask) :
-        _nodeNumber(Node),
-        _groupNumber(Group),
-        _processorMask(ProcessorMask)
-    {
-    }
+    vector<pair<WORD, KAFFINITY>> _vProcessorMasks;
 };
 
-class ProcessorHyperThreadInformation
+class ProcessorCoreInformation
 {
 public:
     WORD _groupNumber;
     KAFFINITY _processorMask;
+    BYTE _efficiencyClass;
+    BYTE _groupCoreNumber;
 
-    ProcessorHyperThreadInformation(
+    ProcessorCoreInformation() = delete;
+    ProcessorCoreInformation(
         WORD Group,
-        KAFFINITY ProcessorMask) :
+        KAFFINITY ProcessorMask,
+        BYTE EfficiencyClass) :
         _groupNumber(Group),
-        _processorMask(ProcessorMask)
+        _processorMask(ProcessorMask),
+        _efficiencyClass(EfficiencyClass),
+        _groupCoreNumber(0)
     {
     }
 };
@@ -587,6 +581,8 @@ public:
 class ProcessorSocketInformation
 {
 public:
+    DWORD _ulProcCount;
+    DWORD _ulSocketNumber;
     vector<pair<WORD, KAFFINITY>> _vProcessorMasks;
 };
 
@@ -596,10 +592,11 @@ public:
     vector<ProcessorGroupInformation> _vProcessorGroupInformation;
     vector<ProcessorNumaInformation> _vProcessorNumaInformation;
     vector<ProcessorSocketInformation> _vProcessorSocketInformation;
-    vector<ProcessorHyperThreadInformation> _vProcessorHyperThreadInformation;
-    
-    DWORD _ulProcCount;
-    DWORD _ulActiveProcCount;
+    vector<ProcessorCoreInformation> _vProcessorCoreInformation;
+
+    DWORD _ulProcessorCount;            // total number of (active) processors
+    BYTE _ubPerformanceEfficiencyClass; // highest performance class present
+    bool _fSMT;                         // any SMT cores present
 
     ProcessorTopology()
     {
@@ -607,7 +604,16 @@ public:
         PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX pInformation;
         DWORD AllocSize = 1024;
         DWORD ReturnedLength = AllocSize;
+        LOGICAL_PROCESSOR_RELATIONSHIP NumaRelation;
         pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
+
+        _ulProcessorCount = 0;
+        _ubPerformanceEfficiencyClass = 0;
+        _fSMT = false;
+
+        ////
+        // Group Relations
+        ////
 
         fResult = GetLogicalProcessorInformationEx(RelationGroup, pInformation, &ReturnedLength);
         if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
@@ -622,39 +628,73 @@ public:
         {
             // Group information comes back as a single (large) element, not an array.
             assert(ReturnedLength == pInformation->Size);
-            _ulProcCount = 0;
-            _ulActiveProcCount = 0;
 
-            // Fill in group topology vector so we can answer questions about active/max procs
+            //
+            // Fill in group topology vector
+            //
+            // Note: maximum processor count has no utility other than an indication of the
+            // bit width of the KAFFINITY mask that might have set values. But:
+            //
+            //   1) any mask will be a contiguous run of set bits (no sparse holes); there is
+            //      no case where a 0 bit will be present to indicate a gap/disabled processor
+            //   2) all system APIs (such as the cpu utilization query) are defined over active
+            //      processors
+            //
+            // There are (new?) cases where maximum is represented as > active on large systems,
+            // which makes these distinctions critical... active processor count is the only
+            // count that matters.
+            //
+            // For the sake of documentation we do save & report out the masks as reported by the
+            // system, but the only ones we look at are limited to cases where we get information
+            // in the form of GROUP_AFFINITY, which is just group # and mask (like NUMA and package
+            // association).
+            //
+
             for (WORD i = 0; i < pInformation->Group.ActiveGroupCount; i++)
             {
                 _vProcessorGroupInformation.emplace_back(
-                    pInformation->Group.GroupInfo[i].MaximumProcessorCount,
-                    pInformation->Group.GroupInfo[i].ActiveProcessorCount,
                     i,
-                    pInformation->Group.GroupInfo[i].ActiveProcessorMask
+                    pInformation->Group.GroupInfo[i]
                     );
-                _ulProcCount += _vProcessorGroupInformation[i]._maximumProcessorCount;
-                _ulActiveProcCount += _vProcessorGroupInformation[i]._activeProcessorCount;
+
+                _ulProcessorCount += _vProcessorGroupInformation[i]._activeProcessorCount;
             }
         }
 
+        ////
+        // NUMA Relations
+        ////
+
+        //
+        // Dynamically detect the available NUMA relations. Non-Ex returns exactly one relation and
+        // does not define the GroupCount field. Ex scales to return multiple groups for large systems
+        // with > 64 per NUMA domain and does populate GroupCount.
+        //
+
+        NumaRelation = RelationNumaNodeEx;
         ReturnedLength = AllocSize;
-        fResult = GetLogicalProcessorInformationEx(RelationNumaNode, pInformation, &ReturnedLength);
+        fResult = GetLogicalProcessorInformationEx(NumaRelation, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_GEN_FAILURE)
+        {
+            NumaRelation = RelationNumaNode;
+            fResult = GetLogicalProcessorInformationEx(NumaRelation, pInformation, &ReturnedLength);
+        }
         if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
         {
             delete [] pInformation;
             AllocSize = ReturnedLength;
             pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
-            fResult = GetLogicalProcessorInformationEx(RelationNumaNode, pInformation, &ReturnedLength);
+            fResult = GetLogicalProcessorInformationEx(NumaRelation, pInformation, &ReturnedLength);
         }
 
         if (fResult)
         {
             PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
 
-            while (ReturnedLength != 0)
+            while (ReturnedLength > 0)
             {
+                ProcessorNumaInformation node;
+
                 assert(ReturnedLength >= cur->Size);
 
                 if (cur->Size > ReturnedLength)
@@ -662,16 +702,25 @@ public:
                     break;
                 }
 
-                _vProcessorNumaInformation.emplace_back(
-                    cur->NumaNode.NodeNumber,
-                    cur->NumaNode.GroupMask.Group,
-                    cur->NumaNode.GroupMask.Mask
-                    );
+                node._nodeNumber = cur->NumaNode.NodeNumber;
+                node._ulProcCount = 0;
+                for (WORD i = 0; i < (NumaRelation == RelationNumaNode ? 1 : cur->NumaNode.GroupCount); i++)
+                {
+                    node._ulProcCount += ProcessorTopology::MaskCount(cur->NumaNode.GroupMasks[i].Mask);
+                    node._vProcessorMasks.emplace_back(cur->NumaNode.GroupMasks[i].Group,
+                                                       cur->NumaNode.GroupMasks[i].Mask);
+                }
+
+                _vProcessorNumaInformation.push_back(node);
 
                 ReturnedLength -= cur->Size;
                 cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
             }
         }
+
+        ////
+        // Socket/Package Relations
+        ////
 
         ReturnedLength = AllocSize;
         fResult = GetLogicalProcessorInformationEx(RelationProcessorPackage, pInformation, &ReturnedLength);
@@ -687,10 +736,11 @@ public:
         {
             PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
 
+            DWORD socketNumber = 0;
             while (ReturnedLength != 0)
             {
                 ProcessorSocketInformation socket;
-                
+
                 assert(ReturnedLength >= cur->Size);
 
                 if (cur->Size > ReturnedLength)
@@ -698,8 +748,11 @@ public:
                     break;
                 }
 
-                for (WORD i = 0; i < pInformation->Processor.GroupCount; i++)
+                socket._ulProcCount = 0;
+                socket._ulSocketNumber = socketNumber;
+                for (WORD i = 0; i < cur->Processor.GroupCount; i++)
                 {
+                    socket._ulProcCount += ProcessorTopology::MaskCount(cur->Processor.GroupMask[i].Mask);
                     socket._vProcessorMasks.emplace_back(cur->Processor.GroupMask[i].Group,
                                                          cur->Processor.GroupMask[i].Mask);
                 }
@@ -708,8 +761,13 @@ public:
 
                 ReturnedLength -= cur->Size;
                 cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+                socketNumber += 1;
             }
         }
+
+        ////
+        // Core Relations
+        ////
 
         ReturnedLength = AllocSize;
         fResult = GetLogicalProcessorInformationEx(RelationProcessorCore, pInformation, &ReturnedLength);
@@ -721,9 +779,20 @@ public:
             fResult = GetLogicalProcessorInformationEx(RelationProcessorCore, pInformation, &ReturnedLength);
         }
 
+        //
+        // The EfficiencyClass member was added with Windows 10
+        //
+
+        BOOL fEfficiencyClass = false;
+        if (IsWindows10OrGreater())
+        {
+            fEfficiencyClass = true;
+        }
+
         if (fResult)
         {
             PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
+            BYTE curEfficiency;
 
             while (ReturnedLength != 0)
             {
@@ -734,13 +803,56 @@ public:
                     break;
                 }
 
+                //
+                // Determine the highest performance core class and presence of SMT as we sweep.
+                // Note that SMT is per core and can be asymmetric.
+                //
+
+                if (fEfficiencyClass)
+                {
+                    curEfficiency = cur->Processor.EfficiencyClass;
+                    if (_ubPerformanceEfficiencyClass < curEfficiency)
+                    {
+                        _ubPerformanceEfficiencyClass = curEfficiency;
+                    }
+                }
+
+                if (cur->Processor.Flags & LTP_PC_SMT)
+                {
+                    _fSMT = true;
+                }
+
                 assert(pInformation->Processor.GroupCount == 1);
 
-                _vProcessorHyperThreadInformation.emplace_back(cur->Processor.GroupMask[0].Group,
-                                                               cur->Processor.GroupMask[0].Mask);
+                _vProcessorCoreInformation.emplace_back(cur->Processor.GroupMask[0].Group,
+                                                        cur->Processor.GroupMask[0].Mask,
+                                                        fEfficiencyClass ? cur->Processor.EfficiencyClass : (BYTE)0);
 
                 ReturnedLength -= cur->Size;
                 cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+            }
+
+            // Now guarantee ascending order of group number & cpu mask so that group-relative core number can be assigned
+
+            sort(_vProcessorCoreInformation.begin(), _vProcessorCoreInformation.end(),
+                [](const ProcessorCoreInformation& a, const ProcessorCoreInformation& b)
+                {
+                    return a._groupNumber < b._groupNumber ||
+                          (a._groupNumber == b._groupNumber && a._processorMask < b._processorMask);
+                });
+
+            // Assign group-relative core number
+
+            BYTE coreNumber = 0;
+            WORD group = 0;
+            for (auto& core : _vProcessorCoreInformation)
+            {
+                if (core._groupNumber != group)
+                {
+                    group = core._groupNumber;
+                    coreNumber = 0;
+                }
+                core._groupCoreNumber = coreNumber++;
             }
         }
 
@@ -765,6 +877,9 @@ public:
     // or inclusive (Next = false) of the input group/processor.
     // Iteration is in order of absolute processor number.
     // This does assume at least one core is active, but that is a given.
+    //
+    // This logic is strictly unaware that sparse processor masks are not possible;
+    // address this later, not important. See comments around RelationGroup query.
     void GetActiveGroupProcessor(WORD& Group, BYTE& Processor, bool Next)
     {
         if (Next)
@@ -788,6 +903,79 @@ public:
             }
         }
     }
+
+    //
+    // Efficiency of these mappings is not a first order concern. We simply use these to avoid assuming
+    // ordering of groups/masks of processors within topology structures. There's strictly no reason,
+    // for example, that socket 0 contains the first groups (0, 1, etc.) of processors, at least not
+    // documented or guaranteed.
+    //
+
+    DWORD GetNumaOfProcessor(WORD Group, BYTE Processor) const
+    {
+        for (const auto& numa : _vProcessorNumaInformation)
+        {
+            for (const auto& mask : numa._vProcessorMasks)
+            {
+                if (mask.first == Group && (mask.second & ((KAFFINITY)1 << Processor)))
+                {
+                    return numa._nodeNumber;
+                }
+            }
+        }
+
+        assert(false);
+        return 0;
+    }
+
+    DWORD GetSocketOfProcessor(WORD Group, BYTE Processor) const
+    {
+        for (const auto& socket : _vProcessorSocketInformation)
+        {
+            for (const auto& mask : socket._vProcessorMasks)
+            {
+                if (mask.first == Group && (mask.second & ((KAFFINITY)1 << Processor)))
+                {
+                    return socket._ulSocketNumber;
+                }
+            }
+        }
+
+        assert(false);
+        return 0;
+    }
+
+    BYTE GetCoreOfProcessor(WORD Group, BYTE Processor, BYTE& EfficiencyClass) const
+    {
+        for (const auto& core : _vProcessorCoreInformation)
+        {
+            if (core._groupNumber == Group && (core._processorMask & ((KAFFINITY)1 << Processor)))
+            {
+                EfficiencyClass = core._efficiencyClass;
+                return core._groupCoreNumber;
+            }
+        }
+
+        assert(false);
+        return 0;
+    }
+
+    static unsigned int MaskCount(KAFFINITY Mask)
+    {
+        //
+        // Trivial popcount for affinity mask w/o insn dependency
+        //
+
+        unsigned int count = 0;
+
+        while (Mask)
+        {
+            Mask &= (Mask - 1);
+            count++;
+        }
+
+        return count;
+    }
 };
 
 //
@@ -801,7 +989,7 @@ public:
 // start new indented section
 #define AddXmlInc(s,str)    { (s).append(indent, ' '); indent += 2; (s) += (str); }
 // end indented section
-#define AddXmlDec(s,str)    { indent -= 2; (s).append(indent, ' '); (s) += (str); }
+#define AddXmlDec(s,str)    { if (indent >= 2) { indent -= 2; }; (s).append(indent, ' '); (s) += (str); }
 
 class SystemInformation
 {
@@ -809,14 +997,16 @@ private:
     SYSTEMTIME StartTime;
 
 public:
-    string sComputerName;
     ProcessorTopology processorTopology;
+    string sComputerName;
+    string sActivePolicyName;
+    string sActivePolicyGuid;
 
     SystemInformation()
     {
-        // System Name
-        char buffer[64];
+        char buffer[128];
         DWORD cb = _countof(buffer);
+        GUID *guid = NULL;
         BOOL fResult;
 
 #pragma prefast(suppress:38020, "Yes, we're aware this is an ANSI API in a UNICODE project")
@@ -828,6 +1018,52 @@ public:
 
         // capture start time
         GetSystemTime(&StartTime);
+
+        if (PowerGetActiveScheme(NULL, &guid) == ERROR_SUCCESS &&
+            PowerReadFriendlyName(NULL, guid, NULL, NULL, NULL, &cb) == ERROR_SUCCESS)
+        {
+            PUCHAR pwrBuffer;
+
+            if (cb <= _countof(buffer))
+            {
+                pwrBuffer = (PUCHAR) buffer;
+            }
+            else
+            {
+                pwrBuffer = new UCHAR[cb];
+            }
+
+            if (PowerReadFriendlyName(NULL, guid, NULL, NULL, pwrBuffer, &cb) == ERROR_SUCCESS)
+            {
+                // Cast wide string down to basic - all of our current output streams are basic
+                wstring wActivePolicyName = (PWCHAR) pwrBuffer;
+                std::wstring_convert<std::codecvt_utf8<wchar_t>> cvt;
+                sActivePolicyName = cvt.to_bytes(wActivePolicyName);
+            }
+
+            if (pwrBuffer != (PVOID) buffer)
+            {
+                delete pwrBuffer;
+            }
+        }
+
+        if (sActivePolicyName.empty())
+        {
+            sActivePolicyName = "<unknown>";
+        }
+
+        if (guid)
+        {
+            sprintf_s(buffer, _countof(buffer),
+                "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                guid->Data1, guid->Data2, guid->Data3,
+                guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
+                guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
+
+            sActivePolicyGuid = buffer;
+
+            LocalFree(guid);
+        }
     }
 
     // for unit test, squelch variable timestamp
@@ -838,7 +1074,7 @@ public:
 
     string SystemInformation::GetText() const
     {
-        char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
+        char szBuffer[128]; // guid (36ch), timestamp and power friendly (up to 64ch)
         int nWritten;
         string sText("System information:\n\n");
 
@@ -862,6 +1098,31 @@ public:
             sText += szBuffer;
         }
 
+        sText += "\n\n\tcpu count:\t\t";
+        sText += to_string(processorTopology._ulProcessorCount);
+        sText += "\n\tcore count:\t\t";
+        sText += to_string(processorTopology._vProcessorCoreInformation.size());
+        sText += "\n\tgroup count:\t\t";
+        sText += to_string(processorTopology._vProcessorGroupInformation.size());
+        sText += "\n\tnode count:\t\t";
+        sText += to_string(processorTopology._vProcessorNumaInformation.size());
+        sText += "\n\tsocket count:\t\t";
+        sText += to_string(processorTopology._vProcessorSocketInformation.size());
+        sText += "\n\theterogeneous cores:\t";
+        sText += processorTopology._ubPerformanceEfficiencyClass ? "y\n" : "n\n";
+
+        sText += "\n\tactive power scheme:\t";
+        sText += sActivePolicyName;
+
+        if (!sActivePolicyGuid.empty())
+        {
+            sText += " (";
+            sText += sActivePolicyGuid;
+            sText += ")";
+        }
+
+        sText += "\n";
+
         return sText;
     }
 
@@ -883,7 +1144,7 @@ public:
         AddXml(sXml,"<Version>" DISKSPD_NUMERIC_VERSION_STRING "</Version>\n");
         AddXml(sXml, "<VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n");
         AddXmlDec(sXml, "</Tool>\n");
-        
+
         AddXml(sXml, "<RunTime>");
         if (StartTime.wYear) {
 
@@ -900,8 +1161,16 @@ public:
         }
         sXml += "</RunTime>\n";
 
+        AddXml(sXml, "<PowerScheme Name=\"")
+        sXml += sActivePolicyName;
+        sXml += "\" Guid=\"";
+        sXml += sActivePolicyGuid;
+        sXml += "\"/>\n";
+
         // processor topology
-        AddXmlInc(sXml, "<ProcessorTopology>\n");
+        AddXmlInc(sXml, "<ProcessorTopology Heterogeneous=\"");
+        sXml += processorTopology._ubPerformanceEfficiencyClass ? "true\">\n" : "false\">\n";
+
         for (const auto& g : processorTopology._vProcessorGroupInformation)
         {
             AddXml(sXml, "<Group Group=\"");
@@ -919,24 +1188,31 @@ public:
         }
         for (const auto& n : processorTopology._vProcessorNumaInformation)
         {
-            AddXml(sXml, "<Node Node=\"");
+            AddXmlInc(sXml, "<Node Node=\"");
             sXml += to_string(n._nodeNumber);
-            sXml += "\" Group=\"";
-            sXml += to_string(n._groupNumber);
-            sXml += "\" Processors=\"0x";
-            nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", n._processorMask);
-            assert(nWritten && nWritten < _countof(szBuffer));
-            sXml += szBuffer;
-            sXml += "\"/>\n";
+            sXml += "\">\n";
+            for (const auto& g : n._vProcessorMasks)
+            {
+                AddXml(sXml, "<Group Group=\"");
+                sXml += to_string(g.first);
+                sXml += "\" Mask=\"0x";
+                nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g.second);
+                assert(nWritten && nWritten < _countof(szBuffer));
+                sXml += szBuffer;
+                sXml += "\"/>\n";
+            }
+            AddXmlDec(sXml, "</Node>\n");
         }
         for (const auto& s : processorTopology._vProcessorSocketInformation)
         {
-            AddXmlInc(sXml, "<Socket>\n");
+            AddXmlInc(sXml, "<Socket Socket=\"");
+            sXml += to_string(s._ulSocketNumber);
+            sXml += "\">\n";
             for (const auto& g : s._vProcessorMasks)
             {
                 AddXml(sXml, "<Group Group=\"");
                 sXml += to_string(g.first);
-                sXml += "\" Processors=\"0x";
+                sXml += "\" Mask=\"0x";
                 nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g.second);
                 assert(nWritten && nWritten < _countof(szBuffer));
                 sXml += szBuffer;
@@ -944,14 +1220,18 @@ public:
             }
             AddXmlDec(sXml, "</Socket>\n");
         }
-        for (const auto& h : processorTopology._vProcessorHyperThreadInformation)
+        for (const auto& h : processorTopology._vProcessorCoreInformation)
         {
-            AddXml(sXml, "<HyperThread Group=\"");
+            AddXml(sXml, "<Core Group=\"");
             sXml += to_string(h._groupNumber);
-            sXml += "\" Processors=\"0x";
+            sXml += "\" Core=\"";
+            sXml += to_string(h._groupCoreNumber);
+            sXml += "\" Mask=\"0x";
             nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", h._processorMask);
             assert(nWritten && nWritten < _countof(szBuffer));
             sXml += szBuffer;
+            sXml += "\" EfficiencyClass=\"";
+            sXml += to_string(h._efficiencyClass);
             sXml += "\"/>\n";
         }
 
@@ -1151,7 +1431,7 @@ public:
     UINT64 GetBaseFileOffsetInBytes() const { return _ullBaseFileOffset; }
     UINT64 GetThreadBaseRelativeOffsetInBytes(UINT32 ulThreadNo) const { return ulThreadNo * _ullThreadStride; }
     UINT64 GetThreadBaseFileOffsetInBytes(UINT32 ulThreadNo) const { return _ullBaseFileOffset + GetThreadBaseRelativeOffsetInBytes(ulThreadNo); }
-    
+
 
     void SetSequentialScanHint(bool fBool) { _fSequentialScanHint = fBool; }
     bool GetSequentialScanHint() const { return _fSequentialScanHint; }
@@ -1218,7 +1498,7 @@ public:
 
     void SetUseParallelAsyncIO(bool fBool) { _fParallelAsyncIO = fBool; }
     bool GetUseParallelAsyncIO() const { return _fParallelAsyncIO; }
-    
+
     void SetUseInterlockedSequential(bool fBool) { _fInterlockedSequential = fBool; }
     bool GetUseInterlockedSequential() const { return _fInterlockedSequential; }
 
@@ -1241,7 +1521,7 @@ public:
     void SetWeight(UINT32 ulWeight) { _ulWeight = ulWeight; }
     UINT32 GetWeight() const { return _ulWeight; }
 
-    void AddThreadTarget(const ThreadTarget &threadTarget) 
+    void AddThreadTarget(const ThreadTarget &threadTarget)
     {
         _vThreadTargets.push_back(threadTarget);
     }
@@ -1271,7 +1551,7 @@ public:
     BYTE* GetRandomDataWriteBuffer(Random *pRand);
 
     void SetDistributionRange(const vector<DistributionRange>& v, DistributionType t)
-    { 
+    {
         _vDistributionRange = v; _distributionType = t;
 
         // Now place final element if IO% is < 100.
@@ -1286,7 +1566,7 @@ public:
         // TBD this should be moved to a proper Distribution class.
 
         const DistributionRange& last = *_vDistributionRange.rbegin();
-        
+
         UINT32 ioCur = last._src + last._span;
         if (ioCur < 100)
         {
@@ -1351,7 +1631,7 @@ private:
     UINT64 _ullBlockAlignment;
     UINT32 _ulWriteRatio;
     UINT32 _ulRandomRatio;
- 
+
     UINT64 _ullBaseFileOffset;
 
     TargetCacheMode _cacheMode;
@@ -1394,7 +1674,7 @@ private:
 
     UINT32 _ulWeight;
     vector<ThreadTarget> _vThreadTargets;
-    
+
     vector<DistributionRange> _vDistributionRange;
     DistributionType _distributionType;
 
@@ -1480,7 +1760,7 @@ public:
 
     void SetCompletionRoutines(bool fCompletionRoutines) { _fCompletionRoutines = fCompletionRoutines; }
     bool GetCompletionRoutines() const { return _fCompletionRoutines; }
-    
+
     void SetMeasureLatency(bool fMeasureLatency) { _fMeasureLatency = fMeasureLatency; }
     bool GetMeasureLatency() const { return _fMeasureLatency; }
 
@@ -1489,7 +1769,7 @@ public:
 
     void SetIoBucketDurationInMilliseconds(UINT32 ulIoBucketDurationInMilliseconds) { _ulIoBucketDurationInMilliseconds = ulIoBucketDurationInMilliseconds; }
     UINT32 GetIoBucketDurationInMilliseconds() const { return _ulIoBucketDurationInMilliseconds; }
-    
+
     string GetXml(UINT32 indent) const;
     void MarkFilesAsPrecreated(const vector<string> vFiles);
 
@@ -1532,6 +1812,7 @@ public:
     Profile() :
         _fProfileOnly(false),
         _fVerbose(false),
+        _fVerboseStats(false),
         _dwProgress(0),
         _fEtwEnabled(false),
         _fEtwProcess(false),
@@ -1568,6 +1849,9 @@ public:
 
     void SetVerbose(bool b) { _fVerbose = b; }
     bool GetVerbose() const { return _fVerbose; }
+
+    void SetVerboseStats(bool b) { _fVerboseStats = b; }
+    bool GetVerboseStats() const { return _fVerboseStats; }
 
     void SetProgress(DWORD dwProgress) { _dwProgress = dwProgress; }
     DWORD GetProgress() const { return _dwProgress; }
@@ -1619,6 +1903,7 @@ private:
 
     vector<TimeSpan>_vTimeSpans;
     bool _fVerbose;
+    bool _fVerboseStats;
     bool _fProfileOnly;
     DWORD _dwProgress;
     string _sCmdLine;
@@ -1649,7 +1934,7 @@ public:
     IORequest(Random *pRand) :
         _ioType(IOOperation::ReadIO),
         _pRand(pRand),
-        _pCurrentTarget(nullptr),
+        _iCurrentTarget(0),
         _ullStartTime(0),
         _ulRequestIndex(0xFFFFFFFF),
         _ullTotalWeight(0),
@@ -1665,10 +1950,10 @@ public:
     }
 
     OVERLAPPED *GetOverlapped() { return &_overlapped; }
-    
+
     void AddTarget(Target *pTarget, UINT32 ulWeight)
-    { 
-        _vTargets.push_back(pTarget); 
+    {
+        _vTargets.push_back(pTarget);
         _vulTargetWeights.push_back(ulWeight);
         _ullTotalWeight += ulWeight;
 
@@ -1677,32 +1962,33 @@ public:
         }
     }
 
-    Target *GetCurrentTarget() { return _pCurrentTarget; }
+    Target *GetCurrentTarget() { return _vTargets[_iCurrentTarget]; }
+    size_t GetCurrentTargetIndex() { return _iCurrentTarget; }
 
     Target *GetNextTarget()
     {
         UINT64 ullWeight;
 
         if (_vTargets.size() == 1) {
-            _pCurrentTarget = _vTargets[0];
+            _iCurrentTarget = 0;
         }
         else if (_fEqualWeights) {
-            _pCurrentTarget = _vTargets[_pRand->Rand32() % _vTargets.size()];
+            _iCurrentTarget = _pRand->Rand32() % _vTargets.size();
         }
         else {
             ullWeight = _pRand->Rand64() % _ullTotalWeight;
-            
+
             for (size_t iTarget = 0; iTarget < _vTargets.size(); iTarget++) {
                 if (ullWeight < _vulTargetWeights[iTarget]) {
-                    _pCurrentTarget = _vTargets[iTarget];
+                    _iCurrentTarget = iTarget;
                     break;
                 }
-            
+
                 ullWeight -= _vulTargetWeights[iTarget];
             }
         }
 
-        return _pCurrentTarget;
+        return GetCurrentTarget();
     }
 
     void SetIoType(IOOperation ioType) { _ioType = ioType; }
@@ -1724,7 +2010,7 @@ private:
     UINT64 _ullTotalWeight;
     bool _fEqualWeights;
     Random *_pRand;
-    Target *_pCurrentTarget;
+    size_t _iCurrentTarget;
     IOOperation _ioType;
     UINT64 _ullStartTime;
     UINT32 _ulRequestIndex;
@@ -1793,7 +2079,7 @@ public:
 
     // TODO: check how it's used
     HANDLE hEndEvent;        //used only in case of completion routines (not for IO Completion Ports)
-    
+
     bool AllocateAndFillBufferForTarget(const Target& target);
     BYTE* GetReadBuffer(size_t iTarget, size_t iRequest);
     BYTE* GetWriteBuffer(size_t iTarget, size_t iRequest);
@@ -2151,7 +2437,7 @@ class ThreadTargetState
             default:
             break;
         }
-        
+
         _lastIO = NextIOType(true);
     }
 
@@ -2218,7 +2504,7 @@ class ThreadTargetState
 
         nextOffset %= _relTargetSizeAligned;
         return nextOffset;
-    }    
+    }
 
     UINT64 NextRelativeParaSeqOffset(IORequest& ioRequest)
     {
@@ -2256,7 +2542,7 @@ class ThreadTargetState
         if (_vDistributionRange.size())
         {
             auto r = DistributionRange::find(_vDistributionRange, _tp->pRand->Rand64() % _ioDistributionSpan);
-            nextOffset %= r->_dst.second;   // trim to range length (already aligned)    
+            nextOffset %= r->_dst.second;   // trim to range length (already aligned)
             nextOffset += r->_dst.first;    // bump by range base
         }
         // Full width.
@@ -2301,7 +2587,7 @@ class ThreadTargetState
             // repeat last IO if not needing a new choice (e.g., random)
             ioType = _lastIO;
         }
-        else 
+        else
         {
             ioType = Util::BooleanRatio(_tp->pRand, _target->GetWriteRatio()) ? IOOperation::WriteIO : IOOperation::ReadIO;
             _lastIO = ioType;
@@ -2370,7 +2656,7 @@ class ThreadTargetState
     // Offsets/sizes are zero-based relative to target base offset, not absolute file offset.
     // Relative size is trimmed with respect to block alignment, if specified.
     //
-    
+
     UINT64 _relTargetSize;              // relative target size for IO v. base/max
     UINT64 _relTargetSizeAligned;       // relative target size for zero-base aligned IO (applies to: Random, InterlockedSequential)
     UINT64 _nextSeqOffset;              // next IO offset to issue sequential IO at (applies to: Sequential & Mixed)

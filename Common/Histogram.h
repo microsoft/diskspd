@@ -36,6 +36,8 @@ SOFTWARE.
 #include <limits>
 #include <cmath>
 
+// Plain min/max macros from common headers will interfere with std::numeric_limits
+
 #pragma push_macro("min")
 #pragma push_macro("max")
 #undef min
@@ -44,41 +46,61 @@ SOFTWARE.
 template<typename T>
 class Histogram
 {
-    private:
+private:
 
-    unsigned _samples;
+    mutable std::unordered_map<T, unsigned> _data;
+    mutable unsigned _samples;
 
-#define USE_HASH_TABLE
-#ifdef USE_HASH_TABLE
-    std::unordered_map<T,unsigned> _data;
+    mutable std::map<T, unsigned> _sdata;
+    mutable unsigned _ssamples;
 
-    std::map<T,unsigned> _GetSortedData() const
+    // Save most recent percentile/iterator/nth-distance query. If the next is strictly >= it allows
+    // an efficient forward iteration through an ascending set of queries.
+
+    mutable double _lastptile;
+    mutable unsigned _lastptilen;
+    mutable decltype(_sdata.cbegin()) _lastptilepos;
+
+    // A histogram starts writable/unsealed and automatically seals after the first read operation.
+    // Subsequent writes which add data restart from empty.
+
+    void _SealData() const
     {
-        return std::map<T,unsigned>(_data.begin(), _data.end());
-    }
-#else
-    std::map<T,unsigned> _data;
+        if (!_data.empty())
+        {
+            _sdata.clear();
 
-    std::map<T,unsigned> _GetSortedData() const
-    {
-        return _data; 
+            _sdata = std::map<T, unsigned>(_data.cbegin(), _data.cend());
+            _ssamples = _samples;
+
+            // invalid ptile > 1; first ptile query will initialize
+            _lastptile = 1.1;
+
+            _data.clear();
+            _samples = 0;
+        }
     }
-#endif
-    public: 
+
+public:
 
     Histogram()
-        : _samples(0)
+        : _samples(0),
+        _ssamples(0)
     {}
 
     void Clear()
     {
         _data.clear();
         _samples = 0;
+
+        _sdata.clear();
+        _ssamples = 0;
+
     }
 
     void Add(T v)
-    { 
-        _data[ v ]++;
+    {
+        _data[v]++;
         _samples++;
     }
 
@@ -93,88 +115,118 @@ class Histogram
     }
 
     T GetMin() const
-    { 
-        T min(std::numeric_limits<T>::max());
+    {
+        _SealData();
 
-        for (auto i : _data)
+        // Default low if empty
+        if (!_ssamples)
         {
-            if (i.first < min)
-            {
-                min = i.first;
-            }
+            return std::numeric_limits<T>::min();
         }
 
-        return min;
+        return _sdata.cbegin()->first;
     }
 
     T GetMax() const
     {
-        T max(std::numeric_limits<T>::min());
+        _SealData();
 
-        for (auto i : _data)
+        // Default low if empty
+        if (!_ssamples)
         {
-            if (i.first > max) 
-            {
-                max = i.first;
-            }
+            return std::numeric_limits<T>::min();
         }
 
-        return max;
+        return _sdata.crbegin()->first;
     }
 
-    unsigned GetSampleSize() const 
+    unsigned GetSampleBuckets() const
     {
-        return _samples;
+        return (unsigned) (_samples ? _data.size() : _sdata.size());
     }
-    
-    T GetPercentile(double p) const 
+
+    unsigned GetSampleSize() const
     {
-        // ISSUE-REVIEW
-        // What do the 0th and 100th percentile really mean?
-        if ((p < 0) || (p > 1))
+        return _samples ? _samples : _ssamples;
+    }
+
+    T GetPercentile(double p) const
+    {
+        if ((p < 0.0) || (p > 1.0))
         {
             throw std::invalid_argument("Percentile must be >= 0 and <= 1");
         }
 
-        const double target = GetSampleSize() * p;
+        _SealData();
 
-        unsigned cur = 0;
-        for (auto i : _GetSortedData()) 
+        // Default low if empty
+        if (!_ssamples)
         {
-            cur += i.second;
-            if (cur >= target)
-            {
-                return i.first;
-            }
+            return std::numeric_limits<T>::min();
         }
 
-        // We can get here if no IOs are issued, simply return 0 since
-        // we don't want to throw an exception and crash
-        return 0;
+        const double target = p * _ssamples;
+
+        // Default to beginning; n is the number of samples iterated over so far
+        unsigned n = 0;
+        auto pos = _sdata.cbegin();
+
+        // Resume from last?
+        if (p >= _lastptile)
+        {
+            n = _lastptilen;
+            pos = _lastptilepos;
+        }
+
+        while (pos != _sdata.cend())
+        {
+            if (n + pos->second >= target)
+            {
+                // Save position. Note the pre-incremented distance through the histogram
+                // must be saved in case next is still in the same bucket.
+                _lastptile = p;
+                _lastptilen = n;
+                _lastptilepos = pos;
+
+                return pos->first;
+            }
+
+            n += pos->second;
+            ++pos;
+        }
+
+        throw std::overflow_error("overran end trying to find percentile");
     }
-    
-    T GetPercentile(int p) const 
+
+    T GetPercentile(int p) const
     {
-        return GetPercentile(static_cast<double>(p)/100);
+        return GetPercentile(static_cast<double>(p) / 100);
     }
 
-    T GetMedian() const 
-    { 
-        return GetPercentile(0.5); 
+    T GetMedian() const
+    {
+        return GetPercentile(0.5);
     }
 
-    double GetStdDev() const { return GetStandardDeviation(); }
-    double GetAvg() const { return GetMean(); }
+    double GetStdDev()  const { return GetStandardDeviation(); }
+    double GetAvg()     const { return GetMean(); }
 
-    double GetMean() const 
-    { 
+    double GetMean() const
+    {
+        _SealData();
+
+        // Default low if empty
+        if (!_ssamples)
+        {
+            return std::numeric_limits<T>::min();
+        }
+
         double sum(0);
-        unsigned samples = GetSampleSize();
 
-        for (auto i : _data)
+        for (const auto i : _sdata)
         {
             double bucket_val =
-                static_cast<double>(i.first) * i.second / samples;
+                static_cast<double>(i.first) * i.second / _ssamples;
 
             if (sum + bucket_val < 0)
             {
@@ -188,18 +240,18 @@ class Histogram
     }
 
     double GetStandardDeviation() const
-    { 
+    {
         double mean(GetMean());
         double ssd(0);
 
-        for (auto i : _data)
+        for (const auto i : _sdata)
         {
             double dev = static_cast<double>(i.first) - mean;
-            double sqdev = dev*dev;
+            double sqdev = dev * dev;
             ssd += i.second * sqdev;
         }
 
-        return sqrt(ssd / GetSampleSize());
+        return sqrt(ssd / _ssamples);
     }
 
     std::string GetHistogramCsv(const unsigned bins) const
@@ -209,6 +261,8 @@ class Histogram
 
     std::string GetHistogramCsv(const unsigned bins, const T LOW, const T HIGH) const
     {
+        _SealData();
+
         // ISSUE-REVIEW
         // Currently bins are defined as strictly less-than
         // their upper limit, with the exception of the last
@@ -219,10 +273,7 @@ class Histogram
         std::ostringstream os;
         os.precision(std::numeric_limits<T>::digits10);
 
-        std::map<T,unsigned> sortedData = _GetSortedData();
-
-        auto pos = sortedData.begin(); 
-
+        auto pos = _sdata.cbegin();
         unsigned cumulative = 0;
 
         for (unsigned bin = 1; bin <= bins; ++bin)
@@ -230,8 +281,8 @@ class Histogram
             unsigned count = 0;
             limit += binSize;
 
-            while (pos != sortedData.end() && 
-                    (pos->first < limit || bin == bins))
+            while (pos != _sdata.end() &&
+                (pos->first < limit || bin == bins))
             {
                 count += pos->second;
                 ++pos;
@@ -247,10 +298,12 @@ class Histogram
 
     std::string GetRawCsv() const
     {
+        _SealData();
+
         std::ostringstream os;
         os.precision(std::numeric_limits<T>::digits10);
 
-        for (auto i : _GetSortedData()) 
+        for (const auto i : _sdata)
         {
             os << i.first << "," << i.second << std::endl;
         }
@@ -260,9 +313,11 @@ class Histogram
 
     std::string GetRaw() const
     {
+        _SealData();
+
         std::ostringstream os;
 
-        for (auto i : _GetSortedData()) 
+        for (const auto i : _sdata)
         {
             os << i.second << " " << i.first << std::endl;
         }

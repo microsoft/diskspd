@@ -34,6 +34,7 @@ TRACELOGGING_DEFINE_PROVIDER(g_hEtwProvider,
                              (0xca13db84, 0xd0a9, 0x5145, 0xfc, 0xa4, 0x46, 0x8d, 0xa9, 0x2f, 0xdc, 0x2d));
 
 SystemInformation g_SystemInformation;
+ULONG g_ExperimentFlags;
 
 UINT64 PerfTimer::GetTime()
 {
@@ -99,12 +100,12 @@ UINT64 PerfTimer::SecondsToPerfTime(const double seconds)
 Random::Random(UINT64 ulSeed)
 {
     UINT32 i;
-    
+
     _ulState[0] = 0xf1ea5eed;
     _ulState[1] = ulSeed;
     _ulState[2] = ulSeed;
     _ulState[3] = ulSeed;
-    
+
     for (i = 0; i < 20; i++) {
         Rand64();
     }
@@ -138,10 +139,10 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
     pBuffer += Remaining * 8;
 
     if (fPseudoRandomOkay) {
-        
+
         //
         // Generate 5 random numbers and then mix them to produce
-        // 16 random (but correlated) numbers.  We want to do 16 
+        // 16 random (but correlated) numbers.  We want to do 16
         // numbers at a time for optimal cache line alignment.
         // Only do this if the caller is okay with numbers that
         // aren't independent.  A detailed analysis of the data
@@ -150,7 +151,7 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
         // instance it's unlikely compression algorithms will be
         // able to detect this and utilize it).
         //
-        
+
         while (Remaining > 16) {
             r1 = Rand64();
             r2 = Rand64();
@@ -195,7 +196,7 @@ void Random::RandBuffer(BYTE *pBuffer, UINT32 ulLength, bool fPseudoRandomOkay)
     //
     // Fill in the tail of the buffer
     //
-    
+
     while (Remaining >= 4) {
         r1 = Rand64();
         r2 = Rand64();
@@ -241,7 +242,7 @@ string ThreadTarget::GetXml(UINT32 indent) const
 {
     char buffer[4096];
     string sXml;
-    
+
     AddXmlInc(sXml, "<ThreadTarget>\n");
 
     sprintf_s(buffer, _countof(buffer), "<Thread>%u</Thread>\n", _ulThread);
@@ -262,7 +263,7 @@ string Target::GetXml(UINT32 indent) const
 {
     char buffer[4096];
     string sXml;
-    
+
     AddXmlInc(sXml, "<Target>\n");
     AddXml(sXml, "<Path>" + _sPath + "</Path>\n");
 
@@ -295,7 +296,7 @@ string Target::GetXml(UINT32 indent) const
         AddXml(sXml, "<WriteThrough>true</WriteThrough>\n");
         break;
     }
-    
+
     // MemoryMappedIoMode::Off is implied default
     switch (_memoryMappedIoMode)
     {
@@ -416,7 +417,7 @@ string Target::GetXml(UINT32 indent) const
     {
         sprintf_s(buffer, _countof(buffer), "<StrideSize>%I64u</StrideSize>\n", GetBlockAlignmentInBytes());
         AddXml(sXml, buffer);
-    
+
         AddXml(sXml, _fInterlockedSequential ?
             "<InterlockedSequential>true</InterlockedSequential>\n" :
             "<InterlockedSequential>false</InterlockedSequential>\n");
@@ -672,6 +673,13 @@ string Profile::GetXml(UINT32 indent) const
     sprintf_s(buffer, _countof(buffer), "<Progress>%u</Progress>\n", _dwProgress);
     AddXml(sXml, buffer);
 
+    if (g_ExperimentFlags)
+    {
+        // only output if on so that downlevel doesn't get (and fail: not in downlevel xsd) unless actually specified
+        sprintf_s(buffer, _countof(buffer), "<ExperimentFlags>%u</ExperimentFlags>\n", g_ExperimentFlags);
+        AddXml(sXml, buffer);
+    }
+
     if (_resultsFormat == ResultsFormat::Text)
     {
         AddXml(sXml, "<ResultFormat>text</ResultFormat>\n");
@@ -686,6 +694,12 @@ string Profile::GetXml(UINT32 indent) const
     }
 
     AddXml(sXml, _fVerbose ? "<Verbose>true</Verbose>\n" : "<Verbose>false</Verbose>\n");
+    if (_fVerboseStats)
+    {
+        // only output if on so that downlevel doesn't get (and fail: not in downlevel xsd) unless actually specified
+        AddXml(sXml, "<VerboseStats>true</VerboseStats>\n");
+    }
+
     if (_precreateFiles == PrecreateFiles::UseMaxSize)
     {
         AddXml(sXml, "<PrecreateFiles>UseMaxSize</PrecreateFiles>\n");
@@ -763,7 +777,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     }
                     if (fOk && !pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].IsProcessorValid(Affinity.bProc))
                     {
-                        fprintf(stderr, "ERROR: affinity assignment to group %u core %u not possible; group only has %u cores\n",
+                        fprintf(stderr, "ERROR: affinity assignment to group %u cpu %u not possible; group has a max of %u cpus\n",
                             Affinity.wGroup,
                             Affinity.bProc,
                             pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup]._maximumProcessorCount);
@@ -773,21 +787,26 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
 
                     if (fOk && !pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup].IsProcessorActive(Affinity.bProc))
                     {
-                        fprintf(stderr, "ERROR: affinity assignment to group %u core %u not possible; core is not active (current mask 0x%Ix)\n",
+                        fprintf(stderr, "ERROR: affinity assignment to group %u cpu %u not possible; cpu is not active (current mask 0x%p)\n",
                             Affinity.wGroup,
                             Affinity.bProc,
-                            pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup]._activeProcessorMask);
+                            (void *) pSystem->processorTopology._vProcessorGroupInformation[Affinity.wGroup]._activeProcessorMask);
 
                         fOk = false;
                     }
                 }
             }
 
+            // ISSUE: many of the following validation errors are stated in cmdline terms, which is not helpful for XML
+
             if (timeSpan.GetDisableAffinity() && timeSpan.GetAffinityAssignments().size() > 0)
             {
                 fprintf(stderr, "ERROR: -n and -a parameters cannot be used together\n");
                 fOk = false;
             }
+
+            // ISSUE: with XML and the following the target specification validation it would be useful to say what
+            //      target they're for
 
             for (const auto& target : timeSpan.GetTargets())
             {
@@ -881,7 +900,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                         fprintf(stderr, "ERROR: random distribution ranges (-rd) do not apply to sequential-only IO patterns\n");
                         fOk = false;
                     }
-                    
+
                     if (target.GetUseParallelAsyncIO() && target.GetRequestCount() == 1)
                     {
                         fprintf(stderr, "WARNING: -p does not have effect unless outstanding I/O count (-o) is > 1\n");
@@ -958,7 +977,7 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                         // Note that absolute range needs no additional validation - known nonzero/large enough for IO
                         if (target.GetDistributionType() == DistributionType::Percent)
                         {
-                            if (targetAcc + r._dst.second > 100) 
+                            if (targetAcc + r._dst.second > 100)
                             {
                                 fprintf(stderr, "ERROR: invalid random distribution Target%% %I64u: can be at most %I64u - total must be <= 100%%\n", r._dst.second, 100 - targetAcc);
                                 fOk = false;
@@ -1036,10 +1055,20 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                     }
                 }
 
-                // in the cases where there is only a single configuration specified for each target (e.g., cmdline),
-                // currently there are no validations specific to individual targets (e.g., pre-existing files)
-                // so we can stop validation now. this allows us to only warn/error once, as opposed to repeating
-                // it for each target.
+                // Note that this error is only possible with -f or XML. The -Bbase:length form is immune.
+                if (target.GetMaxFileSize() && target.GetMaxFileSize() <= target.GetBaseFileOffsetInBytes())
+                {
+                    fprintf(stderr, "ERROR: maximum (-f) target offset must be greater than base (-B)\n");
+                    fOk = false;
+                }
+
+                // If we know there is only a single target specification (the parameters which apply to targets) shared
+                // across the one or more targets, we can stop. In practical terms this is the command line case - for
+                // XML we don't know, and do need to keep going. This early exit lets us avoid repeating the same sets
+                // of error messages per each target we would otherwise loop over.
+                //
+                // If we ever did target property validation (say, v. its size) we'd want to divide out the validations
+                // into parameter-only v. parameter/property cases for similar reasons.
                 if (fSingleSpec)
                 {
                     break;
@@ -1113,7 +1142,7 @@ BYTE* ThreadParameters::GetReadBuffer(size_t iTarget, size_t iRequest)
 BYTE* ThreadParameters::GetWriteBuffer(size_t iTarget, size_t iRequest)
 {
     BYTE *pBuffer = nullptr;
-    
+
     Target& target(vTargets[iTarget]);
     size_t cb = static_cast<size_t>(target.GetRandomDataWriteBufferSize());
     if (cb == 0)

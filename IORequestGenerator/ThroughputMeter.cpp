@@ -27,6 +27,7 @@ SOFTWARE.
 
 */
 
+#include "Common.h"
 #include "ThroughputMeter.h"
 
 ThroughputMeter::ThroughputMeter(void) :
@@ -100,8 +101,31 @@ DWORD ThroughputMeter::GetSleepTime(void) const
 
 DWORD ThroughputMeter::_GetThrottleTime(void) const
 {
-    ULONGLONG cbExpected = (GetTickCount64() - _ullStartTimestamp) * _cBytesPerMillisecond;
-    return cbExpected >= (_cbCompleted + _cbBlockSize) ? 0 : 1;
+    if ((g_ExperimentFlags & EXPERIMENT_TPUT_CALC) == 0)
+    {
+        ULONGLONG cbExpected = (GetTickCount64() - _ullStartTimestamp) * _cBytesPerMillisecond;
+        return cbExpected >= (_cbCompleted + _cbBlockSize) ? 0 : 1;
+    }
+    else
+    {
+        // prototype to calculate an actual sleep time
+        // under higher loads the ideal delay is likely in the microsecond range, but the minimum sleep is 1 ms
+        // however, at low rates it may be reasonable to calculate the delay and use it if > 1ms
+
+        ULONGLONG elapsed = GetTickCount64() - _ullStartTimestamp;
+        ULONGLONG bytesNext = _cbCompleted + _cbBlockSize;
+
+        if (elapsed * _cBytesPerMillisecond > bytesNext)
+        {
+            // below rate - no sleep
+            return 0;
+        }
+
+        // above rate - sleep at least 1 ms
+        ULONGLONG sleepTarget = (bytesNext / _cBytesPerMillisecond) - elapsed;
+
+        return max((DWORD)sleepTarget, 1);
+    }
 }
 
 void ThroughputMeter::Adjust(size_t cb)

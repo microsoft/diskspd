@@ -66,7 +66,7 @@ private:
     bool _CreateFile(UINT64 ullFileSize, const char *pszFilename, bool fZeroBuffers, bool fVerbose) const;
     bool _GetActiveGroupsAndProcs() const;
     struct ETWSessionInfo _GetResultETWSession(const EVENT_TRACE_PROPERTIES *pTraceProperties) const;
-    bool _GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount) const;
+    bool _GetSystemPerfInfo(vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION>& vSPPI, bool fVerbose) const;
     void _InitializeGlobalParameters();
     bool _LoadDLLs();
     bool _StopETW(bool fUseETW, TRACEHANDLE hTraceSession) const;

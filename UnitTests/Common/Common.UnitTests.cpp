@@ -57,7 +57,7 @@ namespace UnitTests
     void PerfTimerUnitTests::Test_PerfTimeToMilliseconds()
     {
         double d = PerfTimer::PerfTimeToMilliseconds(PerfTimer::TIMER_FREQ);
-        printf("toms %f %a ==? %f %a\n", d, d, 1000.0, 1000.0); 
+        printf("toms %f %a ==? %f %a\n", d, d, 1000.0, 1000.0);
         VERIFY_IS_TRUE(d == 1000.0);
     }
 
@@ -97,6 +97,28 @@ namespace UnitTests
         Histogram<int> h;
         h.Add(42);
         VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)1);
+        VERIFY_ARE_EQUAL(h.GetSampleBuckets(), (unsigned)1);
+
+        h.Add(42);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)2);
+        VERIFY_ARE_EQUAL(h.GetSampleBuckets(), (unsigned)1);
+
+        h.Add(0);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)3);
+        VERIFY_ARE_EQUAL(h.GetSampleBuckets(), (unsigned)2);
+
+        // seal/reset count
+        (void) h.GetMin();
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)3);
+        VERIFY_ARE_EQUAL(h.GetSampleBuckets(), (unsigned)2);
+
+        h.Add(0);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)1);
+        VERIFY_ARE_EQUAL(h.GetSampleBuckets(), (unsigned)1);
+
+        (void) h.GetMin();
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)1);
+        VERIFY_ARE_EQUAL(h.GetSampleBuckets(), (unsigned)1);
     }
 
     void HistogramUnitTests::Test_Clear()
@@ -109,11 +131,25 @@ namespace UnitTests
 
     void HistogramUnitTests::Test_MinMax()
     {
-        Histogram<int> h;
+        // use unsigned here for the sake of a compact empty "min"
+        // signed would be ~0 as negative int
+        Histogram<unsigned> h;
         h.Add(1);
+        h.Add(3);
+        VERIFY_ARE_EQUAL(h.GetMin(), (unsigned)1);
+        VERIFY_ARE_EQUAL(h.GetMax(), (unsigned)3);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)2);
+
+        // seal/reset
         h.Add(2);
-        VERIFY_ARE_EQUAL(h.GetMin(), 1);
-        VERIFY_ARE_EQUAL(h.GetMax(), 2);
+        VERIFY_ARE_EQUAL(h.GetMin(), (unsigned)2);
+        VERIFY_ARE_EQUAL(h.GetMax(), (unsigned)2);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)1);
+
+        // empty case
+        h.Clear();
+        VERIFY_ARE_EQUAL(h.GetMin(), (unsigned)0);
+        VERIFY_ARE_EQUAL(h.GetMax(), (unsigned)0);
     }
 
     void HistogramUnitTests::Test_GetPercentile()
@@ -122,7 +158,74 @@ namespace UnitTests
         h.Add(1);
         h.Add(2);
         h.Add(3);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)3);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.0), 1);
         VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 2);
+        VERIFY_ARE_EQUAL(h.GetPercentile(1.0), 3);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)3);
+
+        // single sample buckets
+        for (int i = 1; i < 100; i++)
+        {
+            h.Add(i);
+        }
+        // double query at same val, forward, back and again
+        // stresses iterator save correctness
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)99);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.0), 1);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 50);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 50);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.6), 60);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.1), 10);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 50);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 50);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.6), 60);
+        VERIFY_ARE_EQUAL(h.GetPercentile(1.0), 99);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)99);
+
+        // multiple sample buckets - all same (2)
+        for (int i = 1; i < 100; i++)
+        {
+            h.Add(i);
+            h.Add(i);
+        }
+        // double query at same val, forward, back and again
+        // stresses iterator save correctness
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)198);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.0), 1);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 50);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 50);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.6), 60);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.1), 10);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 50);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 50);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.6), 60);
+        VERIFY_ARE_EQUAL(h.GetPercentile(1.0), 99);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)198);
+
+        // multiple sample buckets - extra weights on low end shift things lower
+        for (int i = 1; i < 100; i++)
+        {
+            h.Add(i);
+
+            if (i < 50)
+            {
+                h.Add(i);
+            }
+        }
+        // double query at same val, forward, back and again
+        // stresses iterator save correctness
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)148);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.0), 1);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 37);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 37);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.6), 45);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.1), 8);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 37);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.5), 37);
+        VERIFY_ARE_EQUAL(h.GetPercentile(0.6), 45);
+        VERIFY_ARE_EQUAL(h.GetPercentile(1.0), 99);
+        VERIFY_ARE_EQUAL(h.GetSampleSize(), (unsigned)148);
     }
 
     void HistogramUnitTests::Test_GetMean()
@@ -418,8 +521,8 @@ namespace UnitTests
         // 2 group, 2 procs/group
         SystemInformation system;
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)2, (BYTE)2, (WORD)0, (KAFFINITY)0x3);
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)2, (BYTE)2, (WORD)1, (KAFFINITY)0x3);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)2, (BYTE)2, (KAFFINITY)0x3);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)1, (BYTE)2, (BYTE)2, (KAFFINITY)0x3);
 
         TimeSpan timeSpan;
         Profile profile;
@@ -436,16 +539,16 @@ namespace UnitTests
 
         // shrink active mask
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)2, (BYTE)2, (WORD)0, (KAFFINITY)0x1);
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)2, (BYTE)2, (WORD)1, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)2, (BYTE)2, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)1, (BYTE)2, (BYTE)2, (KAFFINITY)0x1);
 
         // fail assignment to inactive procs
         VERIFY_IS_FALSE(profile.Validate(true, &system));
 
         // shrink procs, still fail
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)1, (BYTE)1, (WORD)0, (KAFFINITY)0x1);
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)1, (BYTE)1, (WORD)1, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)1, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
 
         // now fail
         VERIFY_IS_FALSE(profile.Validate(true, &system));
@@ -460,7 +563,7 @@ namespace UnitTests
 
         // shrink groups
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)1, (BYTE)1, (WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
 
         // now fail
         VERIFY_IS_FALSE(profile.Validate(true, &system));
@@ -1069,5 +1172,58 @@ namespace UnitTests
                 VERIFY_IS_TRUE(false);
             }
         }
+    }
+
+    void TopologyUnitTests::Test_MaskCount()
+    {
+        ULONG kaff_bits = sizeof(KAFFINITY) * 8;
+
+        // a complete enumeration could be interesting, but a nibble is enough to test the algorithm.
+        // take the given mask and its width (ordinal distance to the upper 1), shift it through the
+        // range of KAFFINITY to verify the popcnt is correct at all positions
+        //
+        // note that unique masks have msb/lsb set for all combinations of the interior bits. we don't
+        // test "10" (0x2) as a mask, because it's not unique - its the same as the first shift-up of
+        // "1" (0x1), etc.
+
+        struct {
+            KAFFINITY mask;
+            ULONG width;
+            ULONG bits;
+        } tests[] = {      // msb ... lsb
+            { 0x1, 1, 1 }, //    1
+            { 0x3, 2, 2 }, //   11
+            { 0x5, 3, 2 }, //  101
+            { 0x7, 3, 3 }, //  111
+            { 0x9, 4, 2 }, // 1001
+            { 0xb, 4, 3 }, // 1011
+            { 0xd, 4, 3 }, // 1101
+            { 0xf, 4, 4 }  // 1111
+        };
+
+        for (const auto &test : tests)
+        {
+            KAFFINITY mask = test.mask;
+            for (ULONG i = 0; i < kaff_bits - test.width; i++)
+            {
+                VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(mask), test.bits);
+                mask <<= 1;
+            }
+        }
+
+        // ... and a few explicit true/false
+        VERIFY_ARE_NOT_EQUAL(ProcessorTopology::MaskCount(0x0), (ULONG)1);
+        VERIFY_ARE_NOT_EQUAL(ProcessorTopology::MaskCount(0x3), (ULONG)0);
+        VERIFY_ARE_NOT_EQUAL(ProcessorTopology::MaskCount(0x5), (ULONG)3);
+
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0x0), (ULONG)0);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0x3), (ULONG)2);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0x5), (ULONG)2);
+
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0xffff), (ULONG)16);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0xfeef), (ULONG)14);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0xfeef00ff), (ULONG)22);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0xfe0000ff), (ULONG)15);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0x7e0000ff), (ULONG)14);
     }
 }

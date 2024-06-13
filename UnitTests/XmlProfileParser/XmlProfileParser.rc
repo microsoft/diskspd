@@ -1,5 +1,5 @@
 #include <windows.h>
-#include "Common.h"
+#include "Version.h"
 
 DISKSPD.XSD HTML "..\\XmlProfileParser\\diskspd.xsd"
 

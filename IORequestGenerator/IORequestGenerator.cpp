@@ -437,13 +437,22 @@ __declspec(align(4)) static LONG volatile g_lGeneratorRunning = 0;  //used to de
 
 static BOOL volatile g_bError = FALSE;                              //true means there was fatal error during intialization and threads shouldn't perform their work
 
-VOID SetProcGroupMask(WORD wGroupNum, DWORD dwProcNum, PGROUP_AFFINITY pGroupAffinity)
+VOID SetProcGroupMask(WORD wGroupNum, ULONG dwProcNum, PGROUP_AFFINITY pGroupAffinity)
 {
     //must zero this structure first, otherwise it fails to set affinity
     memset(pGroupAffinity, 0, sizeof(GROUP_AFFINITY));
 
     pGroupAffinity->Group = wGroupNum;
     pGroupAffinity->Mask = (KAFFINITY)1<<dwProcNum;
+}
+
+VOID SetGroupMask(WORD wGroupNum, KAFFINITY Mask, PGROUP_AFFINITY pGroupAffinity)
+{
+    //must zero this structure first, otherwise it fails to set affinity
+    memset(pGroupAffinity, 0, sizeof(GROUP_AFFINITY));
+
+    pGroupAffinity->Group = wGroupNum;
+    pGroupAffinity->Mask = Mask;
 }
 
 /*****************************************************************************/
@@ -483,6 +492,29 @@ static void PrintVerbose(bool fVerbose, const char *format, ...)
 
     if(fVerbose )
     {
+        SYSTEMTIME now;
+        char szBuffer[64]; // enough for timestamp+null
+        int nWritten;
+
+        GetLocalTime(&now);
+
+        if (now.wYear) {
+
+            // Mimic .NET 's' sortable time pattern
+            nWritten = sprintf_s(szBuffer, _countof(szBuffer),
+                "%u-%02u-%02uT%02u:%02u:%02u",
+                now.wYear,
+                now.wMonth,
+                now.wDay,
+                now.wHour,
+                now.wMinute,
+                now.wSecond);
+            assert(nWritten && nWritten < _countof(szBuffer));
+
+            // no newline
+            printf("%s: " ,szBuffer);
+        }
+
         va_list argList;
         va_start(argList, format);
         vprintf(format, argList);
@@ -528,67 +560,80 @@ bool IORequestGenerator::_LoadDLLs()
 }
 
 /*****************************************************************************/
-bool IORequestGenerator::_GetSystemPerfInfo(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *pInfo, UINT32 uCpuCount) const
+bool IORequestGenerator::_GetSystemPerfInfo(vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION>& vSPPI, bool fVerbose) const
 {
-    NTSTATUS Status = NO_ERROR;
-    UINT32 uCpuCtr;
-    WORD wActiveGroupCtr;
-    BYTE bActiveProc;
-    HANDLE hThread = GetCurrentThread();
+    NTSTATUS Status;
+    ULONG CpuBase;
+    WORD Group;
+    WORD GroupCount;
     GROUP_AFFINITY GroupAffinity;
-    PROCESSOR_NUMBER procNumber;
-    bool fOk = true;
 
-    assert(NULL != pInfo);
-    assert(uCpuCount > 0);
-
-    for (uCpuCtr=0,wActiveGroupCtr=0; wActiveGroupCtr < g_SystemInformation.processorTopology._vProcessorGroupInformation.size(); wActiveGroupCtr++)
+    for (CpuBase = 0, Group = 0, GroupCount = (WORD) g_SystemInformation.processorTopology._vProcessorGroupInformation.size();
+         Group < GroupCount;
+         Group++)
     {
-        ProcessorGroupInformation *pGroup = &g_SystemInformation.processorTopology._vProcessorGroupInformation[wActiveGroupCtr];
+        ProcessorGroupInformation *pGroup = &g_SystemInformation.processorTopology._vProcessorGroupInformation[Group];
 
-        if (pGroup->_activeProcessorCount != 0) {
+        //
+        // Note that an inactive group is not queried (its not clear this is a practical case).
+        // Correct operation assumes the input SPPI array is prezeroed, which DISKSPD does do via
+        // default vector(size_t) construction.
+        //
 
+        if (pGroup->_activeProcessorCount != 0)
+        {
             //
-            // Affinitize to the group we're querying counters from
+            // In multigroup environments, affinitize to the group we're querying counters from.
             //
 
-            GetCurrentProcessorNumberEx(&procNumber);
-
-            if (procNumber.Group != wActiveGroupCtr)
+            if (GroupCount > 1)
             {
-                for (bActiveProc = 0; bActiveProc < pGroup->_maximumProcessorCount; bActiveProc++)
+                SetGroupMask(Group, pGroup->_activeProcessorMask, &GroupAffinity);
+                if (!SetThreadGroupAffinity(GetCurrentThread(), &GroupAffinity, nullptr))
                 {
-                    if (pGroup->IsProcessorActive(bActiveProc))
-                    {
-                        SetProcGroupMask(wActiveGroupCtr, bActiveProc, &GroupAffinity);
-                        break;
-                    }
+                    PrintError("get system perf info: failed to set affinity to Group %u\n", GroupAffinity.Group);
+                    return false;
                 }
+            }
 
-                if (bActiveProc == pGroup->_maximumProcessorCount ||
-                    SetThreadGroupAffinity(hThread, &GroupAffinity, nullptr) == FALSE)
-                {
-                    fOk = false;
-                    break;
-                }
+            //
+            // The SPPI vector should (is) always be sized to span CPUs for all groups, make this explicit.
+            //
+
+            if (CpuBase + pGroup->_activeProcessorCount > vSPPI.size())
+            {
+                PrintError("get system perf info: unable to return (base CPU %u + group active CPU %u > size %u)\n",
+                    CpuBase,
+                    pGroup->_activeProcessorCount,
+                    vSPPI.size());
+                assert(false);
+                return false;
             }
 
             Status = g_pfnNtQuerySysInfo(SystemProcessorPerformanceInformation,
-                                         (PVOID)(pInfo + uCpuCtr),
-                                         (sizeof(*pInfo) * uCpuCount) - (uCpuCtr * sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION)),
-                                         NULL);
+                                         &vSPPI[CpuBase],
+                                         sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION) * pGroup->_activeProcessorCount,
+                                         nullptr);
 
             if (!NT_SUCCESS(Status))
             {
-                fOk = false;
-                break;
+                PrintError("get system perf info: status 0x%x querying for Group %u (%u CPUs)\n",
+                    Status,
+                    Group,
+                    pGroup->_activeProcessorCount);
+                return false;
             }
+
+            PrintVerbose(fVerbose,
+                "get system perf info: queried for Group %u (%u CPUs)\n",
+                Group,
+                pGroup->_activeProcessorCount);
         }
 
-        uCpuCtr += pGroup->_maximumProcessorCount;
+        CpuBase += pGroup->_activeProcessorCount;
     }
 
-    return fOk;
+    return true;
 }
 
 VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferred, LPOVERLAPPED pOverlapped);
@@ -597,7 +642,7 @@ static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBy
 {
     OVERLAPPED *pOverlapped = pIORequest->GetOverlapped();
     Target *pTarget = pIORequest->GetCurrentTarget();
-    size_t iTarget = pTarget - &p->vTargets[0];
+    size_t iTarget = pIORequest->GetCurrentTargetIndex();
     UINT32 iRequest = pIORequest->GetRequestIndex();
     LARGE_INTEGER li;
     BOOL rslt = true;
@@ -639,7 +684,7 @@ static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBy
             li.QuadPart);
 #endif
 
-    if (p->pTimeSpan->GetMeasureLatency())
+    if (p->pTimeSpan->GetMeasureLatency() || p->pTimeSpan->GetCalculateIopsStdDev())
     {
         pIORequest->SetStartTime(PerfTimer::GetTime());
     }
@@ -718,10 +763,20 @@ static bool issueNextIO(ThreadParameters *p, IORequest *pIORequest, DWORD *pdwBy
     return (rslt) ? true : false;
 }
 
-static void completeIO(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytesTransferred)
+
+void completeIOat(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytesTransferred, UINT64 ullCompletionTime)
 {
-    Target *pTarget = pIORequest->GetCurrentTarget();
-    size_t iTarget = pTarget - &p->vTargets[0];
+    if (*p->pfAccountingOn)
+    {
+        p->pResults->vTargetResults[pIORequest->GetCurrentTargetIndex()].Add(
+            dwBytesTransferred,
+            pIORequest->GetIoType(),
+            pIORequest->GetStartTime(),
+            ullCompletionTime,
+            *(p->pullStartTime),
+            p->pTimeSpan->GetMeasureLatency(),
+            p->pTimeSpan->GetCalculateIopsStdDev());
+    }
 
     if (TraceLoggingProviderEnabled(g_hEtwProvider,
                                     TRACE_LEVEL_VERBOSE,
@@ -738,6 +793,8 @@ static void completeIO(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytes
                                   TraceLoggingLevel(TRACE_LEVEL_VERBOSE));
     }
 
+    Target *pTarget = pIORequest->GetCurrentTarget();
+
     //check if I/O transferred all of the requested bytes
     if (dwBytesTransferred != pTarget->GetBlockSizeInBytes())
     {
@@ -745,16 +802,6 @@ static void completeIO(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytes
             p->ulThreadNo,
             dwBytesTransferred,
             pTarget->GetBlockSizeInBytes());
-    }
-
-    if (*p->pfAccountingOn)
-    {
-        p->pResults->vTargetResults[iTarget].Add(dwBytesTransferred,
-            pIORequest->GetIoType(),
-            pIORequest->GetStartTime(),
-            *(p->pullStartTime),
-            p->pTimeSpan->GetMeasureLatency(),
-            p->pTimeSpan->GetCalculateIopsStdDev());
     }
 
     // check if we should print a progress dot
@@ -768,20 +815,33 @@ static void completeIO(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytes
     }
 }
 
+void completeIO(ThreadParameters *p, IORequest *pIORequest, DWORD dwBytesTransferred)
+{
+    if (p->pTimeSpan->GetMeasureLatency() || p->pTimeSpan->GetCalculateIopsStdDev())
+    {
+        completeIOat(p, pIORequest, dwBytesTransferred, PerfTimer::GetTime());
+    }
+    else
+    {
+        completeIOat(p, pIORequest, dwBytesTransferred, 0);
+    }
+}
+
 /*****************************************************************************/
 // function called from worker thread
 // performs synch I/O
 //
 static bool doWorkUsingSynchronousIO(ThreadParameters *p)
 {
-    bool fOk = true;
+    BOOL fOk = true;
     BOOL rslt = FALSE;
     DWORD dwBytesTransferred;
     size_t cIORequests = p->vIORequest.size();
 
     while(g_bRun && !g_bThreadError)
     {
-        DWORD dwMinSleepTime = ~((DWORD)0);
+        DWORD nIssued = 0;
+        DWORD dwMinSleepTime = INFINITE;
         for (size_t i = 0; i < cIORequests; i++)
         {
             IORequest *pIORequest = &p->vIORequest[i];
@@ -800,6 +860,7 @@ static bool doWorkUsingSynchronousIO(ThreadParameters *p)
                 }
             }
 
+            nIssued += 1;
             rslt = issueNextIO(p, pIORequest, &dwBytesTransferred, false);
 
             if (!rslt)
@@ -813,8 +874,9 @@ static bool doWorkUsingSynchronousIO(ThreadParameters *p)
         }
 
         // if no IOs were issued, wait for the next scheduling time
-        if (dwMinSleepTime != ~((DWORD)0) && dwMinSleepTime != 0)
+        if (!nIssued && dwMinSleepTime != INFINITE && dwMinSleepTime != 0)
         {
+            p->pResults->WaitStats.ThrottleSleep += 1;
             Sleep(dwMinSleepTime);
         }
 
@@ -831,18 +893,16 @@ cleanup:
 //
 static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletionPort)
 {
-    assert(nullptr!= p);
+    assert(nullptr != p);
     assert(nullptr != hCompletionPort);
 
-    bool fOk = true;
+    BOOL fOk = true;
     BOOL rslt = FALSE;
-    OVERLAPPED * pCompletedOvrp;
-    ULONG_PTR ulCompletionKey;
     DWORD dwBytesTransferred;
     OverlappedQueue overlappedQueue;
     size_t cIORequests = p->vIORequest.size();
+    BOOL fLatencyStats = p->pTimeSpan->GetMeasureLatency() || p->pTimeSpan->GetCalculateIopsStdDev();
 
-    //start IO operations
     for (size_t i = 0; i < cIORequests; i++)
     {
         overlappedQueue.Add(p->vIORequest[i].GetOverlapped());
@@ -851,29 +911,47 @@ static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletion
     //
     // perform work
     //
+    DWORD dwMinSleepTime = INFINITE;
+    DWORD dwWaitTime;
+
+    OVERLAPPED_ENTRY ovlEntry[16];
+    const ULONG cOvlEntryMax = _countof(ovlEntry) < (ULONG)cIORequests ? _countof(ovlEntry) : (ULONG)cIORequests;
+    ULONG cCompleted;
+    size_t cUntilThrottle = cIORequests;
+
     while(g_bRun && !g_bThreadError)
     {
-        DWORD dwMinSleepTime = ~((DWORD)0);
-        for (size_t i = 0; i < overlappedQueue.GetCount(); i++)
+        OVERLAPPED *pReadyOverlapped = overlappedQueue.Remove();
+        IORequest *pIORequest = IORequest::OverlappedToIORequest(pReadyOverlapped);
+        (void) pIORequest->GetNextTarget();
+
+        // check throttles
+        if (p->vThroughputMeters.size() != 0)
         {
-            OVERLAPPED *pReadyOverlapped = overlappedQueue.Remove();
-            IORequest *pIORequest = IORequest::OverlappedToIORequest(pReadyOverlapped);
-            Target *pTarget = pIORequest->GetNextTarget();
+            ThroughputMeter *pThroughputMeter = &p->vThroughputMeters[pIORequest->GetCurrentTargetIndex()];
 
-            if (p->vThroughputMeters.size() != 0)
+            cUntilThrottle -= 1;
+
+            DWORD dwSleepTime = pThroughputMeter->GetSleepTime();
+            if (pThroughputMeter->IsRunning() && dwSleepTime > 0)
             {
-                size_t iTarget = pTarget - &p->vTargets[0];
-                ThroughputMeter *pThroughputMeter = &p->vThroughputMeters[iTarget];
+                dwMinSleepTime = min(dwMinSleepTime, dwSleepTime);
+                overlappedQueue.Add(pReadyOverlapped);
 
-                DWORD dwSleepTime = pThroughputMeter->GetSleepTime();
-                if (pThroughputMeter->IsRunning() && dwSleepTime > 0)
+                // continue if throttle not hit
+                if (cUntilThrottle)
                 {
-                    dwMinSleepTime = min(dwMinSleepTime, dwSleepTime);
-                    overlappedQueue.Add(pReadyOverlapped);
                     continue;
                 }
-            }
 
+                // at throttle, no IO to dispatch
+                pIORequest = NULL;
+            }
+        }
+
+        // dispatch IO - skipped iff at throttle
+        if (pIORequest)
+        {
             rslt = issueNextIO(p, pIORequest, &dwBytesTransferred, false);
 
             if (!rslt && GetLastError() != ERROR_IO_PENDING)
@@ -884,26 +962,83 @@ static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletion
                 goto cleanup;
             }
 
-            if (rslt && pTarget->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
+            if (rslt && pIORequest->GetCurrentTarget()->GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
             {
                 completeIO(p, pIORequest, dwBytesTransferred);
                 overlappedQueue.Add(pReadyOverlapped);
+
+                // a completed memory mapped IO resets the throttle so that we traverse
+                // back to it in fair-order before considering throttle again.
+                // note this will drop through to lookside for completions, not wait
+                dwMinSleepTime = INFINITE;
+                cUntilThrottle = overlappedQueue.GetCount();
             }
         }
 
-        // if no IOs are in flight, wait for the next scheduling time
-        if ((overlappedQueue.GetCount() == p->vIORequest.size()) && dwMinSleepTime != ~((DWORD)0))
+        // look for IO completion
+        // queue is fully dispatched: set wait, reset throttle wait
+        if (!overlappedQueue.GetCount())
         {
-            Sleep(dwMinSleepTime);
+            assert(!cUntilThrottle);
+            dwWaitTime = dwMinSleepTime = INFINITE;
+            p->pResults->WaitStats.Wait += 1;
         }
 
-        // wait till one of the IO operations finishes
-        if (GetQueuedCompletionStatus(hCompletionPort, &dwBytesTransferred, &ulCompletionKey, &pCompletedOvrp, 1) != 0)
+        // queue is not fully dispatched ...
+        // if at the throttle, wait throttle time and reset
+        else if (!cUntilThrottle)
         {
-            //find which I/O operation it was (so we know to which buffer should we use)
-            IORequest *pIORequest = IORequest::OverlappedToIORequest(pCompletedOvrp);
-            completeIO(p, pIORequest, dwBytesTransferred);
-            overlappedQueue.Add(pCompletedOvrp);
+            dwWaitTime = dwMinSleepTime;
+            dwMinSleepTime = INFINITE;
+            cUntilThrottle = overlappedQueue.GetCount();
+
+            if (cIORequests == cUntilThrottle)
+            {
+                // all throttled, none dispatched - just sleep
+                p->pResults->WaitStats.ThrottleSleep += 1;
+                Sleep(dwWaitTime);
+                continue;
+            }
+            else
+            {
+                // throttled, but some dispatched - wait for completions
+                p->pResults->WaitStats.ThrottleWait += 1;
+            }
+        }
+
+        // queue is not fully dispatched ...
+        // if this run is not for latency stats, optimize for dispatch and
+        // skip completion lookasides
+        else if (!fLatencyStats)
+        {
+            continue;
+        }
+
+        // else lookaside
+        else
+        {
+            dwWaitTime = 0;
+            p->pResults->WaitStats.Lookaside += 1;
+        }
+
+        if (GetQueuedCompletionStatusEx(hCompletionPort, ovlEntry, cOvlEntryMax, &cCompleted, dwWaitTime, FALSE) != 0)
+        {
+            UINT64 ullCompletionTime = 0;
+
+            if (fLatencyStats)
+            {
+                // single completion time estimate for all completions
+                ullCompletionTime = PerfTimer::GetTime();
+            }
+
+            for (ULONG i = 0; i < cCompleted; i++)
+            {
+                completeIOat(p, IORequest::OverlappedToIORequest(ovlEntry[i].lpOverlapped), ovlEntry[i].dwNumberOfBytesTransferred, ullCompletionTime);
+                overlappedQueue.Add(ovlEntry[i].lpOverlapped);
+            }
+
+            // must reevaluate queue in fair order before next throttle
+            cUntilThrottle = overlappedQueue.GetCount();
         }
         else
         {
@@ -914,6 +1049,12 @@ static bool doWorkUsingIOCompletionPorts(ThreadParameters *p, HANDLE hCompletion
                 fOk = false;
                 goto cleanup;
             }
+        }
+
+        // stats for lookaside waits
+        if (dwWaitTime == 0)
+        {
+            p->pResults->WaitStats.LookasideCompletion[cCompleted < _countof(p->pResults->WaitStats.LookasideCompletion) ? cCompleted : _countof(p->pResults->WaitStats.LookasideCompletion) - 1] += 1;
         }
     } // end work loop
 
@@ -930,7 +1071,6 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
     assert(NULL != pOverlapped);
 
     BOOL rslt = FALSE;
-
     ThreadParameters *p = (ThreadParameters *)pOverlapped->hEvent;
 
     assert(NULL != p);
@@ -949,14 +1089,12 @@ VOID CALLBACK fileIOCompletionRoutine(DWORD dwErrorCode, DWORD dwBytesTransferre
     // start a new IO operation
     if (g_bRun && !g_bThreadError)
     {
-        Target *pTarget = pIORequest->GetNextTarget();
-        size_t iTarget = pTarget - &p->vTargets[0];
-
+        (void) pIORequest->GetNextTarget();
         rslt = issueNextIO(p, pIORequest, NULL, true);
 
         if (!rslt)
         {
-            PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, iTarget, (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
+            PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, pIORequest->GetCurrentTargetIndex(), (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
             goto cleanup;
         }
     }
@@ -975,19 +1113,19 @@ static bool doWorkUsingCompletionRoutines(ThreadParameters *p)
     bool fOk = true;
     BOOL rslt = FALSE;
 
-    //start IO operations
+    // start IO operations
+    // completion routines will reissue 1:1
     UINT32 cIORequests = (UINT32)p->vIORequest.size();
 
-    for (size_t iIORequest = 0; iIORequest < cIORequests; iIORequest++) {
-        IORequest *pIORequest = &p->vIORequest[iIORequest];
-        Target *pTarget = pIORequest->GetNextTarget();
-        size_t iTarget = pTarget - &p->vTargets[0];
+    for (size_t i = 0; i < cIORequests; i++)
+    {
+        IORequest *pIORequest = &p->vIORequest[i];
 
         rslt = issueNextIO(p, pIORequest, NULL, true);
 
         if (!rslt)
         {
-            PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, iTarget, (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
+            PrintError("t[%u:%u] error during %s error code: %u)\n", p->ulThreadNo, pIORequest->GetCurrentTargetIndex(), (pIORequest->GetIoType() == IOOperation::ReadIO ? "read" : "write"), GetLastError());
             fOk = false;
             goto cleanup;
         }
@@ -1090,7 +1228,7 @@ DWORD WINAPI threadFunc(LPVOID cookie)
     {
         GROUP_AFFINITY GroupAffinity;
 
-        PrintVerbose(p->pProfile->GetVerbose(), "affinitizing thread %u to Group %u / CPU %u\n", p->ulThreadNo, p->wGroupNum, p->bProcNum);
+        PrintVerbose(p->pProfile->GetVerbose(), "thread %u: affinitizing to Group %u / CPU %u\n", p->ulThreadNo, p->wGroupNum, p->bProcNum);
         SetProcGroupMask(p->wGroupNum, p->bProcNum, &GroupAffinity);
 
         HANDLE hThread = GetCurrentThread();
@@ -1327,21 +1465,25 @@ DWORD WINAPI threadFunc(LPVOID cookie)
                 fOk = false;
                 goto cleanup;
             }
+        }
 
-            PrintVerbose(p->pProfile->GetVerbose(), "thread %u starting: file '%s' relative thread %u",
+        PrintVerbose(p->pProfile->GetVerbose(), "thread %u: file '%s' relative thread %u (random seed: %u)\n",
+            p->ulThreadNo,
+            pTarget->GetPath().c_str(),
+            p->ulRelativeThreadNo,
+            p->ulRandSeed);
+
+        if (pTarget->GetRandomRatio() > 0)
+        {
+            PrintVerbose(p->pProfile->GetVerbose(), "thread %u: %u%% random IO\n",
                 p->ulThreadNo,
-                pTarget->GetPath().c_str(),
-                p->ulRelativeThreadNo);
-
-            if (pTarget->GetRandomRatio() > 0)
-            {
-                PrintVerbose(p->pProfile->GetVerbose(), ", %u% random pattern\n",
-                    pTarget->GetRandomRatio());
-            }
-            else
-            {
-                PrintVerbose(p->pProfile->GetVerbose(), ", %ssequential file offset\n", pTarget->GetUseInterlockedSequential() ? "interlocked ":"");
-            }
+                pTarget->GetRandomRatio());
+        }
+        else
+        {
+            PrintVerbose(p->pProfile->GetVerbose(), "thread %u: %ssequential IO\n",
+                p->ulThreadNo,
+                pTarget->GetUseInterlockedSequential() ? "interlocked ":"");
         }
 
         // allocate memory for a data buffer
@@ -1401,8 +1543,6 @@ DWORD WINAPI threadFunc(LPVOID cookie)
 
     // TODO: copy parameters for better memory locality?
     // TODO: tell the main thread we're ready
-
-    PrintVerbose(p->pProfile->GetVerbose(), "thread %u started (random seed: %u)\n", p->ulThreadNo, p->ulRandSeed);
 
     p->pResults->vTargetResults.clear();
     p->pResults->vTargetResults.resize(p->vTargets.size());
@@ -2093,14 +2233,13 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //
     // allocate memory for performance counters
     //
-    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfInit(g_SystemInformation.processorTopology._ulProcCount);
-    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfDone(g_SystemInformation.processorTopology._ulProcCount);
-    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfDiff(g_SystemInformation.processorTopology._ulProcCount);
+    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfInit(g_SystemInformation.processorTopology._ulProcessorCount);
+    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfDone(g_SystemInformation.processorTopology._ulProcessorCount);
+    vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION> vPerfDiff(g_SystemInformation.processorTopology._ulProcessorCount);
 
     //
-    //create start event
+    // create start event
     //
-
     hStartEvent = CreateEvent(NULL, TRUE, FALSE, "");
     if (NULL == hStartEvent)
     {
@@ -2252,7 +2391,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
 
         //Set thread group and proc affinity
 
-        // Default: Round robin cores in order of groups, starting at group 0.
+        // Default: Round robin cpus in order of groups, starting at group 0.
         //          Fill each group before moving to next.
         if (vAffinity.size() == 0)
         {
@@ -2313,7 +2452,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     BOOL bBreak = FALSE;
     PEVENT_TRACE_PROPERTIES pETWSession = NULL;
 
-    PrintVerbose(profile.GetVerbose(), "starting warm up...\n");
     //
     // send start signal
     //
@@ -2332,6 +2470,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     {
         TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> WarmActivity;
         TraceLoggingWriteStart(WarmActivity, "Warm Up");
+        PrintVerbose(profile.GetVerbose(), "starting warm up for %us...\n", timeSpan.GetWarmup());
 
         if (bSynchStop)
         {
@@ -2382,8 +2521,6 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             PrintVerbose(profile.GetVerbose(), "tracing events\n");
         }
 
-        PrintVerbose(profile.GetVerbose(), "starting measurements...\n");
-
         //
         // notify the front-end that the test is about to start;
         // do it before starting timing in order not to perturb measurements
@@ -2396,7 +2533,7 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         //
         // read performance counters
         //
-        if (_GetSystemPerfInfo(&vPerfInit[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
+        if (_GetSystemPerfInfo(vPerfInit, profile.GetVerbose()) == FALSE)
         {
             PrintError("Error reading performance counters\n");
             _StopETW(fUseETW, hTraceSession);
@@ -2407,13 +2544,11 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> RunActivity;
         TraceLoggingWriteStart(RunActivity, "Run Time");
 
+        PrintVerbose(profile.GetVerbose(), "starting measurements for %us...\n", timeSpan.GetDuration());
+
         //get cycle count (it will be used to calculate actual work time)
         ullStartTime = PerfTimer::GetTime();
-
-#pragma warning( push )
-#pragma warning( disable : 28931 )
         fAccountingOn = true;
-#pragma warning( pop )
 
         assert(timeSpan.GetDuration() > 0);
         if (bSynchStop)
@@ -2434,14 +2569,14 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
             Sleep(1000 * timeSpan.GetDuration());
         }
 
-        fAccountingOn = false;
-
         //get cycle count and perf counters
+        fAccountingOn = false;
         ullTimeDiff = PerfTimer::GetTime() - ullStartTime;
+        PrintVerbose(profile.GetVerbose(), "stopped measurements, total measured time %.2lfs...\n", PerfTimer::PerfTimeToSeconds(ullTimeDiff));
 
         TraceLoggingWriteStop(RunActivity, "Run Time");
 
-        if (_GetSystemPerfInfo(&vPerfDone[0], g_SystemInformation.processorTopology._ulProcCount) == FALSE)
+        if (_GetSystemPerfInfo(vPerfDone, profile.GetVerbose()) == FALSE)
         {
             PrintError("Error getting performance counters\n");
             _StopETW(fUseETW, hTraceSession);
@@ -2477,11 +2612,11 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
         ullTimeDiff = 0; // mark that no test was run
     }
 
-    PrintVerbose(profile.GetVerbose(), "starting cool down...\n");
     if ((timeSpan.GetCooldown() > 0) && !bBreak)
     {
         TraceLoggingActivity<g_hEtwProvider, DISKSPD_TRACE_INFO, TRACE_LEVEL_NONE> CoolActivity;
         TraceLoggingWriteStart(CoolActivity, "Cool Down");
+        PrintVerbose(profile.GetVerbose(), "starting cool down for %us...\n", timeSpan.GetCooldown());
 
         if (bSynchStop)
         {
@@ -2553,21 +2688,51 @@ bool IORequestGenerator::_GenerateRequestsForTimeSpan(const Profile& profile, co
     //
     // compute time spent by each cpu
     //
-    for (unsigned int p = 0; p < g_SystemInformation.processorTopology._ulProcCount; ++p)
+    for (DWORD p = 0; p < g_SystemInformation.processorTopology._ulProcessorCount; ++p)
     {
         assert(vPerfDone[p].IdleTime.QuadPart >= vPerfInit[p].IdleTime.QuadPart);
         assert(vPerfDone[p].KernelTime.QuadPart >= vPerfInit[p].KernelTime.QuadPart);
         assert(vPerfDone[p].UserTime.QuadPart >= vPerfInit[p].UserTime.QuadPart);
-        assert(vPerfDone[p].Reserved1[0].QuadPart >= vPerfInit[p].Reserved1[0].QuadPart);
-        assert(vPerfDone[p].Reserved1[1].QuadPart >= vPerfInit[p].Reserved1[1].QuadPart);
-        assert(vPerfDone[p].Reserved2 >= vPerfInit[p].Reserved2);
 
         vPerfDiff[p].IdleTime.QuadPart = vPerfDone[p].IdleTime.QuadPart - vPerfInit[p].IdleTime.QuadPart;
         vPerfDiff[p].KernelTime.QuadPart = vPerfDone[p].KernelTime.QuadPart - vPerfInit[p].KernelTime.QuadPart;
         vPerfDiff[p].UserTime.QuadPart = vPerfDone[p].UserTime.QuadPart - vPerfInit[p].UserTime.QuadPart;
-        vPerfDiff[p].Reserved1[0].QuadPart = vPerfDone[p].Reserved1[0].QuadPart - vPerfInit[p].Reserved1[0].QuadPart;
-        vPerfDiff[p].Reserved1[1].QuadPart = vPerfDone[p].Reserved1[1].QuadPart - vPerfInit[p].Reserved1[1].QuadPart;
-        vPerfDiff[p].Reserved2 = vPerfDone[p].Reserved2 - vPerfInit[p].Reserved2;
+
+        //
+        // Handle clock measurement jitter; if the difference is negative, set it to 0. This is usually seen
+        // as a -10000000 (full second of 100ns units) difference over very short runs.
+        //
+        // If the sum of kernel and user time is 0, treat it as a full idle with placeholder values. This provides
+        // a nonzero denominator for the CPU utilization calculation and avoids divide by zero -> INF results.
+        // Note that system clock convention is that kernel time includes idle time.
+        //
+
+        if (vPerfDiff[p].IdleTime.QuadPart < 0)
+        {
+            PrintVerbose(profile.GetVerbose(), "time fixup: IdleTime < 0 @ %u : ticks %lld - %lld\n", p, vPerfDone[p].IdleTime.QuadPart, vPerfInit[p].IdleTime.QuadPart);
+            vPerfDiff[p].IdleTime.QuadPart = 0;
+        }
+
+        if (vPerfDiff[p].KernelTime.QuadPart < 0)
+        {
+            PrintVerbose(profile.GetVerbose(), "time fixup: KernelTime < 0 @ %u : ticks %lld - %lld\n", p, vPerfDone[p].KernelTime.QuadPart, vPerfInit[p].KernelTime.QuadPart);
+            vPerfDiff[p].KernelTime.QuadPart = 0;
+        }
+
+        if (vPerfDiff[p].UserTime.QuadPart < 0)
+        {
+            PrintVerbose(profile.GetVerbose(), "time fixup: UserTime < 0 @ %u : ticks %lld - %lld\n", p, vPerfDone[p].UserTime.QuadPart, vPerfInit[p].UserTime.QuadPart);
+            vPerfDiff[p].UserTime.QuadPart = 0;
+        }
+
+        if (vPerfDiff[p].KernelTime.QuadPart + vPerfDiff[p].UserTime.QuadPart == 0)
+        {
+            PrintVerbose(profile.GetVerbose(), "time fixup: KernelTime+UserTime = 0 @ %u : ticks K (%lld - %lld) + U (%lld - %lld)\n", p,
+                vPerfDone[p].KernelTime.QuadPart, vPerfInit[p].KernelTime.QuadPart,
+                vPerfDone[p].UserTime.QuadPart,   vPerfInit[p].UserTime.QuadPart);
+
+            vPerfDiff[p].IdleTime.QuadPart = vPerfDiff[p].KernelTime.QuadPart = 1;
+        }
     }
 
     //
