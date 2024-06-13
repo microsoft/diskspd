@@ -157,34 +157,40 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
 
     printf(
         "Valid targets:\n"
-        "       file_path\n"
-        "       #<physical drive number>\n"
-        "       <drive_letter>:\n"
+        "     file_path\n"
+        "     #<physical drive number>\n"
+        "     <drive_letter>:\n"
+        "\n"
+        "Sizes, offsets and lengths are specified as integer bytes, or with an\n"
+        "optional suffix of KMGT (KiB/MiB/GiB/TiB) or b (for blocks, see -b).\n"
+        "Examples: 4k = 4096\n"
+        "          with -b4k, 8b = 32768 (8 * 4KiB)\n"
         "\n"
         "Available options:\n"
         "  -?                    display usage information\n"
-        "  -ag                   group affinity - affinitize threads round-robin to cores in Processor Groups 0 - n.\n"
-        "                          Group 0 is filled before Group 1, and so forth.\n"
+        "  -:<flags>             experimental behaviors, as a bitmask of flags. current:\n"
+        "                          1 - allow throughput rate limit sleeps >1ms if indicated by rate\n"
+        "  -ag                   group affinity - threads assigned round-robin to CPUs by processor groups, 0 - n.\n"
+        "                          Groups are filled from lowest to highest processor before moving to the next.\n"
         "                          [default; use -n to disable default affinity]\n"
-        "  -ag#,#[,#,...]>       advanced CPU affinity - affinitize threads round-robin to the CPUs provided. The g# notation\n"
-        "                          specifies Processor Groups for the following CPU core #s. Multiple Processor Groups\n"
-        "                          may be specified, and groups/cores may be repeated. If no group is specified, 0 is assumed.\n"
-        "                          Additional groups/processors may be added, comma separated, or on separate parameters.\n"
+        "  -a[g#,]#[,#,...]>     advanced CPU affinity -  threads assigned round-robin to the CPUs stated, in order of\n"
+        "                          specification; g# is the processor group for the following CPUs. If no group is\n"
+        "                          stated, 0 is default. Additional groups/processors can be added, comma separated,\n"
+        "                          on the same or separate -a parameters.\n"
         "                          Examples: -a0,1,2 and -ag0,0,1,2 are equivalent.\n"
-        "                                    -ag0,0,1,2,g1,0,1,2 specifies the first three cores in groups 0 and 1.\n"
-        "                                    -ag0,0,1,2 -ag1,0,1,2 is equivalent.\n"
-        "  -b<size>[KMGT]        block size in bytes or KiB/MiB/GiB/TiB [default=64K]\n"
-        "  -B<offs>[KMGTb]       base target offset in bytes or KiB/MiB/GiB/TiB/blocks [default=0]\n"
-        "                          (offset from the beginning of the file)\n"
-        "  -c<size>[KMGTb]       create files of the given size.\n"
-        "                          Size can be stated in bytes or KiB/MiB/GiB/TiB/blocks\n"
+        "                                    -ag0,0,1,2,g1,0,1,2 specifies the first three CPUs in groups 0 and 1.\n"
+        "                                    -ag0,0,1,2,g1,0,1,2 and -ag0,0,1,2 -ag1,0,1,2 are equivalent.\n"
+        "  -b<size>              IO size, defines the block \'b\' for sizes stated in units of blocks [default=64K]\n"
+        "  -B<base>[:length]     bounds; specify range of target to issue IO to - base offset and length\n"
+        "                          (default: IO is issued across the entire target)\n"
+        "  -c<size>              create file targets of the given size. Conflicts with non-file target specifications.\n"
         "  -C<seconds>           cool down time - duration of the test after measurements finished [default=0s].\n"
         "  -D<milliseconds>      Capture IOPs statistics in intervals of <milliseconds>; these are per-thread\n"
         "                          per-target: text output provides IOPs standard deviation, XML provides the full\n"
         "                          IOPs time series in addition. [default=1000, 1 second].\n"
         "  -d<seconds>           duration (in seconds) to run test [default=10s]\n"
-        "  -f<size>[KMGTb]       target size - use only the first <size> bytes or KiB/MiB/GiB/TiB/blocks of the file/disk/partition,\n"
-        "                          for example to test only the first sectors of a disk\n"
+        "  -f<size>              maximum target offset to issue IO to (non-inclusive); -Bbase -f(base+length) is the same\n"
+        "                         as -Bbase:length. For example, to test only the first sectors of a disk.\n"
         "  -f<rst>               open file with one or more additional access hints\n"
         "                          r : the FILE_FLAG_RANDOM_ACCESS hint\n"
         "                          s : the FILE_FLAG_SEQUENTIAL_SCAN hint\n"
@@ -216,7 +222,7 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "                          (ignored if -r is specified, makes sense only with -o2 or greater)\n"
         "  -P<count>             enable printing a progress dot after each <count> [default=65536]\n"
         "                          completed I/O operations, counted separately by each thread \n"
-        "  -r[align[KMGTb]]      random I/O aligned to <align> in bytes/KiB/MiB/GiB/TiB/blocks (overrides -s)\n"
+        "  -r[align]             random I/O aligned to [align] byte offsets within the target range (overrides -s)\n"
         "                          [default alignment=block size (-b)]\n"
         "  -rd<dist>[params]     specify an non-uniform distribution for random IO in the target\n"
         "                          [default uniformly random]\n"
@@ -234,22 +240,21 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "                                   next 10GiB, 5%% IO in the next 20GiB and the remaining 5%% of IO in the remaining\n"
         "                                   capacity of the target. If the target is only 20G, the distribution truncates at\n"
         "                                   90/10G:0:10G and all IO is directed to the first 10G (equivalent to -f10G).\n"
-        "  -rs<percentage>       percentage of requests which should be issued randomly. When used, -r may be used to\n"
-        "                          specify IO alignment (applies to both the random and sequential portions of the load).\n"
-        "                          Sequential IO runs will be homogeneous if a mixed ratio is specified (-w), and run\n"
-        "                          lengths will follow a geometric distribution based on the percentage split.\n"
+        "  -rs<percentage>       percentage of requests which should be issued randomly; -r is used to specify IO alignment.\n"
+        "                          Sequential IO runs are homogeneous when a mixed r/w ratio is specified (-w) and their lengths\n"
+        "                          follow a geometric distribution based on the percentage (chance of next IO being sequential).\n"
         "  -R[p]<text|xml>       output format. With the p prefix, the input profile (command line or XML) is validated and\n"
         "                          re-output in the specified format without running load, useful for checking or building\n"
         "                          complex profiles.\n"
         "                          [default: text]\n"
-        "  -s[i][align[KMGTb]]   stride size of <align> in bytes/KiB/MiB/GiB/TiB/blocks, alignment/offset between operations\n"
+        "  -s[i][align]          stride size of [align] bytes, alignment & offset between operations\n"
         "                          [default=non-interlocked, default alignment=block size (-b)]\n"
-        "                          By default threads track independent sequential IO offsets starting at offset 0 of the target.\n"
+        "                          By default threads track independent sequential IO offsets starting at base offset of the target.\n"
         "                          With multiple threads this results in threads overlapping their IOs - see -T to divide\n"
         "                          them into multiple separate sequential streams on the target.\n"
         "                          With the optional i qualifier (-si) threads interlock on a shared sequential offset.\n"
         "                          Interlocked operations may introduce overhead but make it possible to issue a single\n"
-        "                          sequential stream to a target which responds faster than a one thread can drive.\n"
+        "                          sequential stream to a target which responds faster than one thread can drive.\n"
         "                          (ignored if -r specified, -si conflicts with -p, -rs and -T)\n"
         "  -S[bhmruw]            control caching behavior [default: caching is enabled, no writethrough]\n"
         "                          non-conflicting flags may be combined in any order; ex: -Sbw, -Suw, -Swu\n"
@@ -262,20 +267,21 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "  -Sw                   enable writethrough (no hardware write caching), equivalent to FILE_FLAG_WRITE_THROUGH or\n"
         "                          non-temporal writes for memory mapped I/O (-Sm)\n"
         "  -t<count>             number of threads per target (conflicts with -F)\n"
-        "  -T<offs>[KMGTb]       starting stride between I/O operations performed on the same target by different threads\n"
-        "                          [default=0] (starting offset = base file offset + (thread number * <offs>)\n"
-        "                          only applies with #threads > 1\n"
-        "  -v                    verbose mode\n"
+        "  -T<offs>              starting separation between I/O operations performed on the same target by different threads\n"
+        "                          [default=0] (starting offset = base target offset + (thread number * <offs>)\n"
+        "                          only applies to -s sequential IO with #threads > 1, conflicts with -r and -si\n"
+        "  -v[s]                 verbose mode - with s, only provide additional summary statistics\n"
         "  -w<percentage>        percentage of write requests (-w and -w0 are equivalent and result in a read-only workload).\n"
         "                        absence of this switch indicates 100%% reads\n"
         "                          IMPORTANT: a write test will destroy existing data without a warning\n"
         "  -W<seconds>           warm up time - duration of the test before measurements start [default=5s]\n"
         "  -x                    use completion routines instead of I/O Completion Ports\n"
-        "  -X<filepath>          use an XML file to configure the workload. Combine with -R, -v and -z to override profile defaults.\n"
+        "  -X<filepath>          use an XML file to configure the workload. Profile defaults for -W/d/C (durations) and -R/v/z\n"
+        "                          (output format, verbosity and random seed) may be overriden by direct specification.\n"
         "                          Targets can be defined in XML profiles as template paths of the form *<integer> (*1, *2, ...).\n"
         "                          When run, specify the paths to substitute for the template paths in order on the command line.\n"
         "                          The first specified target is *1, second is *2, and so on.\n"
-        "                          Example: diskspd -Xprof.xml first.bin second.bin (prof.xml using *1 and *2)\n"
+        "                          Example: diskspd -d60 -Xprof.xml first.bin second.bin (prof.xml using *1 and *2, 60s run)\n"
         "  -z[seed]              set random seed [with no -z, seed=0; with plain -z, seed is based on system run time]\n"
         "\n"
         "Write buffers:\n"
@@ -283,10 +289,10 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "  -Zr                   per IO random buffers used for write tests - this incurrs additional run-time\n"
         "                         overhead to create random content and shouln't be compared to results run\n"
         "                         without -Zr\n"
-        "  -Z<size>[KMGb]        use a <size> buffer filled with random data as a source for write operations.\n"
-        "  -Z<size>[KMGb],<file> use a <size> buffer filled with data from <file> as a source for write operations.\n"
+        "  -Z<size>              use a <size> buffer filled with random data as a source for write operations.\n"
+        "  -Z<size>,<file>       use a <size> buffer filled with data from <file> as a source for write operations.\n"
         "\n"
-        "  By default, the write buffers are filled with a repeating pattern (0, 1, 2, ..., 255, 0, 1, ...)\n"
+        "  By default, write source buffers are filled with a repeating pattern (0, 1, 2, ..., 255, 0, 1, ...)\n"
         "\n"
         "Synchronization:\n"
         "  -ys<eventname>     signals event <eventname> before starting the actual run (no warmup)\n"
@@ -475,12 +481,12 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
             {
                 fOk = false;
             }
-            // have a parsed core number
+            // have a parsed CPU number
             else
             {
                 if (nNum > MAXBYTE)
                 {
-                    fprintf(stderr, "ERROR: core %u is out of range\n", nNum);
+                    fprintf(stderr, "ERROR: CPU %u is out of range\n", nNum);
                     fOk = false;
                 }
                 else
@@ -514,7 +520,7 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
 
     if (fOk && nNum > MAXBYTE)
     {
-        fprintf(stderr, "ERROR: core %u is out of range\n", nNum);
+        fprintf(stderr, "ERROR: CPU %u is out of range\n", nNum);
         fOk = false;
     }
 
@@ -537,7 +543,7 @@ bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
 
     if (fOk)
     {
-        // fprintf(stderr, "FINAL parsed group %d core %d\n", nGroup, nNum);
+        // fprintf(stderr, "FINAL parsed group %d CPU %d\n", nGroup, nNum);
         pTimeSpan->AddAffinityAssignment((WORD)nGroup, (BYTE)nNum);
     }
 
@@ -732,15 +738,18 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
     ParseState isXMLResultFormat = ParseState::Unknown;
     ParseState isProfileOnly = ParseState::Unknown;
     ParseState isVerbose = ParseState::Unknown;
+    ParseState isVerboseStats = ParseState::Unknown;
     ParseState isRandomSeed = ParseState::Unknown;
     ParseState isWarmupTime = ParseState::Unknown;
     ParseState isDurationTime = ParseState::Unknown;
     ParseState isCooldownTime = ParseState::Unknown;
+    ParseState isExperimentFlags = ParseState::Unknown;
 
     ULONG randomSeedValue = 0;
     ULONG warmupTime = 0;
     ULONG durationTime = 0;
     ULONG cooldownTime = 0;
+    ULONG experimentFlags = 0;
     const char *xmlProfile = nullptr;
 
     //
@@ -780,6 +789,13 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             switch(args[i][1])
             {
 
+
+            case ':':
+                // Experiment flags
+                experimentFlags = atoi(arg);
+                isExperimentFlags = ParseState::True;
+                break;
+
             case 'b':
 
                 // Block size does not compose with XML profile spec
@@ -793,9 +809,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     UINT64 ullBlockSize;
                     if (_GetSizeInBytes(arg, ullBlockSize, nullptr) && ullBlockSize < MAXUINT32)
                     {
-                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        for (auto &i : vTargets)
                         {
-                            i->SetBlockSizeInBytes((DWORD)ullBlockSize);
+                            i.SetBlockSizeInBytes((DWORD)ullBlockSize);
                         }
                     }
                     else
@@ -896,7 +912,19 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
             case 'v':
 
-                isVerbose = ParseState::True;
+                if (*arg == '\0')
+                {
+                    isVerbose = ParseState::True;
+                }
+                else if (*arg == 's' && *(arg+1) == '\0') // -vs
+                {
+                    isVerboseStats = ParseState::True;
+                }
+                else
+                {
+                    fprintf(stderr, "ERROR: invalid verbose mode (-v): '%s'\n", arg);
+                    return false;
+                }
                 break;
 
             case 'X':
@@ -984,6 +1012,16 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         pProfile->SetVerbose(true);
     }
 
+    if (isVerboseStats == ParseState::True)
+    {
+        pProfile->SetVerboseStats(true);
+    }
+
+    if (isExperimentFlags == ParseState::True)
+    {
+        g_ExperimentFlags = experimentFlags;
+    }
+
     //
     // Apply timespan common composable parameters
     //
@@ -1025,6 +1063,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
     MemoryMappedIoMode m = MemoryMappedIoMode::Undefined;
     MemoryMappedIoFlushMode f = MemoryMappedIoFlushMode::Undefined;
 
+    // seen base/max target offset specification yet?
+    ParseState isMaxTargetOffset = ParseState::Unknown;
+    ParseState isBaseTargetOffset = ParseState::Unknown;
+
     bool bExit = false;
     while (nParamCnt)
     {
@@ -1047,7 +1089,11 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             _DisplayUsageInfo(argv[0]);
             exit(0);
 
-        case 'a':    //affinity
+        case ':': // experiment flags
+            // handled during composable parameter evaluation
+            break;
+
+        case 'a': // affinity
             //-a1,2,3,4 (assign threads to cpus 1,2,3,4 (round robin))
             if (!_ParseAffinity(arg, &timeSpan))
             {
@@ -1056,24 +1102,75 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             break;
 
         case 'b':    //block size
-            // nop - block size has been taken care of before the loop
+            // handled during composable parameter evaluation
             break;
 
-        case 'B':    //base file offset (offset from the beginning of the file)
+        case 'B':    //base target offset (offset from 0) and optional length
             if (*(arg + 1) != '\0')
             {
-                UINT64 cb;
-                if (_GetSizeInBytes(arg + 1, cb, nullptr))
+                UINT64 base;
+                UINT64 len;
+                const char *rest;
+
+                if (isBaseTargetOffset == ParseState::True)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    fprintf(stderr, "ERROR: base target offset (-Bbase[:length]) can only be specified once\n");
+                    fError = true;
+                    break;
+                }
+
+                if (_GetSizeInBytes(arg + 1, base, &rest))
+                {
+                    for (auto &i : vTargets)
                     {
-                        i->SetBaseFileOffsetInBytes(cb);
+                        i.SetBaseFileOffsetInBytes(base);
                     }
+
+                    isBaseTargetOffset = ParseState::True;
                 }
                 else
                 {
-                    fprintf(stderr, "ERROR: invalid base file offset passed to -B\n");
+                    fprintf(stderr, "ERROR: invalid base target offset passed to -B\n");
                     fError = true;
+                    break;
+                }
+
+                if (rest && *rest != '\0')
+                {
+                    if (*rest != ':')
+                    {
+                        fprintf(stderr, "ERROR: unexpected characters after -Bbase; use \':\' to separate -Bbase:length\n");
+                        fError = true;
+                        break;
+                    }
+
+                    if (*(++rest) == '\0')
+                    {
+                        fprintf(stderr, "ERROR: -Bbase:length - no length provided\n");
+                        fError = true;
+                        break;
+                    }
+
+                    if (isMaxTargetOffset == ParseState::True)
+                    {
+                        fprintf(stderr, "ERROR: maximum target offset (-Bbase:length or -fsize) can only be specified once\n");
+                        fError = true;
+                        break;
+                    }
+
+                    if (!_GetSizeInBytes(rest, len, nullptr) || base + len < base)
+                    {
+                        fprintf(stderr, "ERROR: invalid target length passed to -B\n");
+                        fError = true;
+                        break;
+                    }
+
+                    for (auto &i : vTargets)
+                    {
+                        i.SetMaxFileSize(base + len);
+                    }
+
+                    isMaxTargetOffset = ParseState::True;
                 }
             }
             else
@@ -1088,15 +1185,15 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 UINT64 cb;
                 if (_GetSizeInBytes(arg + 1, cb, nullptr))
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetFileSize(cb);
-                        i->SetCreateFile(true);
+                        i.SetFileSize(cb);
+                        i.SetCreateFile(true);
                     }
                 }
                 else
                 {
-                    fprintf(stderr, "ERROR: invalid file size passed to -c\n");
+                    fprintf(stderr, "ERROR: invalid target size passed to -c\n");
                     fError = true;
                 }
             }
@@ -1106,10 +1203,12 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             }
             break;
 
-        case 'C':    //cool down time - pass 1 composable
+        case 'C':    //cool down time
+            // handled during composable parameter evaluation
             break;
 
-        case 'd':    //duration - pass 1 composable
+        case 'd':    //duration
+            // handled during composable parameter evaluation
             break;
 
         case 'D':    //standard deviation
@@ -1132,59 +1231,67 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             break;
 
         case 'f':
+            if ('\0' == *(arg + 1))
+            {
+                fError = true;
+                break;
+            }
+
+            // max target offset form?
             if (isdigit(*(arg + 1)))
             {
                 UINT64 cb;
-                if (_GetSizeInBytes(arg + 1, cb, nullptr))
+
+                if (isMaxTargetOffset == ParseState::True)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
-                    {
-                        i->SetMaxFileSize(cb);
-                    }
-                }
-                else
-                {
-                    fprintf(stderr, "ERROR: invalid max file size passed to -f\n");
+                    fprintf(stderr, "ERROR: maximum target offset (-Bbase:length or -fsize) can only be specified once\n");
                     fError = true;
+                    break;
                 }
+
+                if (!_GetSizeInBytes(arg + 1, cb, nullptr))
+                {
+                    fprintf(stderr, "ERROR: invalid max target size passed to -f\n");
+                    fError = true;
+                    break;
+                }
+
+                for (auto &i : vTargets)
+                {
+                    i.SetMaxFileSize(cb);
+                }
+
+                isMaxTargetOffset = ParseState::True;
+                break;
             }
-            else
+
+            // while -frs (or -fsr) are generally conflicting intentions as far as
+            // the OS is concerned, do not enforce
+            while (*(++arg) != '\0')
             {
-                if ('\0' == *(arg + 1))
+                switch (*arg)
                 {
-                    fError = true;
-                }
-                else
-                {
-                    // while -frs (or -fsr) are generally conflicting intentions as far as
-                    // the OS is concerned, do not enforce
-                    while (*(++arg) != '\0')
+                case 'r':
+                    for (auto &i : vTargets)
                     {
-                        switch (*arg)
-                        {
-                        case 'r':
-                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
-                            {
-                                i->SetRandomAccessHint(true);
-                            }
-                            break;
-                        case 's':
-                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
-                            {
-                                i->SetSequentialScanHint(true);
-                            }
-                            break;
-                        case 't':
-                            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
-                            {
-                                i->SetTemporaryFileHint(true);
-                            }
-                            break;
-                        default:
-                            fError = true;
-                            break;
-                        }
+                        i.SetRandomAccessHint(true);
                     }
+                    break;
+                case 's':
+                    for (auto &i : vTargets)
+                    {
+                        i.SetSequentialScanHint(true);
+                    }
+                    break;
+                case 't':
+                    for (auto &i : vTargets)
+                    {
+                        i.SetTemporaryFileHint(true);
+                    }
+                    break;
+                default:
+                    fError = true;
+                    break;
                 }
             }
             break;
@@ -1222,15 +1329,15 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     int c = atoi(arg + 1);
                     if (c > 0)
                     {
-                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        for (auto &i : vTargets)
                         {
                             if (isBpms)
                             {
-                                i->SetThroughput(c);
+                                i.SetThroughput(c);
                             }
                             else
                             {
-                                i->SetThroughputIOPS(c);
+                                i.SetThroughputIOPS(c);
                             }
                         }
                     }
@@ -1261,10 +1368,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetBurstSize(c);
-                        i->SetUseBurstSize(true);
+                        i.SetBurstSize(c);
+                        i.SetUseBurstSize(true);
                     }
                 }
                 else
@@ -1279,10 +1386,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetThinkTime(c);
-                        i->SetEnableThinkTime(true);
+                        i.SetThinkTime(c);
+                        i.SetEnableThinkTime(true);
                     }
                 }
                 else
@@ -1298,9 +1405,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 if (x > 0 && x < 4)
                 {
                     PRIORITY_HINT hint[] = { IoPriorityHintVeryLow, IoPriorityHintLow, IoPriorityHintNormal };
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetIOPriorityHint(hint[x - 1]);
+                        i.SetIOPriorityHint(hint[x - 1]);
                     }
                 }
                 else
@@ -1311,9 +1418,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             break;
 
         case 'l':    //large pages
-            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+            for (auto &i : vTargets)
             {
-                i->SetUseLargePages(true);
+                i.SetUseLargePages(true);
             }
             break;
 
@@ -1337,9 +1444,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetRequestCount(c);
+                        i.SetRequestCount(c);
                     }
                 }
                 else
@@ -1365,9 +1472,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'p':    //start async IO operations with the same offset
             //makes sense only for -o2 and greater
-            for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+            for (auto &i : vTargets)
             {
-                i->SetUseParallelAsyncIO(true);
+                i.SetUseParallelAsyncIO(true);
             }
             break;
 
@@ -1406,12 +1513,12 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     }
                     if (!fError)
                     {
-                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        for (auto &i : vTargets)
                         {
                             // if random ratio is unset and actual alignment is already specified,
                             // -s was used: don't allow this for clarity of intent
-                            if (!i->GetRandomRatio() &&
-                                i->GetBlockAlignmentInBytes(true))
+                            if (!i.GetRandomRatio() &&
+                                i.GetBlockAlignmentInBytes(true))
                             {
                                 fprintf(stderr, "ERROR: use -r to specify IO alignment when using mixed random/sequential IO (-rs)\n");
                                 fError = true;
@@ -1419,8 +1526,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                             }
                             // if random ratio was already set to something other than 100% (-r)
                             // then -rs was specified multiple times: catch and block this
-                            if (i->GetRandomRatio() &&
-                                i->GetRandomRatio() != 100)
+                            if (i.GetRandomRatio() &&
+                                i.GetRandomRatio() != 100)
                             {
                                 fprintf(stderr, "ERROR: mixed random/sequential IO (-rs) specified multiple times\n");
                                 fError = true;
@@ -1432,7 +1539,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                             // Saying -rs0 (sequential) would create an ambiguity between that and -r[nnn]. Rather
                             // than bend the intepretation of -r[nnn] for the special case of -rs0 we will error
                             // it out in the bounds check above.
-                            i->SetRandomRatio(c);
+                            i.SetRandomRatio(c);
                         }
                     }
                 }
@@ -1463,41 +1570,42 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     }
                     if (!fError)
                     {
-                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        for (auto &i : vTargets)
                         {
                             // Do not override -rs specification
-                            if (!i->GetRandomRatio())
+                            if (!i.GetRandomRatio())
                             {
-                                i->SetRandomRatio(100);
+                                i.SetRandomRatio(100);
                             }
                             // Multiple -rNN?
                             // Note that -rs100 -r[NN] will pass since -rs does not set alignment.
                             // We are only validating a single -rNN specification.
-                            else if (i->GetRandomRatio() == 100 &&
-                                     i->GetBlockAlignmentInBytes(true))
+                            else if (i.GetRandomRatio() == 100 &&
+                                     i.GetBlockAlignmentInBytes(true))
                             {
                                 fprintf(stderr, "ERROR: random IO (-r) specified multiple times\n");
                                 fError = true;
                                 break;
                             }
                             // -s already set the alignment?
-                            if (i->GetBlockAlignmentInBytes(true))
+                            if (i.GetBlockAlignmentInBytes(true))
                             {
                                 fprintf(stderr, "ERROR: sequential IO (-s) conflicts with random IO (-r/-rs)\n");
                                 fError = true;
                                 break;
                             }
-                            i->SetBlockAlignmentInBytes(cb);
+                            i.SetBlockAlignmentInBytes(cb);
                         }
                     }
                 }
             }
             break;
 
-        case 'R':   // output profile/results format engine - handled in pass 1
+        case 'R':   // output profile/results format engine
+            // handled during composable parameter evaluation
             break;
 
-        case 's':    //stride size
+        case 's':   //stride size
             {
                 int idx = 1;
 
@@ -1507,20 +1615,20 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     // ISSUE-REVIEW: this does nothing if -r is specified
                     // ISSUE-REVIEW: this does nothing if -p is specified
                     // ISSUE-REVIEW: this does nothing if we are single-threaded
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetUseInterlockedSequential(true);
+                        i.SetUseInterlockedSequential(true);
                     }
 
                     idx++;
                 }
 
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                for (auto &i : vTargets)
                 {
                     // conflict -s with -rs/-s
-                    if (i->GetRandomRatio())
+                    if (i.GetRandomRatio())
                     {
-                        if (i->GetRandomRatio() == 100) {
+                        if (i.GetRandomRatio() == 100) {
                             fprintf(stderr, "ERROR: sequential IO (-s) conflicts with random IO (-r/-rs)\n");
                         }
                         else
@@ -1532,7 +1640,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     }
 
                     // conflict with multiple -s
-                    if (i->GetBlockAlignmentInBytes(true))
+                    if (i.GetBlockAlignmentInBytes(true))
                     {
                         fprintf(stderr, "ERROR: sequential IO (-s) specified multiple times\n");
                         fError = true;
@@ -1547,9 +1655,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     // The counter-case of -r0 is invalid and checked for.
                     if (_GetSizeInBytes(arg + idx, cb, nullptr))
                     {
-                        for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                        for (auto &i : vTargets)
                         {
-                            i->SetBlockAlignmentInBytes(cb);
+                            i.SetBlockAlignmentInBytes(cb);
                         }
                     }
                     else
@@ -1562,9 +1670,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 {
                     // explicitly pass through the block size so that we can detect
                     // -rs/-s intent conflicts when attempting to set -rs
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetBlockAlignmentInBytes(i->GetBlockSizeInBytes());
+                        i.SetBlockAlignmentInBytes(i.GetBlockSizeInBytes());
                     }
                 }
             }
@@ -1680,9 +1788,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 int c = atoi(arg + 1);
                 if (c > 0)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetThreadsPerFile(c);
+                        i.SetThreadsPerFile(c);
                     }
                 }
                 else
@@ -1697,9 +1805,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 UINT64 cb;
                 if (_GetSizeInBytes(arg + 1, cb, nullptr) && (cb > 0))
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetThreadStrideInBytes(cb);
+                        i.SetThreadStrideInBytes(cb);
                     }
                 }
                 else
@@ -1710,7 +1818,8 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             }
             break;
 
-        case 'v':    //verbose mode - handled in pass 1
+        case 'v':    //verbose mode
+            // handled during composable parameter evaluation
             break;
 
         case 'w':    //write test [default=read]
@@ -1733,15 +1842,16 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 }
                 if (!fError)
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetWriteRatio(c);
+                        i.SetWriteRatio(c);
                     }
                 }
             }
             break;
 
-        case 'W':    //warm up time - pass 1 composable
+        case 'W':    //warm up time
+            // handled during composable parameter evaluation
             break;
 
         case 'x':    //completion routines
@@ -1811,15 +1921,16 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 fError = true;
             }
 
-        case 'z':    //random seed - pass 1 composable
+        case 'z':    //random seed
+            // handled during composable parameter evaluation
             break;
 
         case 'Z':    //zero write buffers
             if (*(arg + 1) == '\0')
             {
-                for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                for (auto &i : vTargets)
                 {
-                    i->SetZeroWriteBuffers(true);
+                    i.SetZeroWriteBuffers(true);
                 }
             }
             else if (*(arg + 1) == 'r' && *(arg + 2) == '\0')
@@ -1832,10 +1943,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 string sPath;
                 if (_GetRandomDataWriteBufferData(string(arg + 1), cb, sPath) && (cb > 0))
                 {
-                    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+                    for (auto &i : vTargets)
                     {
-                        i->SetRandomDataWriteBufferSize(cb);
-                        i->SetRandomDataWriteBufferSourcePath(sPath);
+                        i.SetRandomDataWriteBufferSize(cb);
+                        i.SetRandomDataWriteBufferSourcePath(sPath);
                     }
                 }
                 else
@@ -1878,30 +1989,30 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
     }
 
     // apply resultant cache/writethrough/memory mapped io modes to the targets
-    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+    for (auto &i : vTargets)
     {
         if (t != TargetCacheMode::Undefined)
         {
-            i->SetCacheMode(t);
+            i.SetCacheMode(t);
         }
         if (w != WriteThroughMode::Undefined)
         {
-            i->SetWriteThroughMode(w);
+            i.SetWriteThroughMode(w);
         }
         if (m != MemoryMappedIoMode::Undefined)
         {
-            i->SetMemoryMappedIoMode(m);
+            i.SetMemoryMappedIoMode(m);
         }
         if (f != MemoryMappedIoFlushMode::Undefined)
         {
-            i->SetMemoryMappedIoFlushMode(f);
+            i.SetMemoryMappedIoFlushMode(f);
         }
     }
 
     // ... and apply targets to the timespan
-    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
+    for (auto &i : vTargets)
     {
-        timeSpan.AddTarget(*i);
+        timeSpan.AddTarget(i);
     }
     pProfile->AddTimeSpan(timeSpan);
 

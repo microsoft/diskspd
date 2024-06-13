@@ -52,29 +52,28 @@ namespace UnitTests
         double fTime = 120.0;
         results.ullTimeCount = PerfTimer::SecondsToPerfTime(fTime);
 
-        // First group has 1 core
-        SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION systemProcessorInfo = {};
+        // First group has 1 active cpu
+        // 30% user, 45% idle, 25% non-idle kernel (45% + 25% = 70%)
+        SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION systemProcessorInfo = { 0 };
         systemProcessorInfo.UserTime.QuadPart = static_cast<LONGLONG>(fTime * 30 * 100000);
         systemProcessorInfo.IdleTime.QuadPart = static_cast<LONGLONG>(fTime * 45 * 100000);
         systemProcessorInfo.KernelTime.QuadPart = static_cast<LONGLONG>(fTime * 70 * 100000);
         results.vSystemProcessorPerfInfo.push_back(systemProcessorInfo);
 
-        // Second group has a maximum of 4 cores with 2 active
-        SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION zeroSystemProcessorInfo = { 0 };
-        zeroSystemProcessorInfo.UserTime.QuadPart = static_cast<LONGLONG>(fTime * 0 * 100000);
-        zeroSystemProcessorInfo.IdleTime.QuadPart = static_cast<LONGLONG>(fTime * 100 * 100000);
-        zeroSystemProcessorInfo.KernelTime.QuadPart = static_cast<LONGLONG>(fTime * 100 * 100000);
-        results.vSystemProcessorPerfInfo.push_back(zeroSystemProcessorInfo);
-        results.vSystemProcessorPerfInfo.push_back(zeroSystemProcessorInfo);
-        results.vSystemProcessorPerfInfo.push_back(zeroSystemProcessorInfo);
-        results.vSystemProcessorPerfInfo.push_back(zeroSystemProcessorInfo);
-        
+        // Second group has 2 active
+        // 100% idle
+        systemProcessorInfo.UserTime.QuadPart = static_cast<LONGLONG>(fTime * 0 * 100000);
+        systemProcessorInfo.IdleTime.QuadPart = static_cast<LONGLONG>(fTime * 100 * 100000);
+        systemProcessorInfo.KernelTime.QuadPart = static_cast<LONGLONG>(fTime * 100 * 100000);
+        results.vSystemProcessorPerfInfo.push_back(systemProcessorInfo);
+        results.vSystemProcessorPerfInfo.push_back(systemProcessorInfo);
+
         // TODO: multiple target cases, full profile/result variations
         target.SetPath("testfile1.dat");
         target.SetCacheMode(TargetCacheMode::DisableOSCache);
         target.SetWriteThroughMode(WriteThroughMode::On);
         target.SetThroughputIOPS(1000);
-        
+
         timeSpan.AddTarget(target);
         timeSpan.SetCalculateIopsStdDev(true);
 
@@ -106,32 +105,41 @@ namespace UnitTests
         vector<Results> vResults;
         vResults.push_back(results);
 
-        // just throw away the computername and reset the timestamp - for the ut, it's
-        // as useful (and simpler) to verify statics as anything else.  Reconstruct
-        // processor topo to a fixed example as well.
+        // Just throw away the computername, pp and reset the timestamp - for the ut, it's
+        // as useful (and simpler) to verify statics as anything else. Reconstruct the
+        // processor topo to a fixed example as well. Note that the performance
+        // efficiency class must be placed since it is calculated on the fly during
+        // the actual GLPIEx enumeration. If we could shim GLPIEx ...
         SystemInformation system;
         system.ResetTime();
         system.sComputerName.clear();
-        system.processorTopology._ulProcCount = 5;
-        system.processorTopology._ulActiveProcCount = 3;
+        system.sActivePolicyName.clear();
+        system.sActivePolicyGuid.clear();
+
+        system.processorTopology._ulProcessorCount = 3;
+        system.processorTopology._ubPerformanceEfficiencyClass = 1;
+        system.processorTopology._fSMT = true;
 
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)1, (BYTE)1, (WORD)0, (KAFFINITY)0x1);
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)4, (BYTE)2, (WORD)1, (KAFFINITY)0x6);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)1, (BYTE)4, (BYTE)2, (KAFFINITY)0x3);
 
+        ProcessorNumaInformation node;
+        node._nodeNumber = 0;
+        node._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        node._vProcessorMasks.emplace_back((WORD)1, (KAFFINITY)0x3);
         system.processorTopology._vProcessorNumaInformation.clear();
-        system.processorTopology._vProcessorNumaInformation.emplace_back((DWORD)0, (WORD)0, (KAFFINITY)0x1);
-        system.processorTopology._vProcessorNumaInformation.emplace_back((DWORD)1, (WORD)1, (KAFFINITY)0x6);
+        system.processorTopology._vProcessorNumaInformation.push_back(node);
 
         ProcessorSocketInformation socket;
         socket._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
-        socket._vProcessorMasks.emplace_back((WORD)1, (KAFFINITY)0x6);
+        socket._vProcessorMasks.emplace_back((WORD)1, (KAFFINITY)0x3);
         system.processorTopology._vProcessorSocketInformation.clear();
         system.processorTopology._vProcessorSocketInformation.push_back(socket);
 
-        system.processorTopology._vProcessorHyperThreadInformation.clear();
-        system.processorTopology._vProcessorHyperThreadInformation.emplace_back((WORD)0, (KAFFINITY)0x1);
-        system.processorTopology._vProcessorHyperThreadInformation.emplace_back((WORD)1, (KAFFINITY)0x6);
+        system.processorTopology._vProcessorCoreInformation.clear();
+        system.processorTopology._vProcessorCoreInformation.emplace_back((WORD)0, (KAFFINITY)0x1, (BYTE)0);
+        system.processorTopology._vProcessorCoreInformation.emplace_back((WORD)1, (KAFFINITY)0x3, (BYTE)1);
 
         // finally, add the timespan to the profile and dump.
         profile.AddTimeSpan(timeSpan);
@@ -150,17 +158,20 @@ namespace UnitTests
             "      <VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n"
             "    </Tool>\n"
             "    <RunTime></RunTime>\n"
-            "    <ProcessorTopology>\n"
+            "    <PowerScheme Name=\"\" Guid=\"\"/>\n"
+            "    <ProcessorTopology Heterogeneous=\"true\">\n"
             "      <Group Group=\"0\" MaximumProcessors=\"1\" ActiveProcessors=\"1\" ActiveProcessorMask=\"0x1\"/>\n"
-            "      <Group Group=\"1\" MaximumProcessors=\"4\" ActiveProcessors=\"2\" ActiveProcessorMask=\"0x6\"/>\n"
-            "      <Node Node=\"0\" Group=\"0\" Processors=\"0x1\"/>\n"
-            "      <Node Node=\"1\" Group=\"1\" Processors=\"0x6\"/>\n"
-            "      <Socket>\n"
-            "        <Group Group=\"0\" Processors=\"0x1\"/>\n"
-            "        <Group Group=\"1\" Processors=\"0x6\"/>\n"
+            "      <Group Group=\"1\" MaximumProcessors=\"4\" ActiveProcessors=\"2\" ActiveProcessorMask=\"0x3\"/>\n"
+            "      <Node Node=\"0\">\n"
+            "        <Group Group=\"0\" Mask=\"0x1\"/>\n"
+            "        <Group Group=\"1\" Mask=\"0x3\"/>\n"
+            "      </Node>\n"
+            "      <Socket Socket=\"0\">\n"
+            "        <Group Group=\"0\" Mask=\"0x1\"/>\n"
+            "        <Group Group=\"1\" Mask=\"0x3\"/>\n"
             "      </Socket>\n"
-            "      <HyperThread Group=\"0\" Processors=\"0x1\"/>\n"
-            "      <HyperThread Group=\"1\" Processors=\"0x6\"/>\n"
+            "      <Core Group=\"0\" Core=\"0\" Mask=\"0x1\" EfficiencyClass=\"0\"/>\n"
+            "      <Core Group=\"1\" Core=\"0\" Mask=\"0x3\" EfficiencyClass=\"1\"/>\n"
             "    </ProcessorTopology>\n"
             "  </System>\n"
             "  <Profile>\n"
@@ -217,7 +228,11 @@ namespace UnitTests
             "    <ProcCount>3</ProcCount>\n"
             "    <CpuUtilization>\n"
             "      <CPU>\n"
+            "        <Socket>0</Socket>\n"
+            "        <Node>0</Node>\n"
             "        <Group>0</Group>\n"
+            "        <Core>0</Core>\n"
+            "        <EfficiencyClass>0</EfficiencyClass>\n"
             "        <Id>0</Id>\n"
             "        <UsagePercent>55.00</UsagePercent>\n"
             "        <UserPercent>30.00</UserPercent>\n"
@@ -225,16 +240,24 @@ namespace UnitTests
             "        <IdlePercent>45.00</IdlePercent>\n"
             "      </CPU>\n"
             "      <CPU>\n"
+            "        <Socket>0</Socket>\n"
+            "        <Node>0</Node>\n"
             "        <Group>1</Group>\n"
-            "        <Id>1</Id>\n"
+            "        <Core>0</Core>\n"
+            "        <EfficiencyClass>1</EfficiencyClass>\n"
+            "        <Id>0</Id>\n"
             "        <UsagePercent>0.00</UsagePercent>\n"
             "        <UserPercent>0.00</UserPercent>\n"
             "        <KernelPercent>0.00</KernelPercent>\n"
             "        <IdlePercent>100.00</IdlePercent>\n"
             "      </CPU>\n"
             "      <CPU>\n"
+            "        <Socket>0</Socket>\n"
+            "        <Node>0</Node>\n"
             "        <Group>1</Group>\n"
-            "        <Id>2</Id>\n"
+            "        <Core>0</Core>\n"
+            "        <EfficiencyClass>1</EfficiencyClass>\n"
+            "        <Id>1</Id>\n"
             "        <UsagePercent>0.00</UsagePercent>\n"
             "        <UserPercent>0.00</UserPercent>\n"
             "        <KernelPercent>0.00</KernelPercent>\n"
@@ -411,9 +434,9 @@ namespace UnitTests
         target.SetPath("testfile1.dat");
         target.SetCacheMode(TargetCacheMode::DisableOSCache);
         target.SetWriteThroughMode(WriteThroughMode::On);
-        
+
         // Base case - no limit
- 
+
         nWritten = sprintf_s(pszExpectedOutput, sizeof(pszExpectedOutput),
                              pcszOutputTemplate, "", "0");
         VERIFY_IS_GREATER_THAN(nWritten, 0);
@@ -428,7 +451,7 @@ namespace UnitTests
         VERIFY_IS_GREATER_THAN(nWritten, 0);
         sResults = target.GetXml(0);
         VERIFY_ARE_EQUAL(sResults, pszExpectedOutput);
- 
+
         // BPMS - not specified with units in output
 
         target.SetThroughput(1000);

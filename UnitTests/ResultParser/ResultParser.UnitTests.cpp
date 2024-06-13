@@ -92,10 +92,31 @@ namespace UnitTests
         SystemInformation system;
         system.sComputerName.clear();
         system.ResetTime();
-        system.processorTopology._ulProcCount = 1;
-        system.processorTopology._ulActiveProcCount = 1;
-        system.processorTopology._vProcessorGroupInformation[0]._maximumProcessorCount = 1;
-        system.processorTopology._vProcessorGroupInformation[0]._activeProcessorCount = 1;
+
+        // and power plan
+        system.sActivePolicyName.clear();
+        system.sActivePolicyGuid.clear();
+
+        system.processorTopology._ulProcessorCount = 1;
+        system.processorTopology._ubPerformanceEfficiencyClass = 0;
+        system.processorTopology._fSMT = false;
+
+        system.processorTopology._vProcessorGroupInformation.clear();
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
+
+        ProcessorNumaInformation node;
+        node._nodeNumber = 0;
+        node._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorNumaInformation.clear();
+        system.processorTopology._vProcessorNumaInformation.push_back(node);
+
+        ProcessorSocketInformation socket;
+        socket._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorSocketInformation.clear();
+        system.processorTopology._vProcessorSocketInformation.push_back(socket);
+
+        system.processorTopology._vProcessorCoreInformation.clear();
+        system.processorTopology._vProcessorCoreInformation.emplace_back((WORD)0, (KAFFINITY)0x1, (BYTE)0);
 
         // finally, add the timespan to the profile and dump.
         profile.AddTimeSpan(timeSpan);
@@ -122,18 +143,26 @@ namespace UnitTests
             "\tcomputer name: \n"
             "\tstart time: \n"
             "\n"
+            "\tcpu count:\t\t1\n"
+            "\tcore count:\t\t1\n"
+            "\tgroup count:\t\t1\n"
+            "\tnode count:\t\t1\n"
+            "\tsocket count:\t\t1\n"
+            "\theterogeneous cores:\tn\n"
+            "\n"
+            "\tactive power scheme:\t\n"
+            "\n"
             "Results for timespan 1:\n"
             "*******************************************************************************\n"
             "\n"
             "actual test time:\t120.00s\n"
             "thread count:\t\t1\n"
-            "proc count:\t\t1\n"
             "\n"
-            "CPU |  Usage |  User  |  Kernel |  Idle\n"
-            "-------------------------------------------\n"
-            "   0|  55.00%|  30.00%|   25.00%|  45.00%\n"
-            "-------------------------------------------\n"
-            "avg.|  55.00%|  30.00%|   25.00%|  45.00%\n"
+            "CPU |  Usage |  User  | Kernel |  Idle\n"
+            "----------------------------------------\n"
+            "   0|  55.00%|  30.00%|  25.00%|  45.00%\n"
+            "----------------------------------------\n"
+            "avg.|  55.00%|  30.00%|  25.00%|  45.00%\n"
             "\n"
             "Total IO\n"
             "thread |       bytes     |     I/Os     |    MiB/s   |  I/O per s | IopsStdDev |  file\n"
@@ -732,7 +761,7 @@ namespace UnitTests
             TargetResults targetResults;
 
             targetResults.vDistributionRange = tts._vDistributionRange;
-            
+
             targetResults.sPath = "testfile.dat";
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
@@ -769,7 +798,7 @@ namespace UnitTests
             TargetResults targetResults;
 
             targetResults.vDistributionRange = tts._vDistributionRange;
-            
+
             targetResults.sPath = "testfile.dat";
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
@@ -847,7 +876,7 @@ namespace UnitTests
     {
         // the first matches the corresponding IORequestGenerator effdist UT
         ResultParser parser;
- 
+
         Target target;
         target.SetBlockAlignmentInBytes(4*KB);
         target.SetBlockSizeInBytes(4*KB);

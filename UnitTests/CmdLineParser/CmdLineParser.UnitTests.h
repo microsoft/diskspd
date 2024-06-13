@@ -85,6 +85,7 @@ namespace UnitTests
         TEST_METHOD(TestParseCmdLineEtwUseSystemTimer);
         TEST_METHOD(TestParseCmdLineGroupAffinity);
         TEST_METHOD(TestParseCmdLineHintFlag);
+        TEST_METHOD(TestParseCmdLineBaseMaxTarget);
         TEST_METHOD(TestParseCmdLineInterlockedSequential);
         TEST_METHOD(TestParseCmdLineInterlockedSequentialWithStride);
         TEST_METHOD(TestParseCmdLineIOPriority);

@@ -17,6 +17,27 @@ What's New?
 
 ## DISKSPD
 
+# DISKSPD 2.2 6/3/2024
+
+**NOTE:** changes to the asynchronous IO loop will require rebaselining results with queue depths greater than 1.
+The new design drains the completion queue more aggressively, shrinking delays that impacted latency measurement
+especially on faster storage targeting higher queue depths. Latency measurement is improved at a very small cost
+to rates, as well as improving rates when latency measurement is not used (`-D` or `-L`) due to batch dequeue.
+
+Smaller IO sizes will see the most change.
+
+* New: Socket, NUMA, Core and Power Efficiency Class (big/little cores) added to processor topology reporting (XML and text output)
+  * topology elements only displayed in text results when > 1 are present (e.g. multi-socket systems)
+  * CPU numbering remains group relative, as is the new Core numbering
+  * highest Power Efficiency Class is marked with a `P` suffix (this will usually be `1P` v. `0`)
+  * **NOTE**: efficiency classes can have major impact; work on heterogenous systems **must** be aware of core properties in combination thread affinity rules (see `-a` and `-n `)
+* New: active power scheme reporting
+* New: base target offset switch now allows range specification: `-Bbase[:length]`; replaces `-B` and `-f`
+* post-run latency histogram processing now significantly faster
+* verbose output is more consistent; includes actual warmup, measured and cooldown intervals v. expected
+
+Binary release supports down to Windows 8 and Windows Server 2012; now uses the Universal CRT.
+
 # DISKSPD 2.1 7/1/2021
 
 * New `-g<n>i` form allowing throughput limit specification in units of IOPS (per specified blocksize)

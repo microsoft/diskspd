@@ -654,6 +654,161 @@ namespace UnitTests
         VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
     }
 
+    void CmdLineParserUnitTests::TestParseCmdLineBaseMaxTarget()
+    {
+        CmdLineParser p;
+        struct Synchronization s = {};
+
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo testfile.dat") == 0);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
+
+            vector<Target> vTargets(vSpans[0].GetTargets());
+            VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
+
+            // defaults = 0
+            const auto& t(vTargets[0]);
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), (UINT64) 0);
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), (UINT64) 0);
+        }
+
+        {
+            // base 5MiB
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -B5m testfile.dat") == 0);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
+
+            vector<Target> vTargets(vSpans[0].GetTargets());
+            VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
+
+            const auto& t(vTargets[0]);
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), (UINT64)(5 * 1024 * 1024));
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), (UINT64) 0);
+        }
+
+        {
+            // base 5MiB, length 1MiB -> 6MiB
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:1m", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -B5m:1m testfile.dat") == 0);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
+
+            vector<Target> vTargets(vSpans[0].GetTargets());
+            VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
+
+            const auto& t(vTargets[0]);
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), (UINT64)(5 * 1024 * 1024));
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), (UINT64)(6 * 1024 * 1024));
+        }
+
+        {
+            // base 5MiB, max 6MiB
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m", "-f6m", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -B5m -f6m testfile.dat") == 0);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
+
+            vector<Target> vTargets(vSpans[0].GetTargets());
+            VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
+
+            const auto& t(vTargets[0]);
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), (UINT64)(5 * 1024 * 1024));
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), (UINT64)(6 * 1024 * 1024));
+        }
+
+        {
+            // cannot specify -f/-Bb:l together
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:1m", "-f6m", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // cannot specify -B twice (2x b:l)
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:1m", "-B5m:1m", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // cannot specify -B twice (b:l and b)
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:1m", "-B5m", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // cannot specify -B twice (b and b)
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m", "-B5m", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // cannot specify -f twice (f and f)
+            Profile profile;
+            const char *argv[] = { "foo", "-f5m", "-f6m", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // cannot specify max twice (b:l and f)
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:1m", "-f6m", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // junk after -Bbase
+            Profile profile;
+            const char *argv[] = { "foo", "-B5mx", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // sep but no length
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // sep but junk length
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:j", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // sep but bad length spec
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:1x", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+
+        {
+            // sep but extra after length spec
+            Profile profile;
+            const char *argv[] = { "foo", "-B5m:1mx", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+        }
+    }
+
     void CmdLineParserUnitTests::TestParseCmdLineHintFlag()
     {
         CmdLineParser p;

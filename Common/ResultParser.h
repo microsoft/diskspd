@@ -61,6 +61,7 @@ private:
     void _PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fUseRequestsPerFile, bool fCompletionRoutines);
     void _PrintDistribution(DistributionType dT, const vector<DistributionRange>& v, char* spc);
     void _PrintEffectiveDistributions(const Results& results);
+    void _PrintWaitStats(const Results& result);
 
     string _sResult;
 

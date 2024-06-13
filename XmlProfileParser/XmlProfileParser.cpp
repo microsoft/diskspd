@@ -85,7 +85,7 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, vector<
     assert(hSchemaXml != NULL);
     LPVOID pSchemaXml = LockResource(hSchemaXml);
     assert(pSchemaXml != NULL);
-    
+
     // convert from utf-8 produced by the xsd authoring tool to utf-16
     int cchSchemaXml = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)pSchemaXml, -1, NULL, 0);
 	vector<WCHAR> vWideSchemaXml(cchSchemaXml);
@@ -202,6 +202,26 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, vector<
 
         if (SUCCEEDED(hr))
         {
+            bool b;
+            hr = _GetBool(spXmlDoc, "//Profile/VerboseStats", &b);
+            if (SUCCEEDED(hr) && (hr != S_FALSE))
+            {
+                pProfile->SetVerboseStats(b);
+            }
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            DWORD i;
+            hr = _GetDWORD(spXmlDoc, "//Profile/ExperimentFlags", &i);
+            if (SUCCEEDED(hr) && (hr != S_FALSE))
+            {
+                g_ExperimentFlags = i;
+            }
+        }
+
+        if (SUCCEEDED(hr))
+        {
             DWORD i;
             hr = _GetDWORD(spXmlDoc, "//Profile/Progress", &i);
             if (SUCCEEDED(hr) && (hr != S_FALSE))
@@ -265,7 +285,7 @@ bool XmlProfileParser::ParseFile(const char *pszPath, Profile *pProfile, vector<
         // Generate an error for each unused substitution.
         //
 
-        if (SUCCEEDED(hr))        
+        if (SUCCEEDED(hr))
         {
             for (size_t i = 1; i <= vSubsts.size(); ++i)
             {
@@ -661,7 +681,7 @@ HRESULT XmlProfileParser::_ParseTargets(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSp
                     }
                     if (SUCCEEDED(hr))
                     {
-                        pTimeSpan->AddTarget(target);    
+                        pTimeSpan->AddTarget(target);
                     }
                 }
 
@@ -773,7 +793,7 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
             pTarget->SetBlockSizeInBytes(dwBlockSize);
         }
     }
-    
+
     if (SUCCEEDED(hr))
     {
         bool fInterlockedSequential;
@@ -1299,10 +1319,10 @@ HRESULT XmlProfileParser::_ParseDistribution(IXMLDOMNode *pXmlNode, Target *pTar
                 }
 
                 if (SUCCEEDED(hr) && (hr != S_FALSE))
-                {                    
+                {
                     pTarget->SetDistributionRange(v, type.t);
                 }
-                     
+
                 // if we parsed into the element, we are done (success or failure) - only one type is possible.
                 return hr;
             }
@@ -1393,7 +1413,7 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, T
                         if (SUCCEEDED(hr)) {
                             pTimeSpan->AddAffinityAssignment((WORD)dwGroup, (BYTE)dwProc);
                         }
-                        
+
                     }
                 }
             }

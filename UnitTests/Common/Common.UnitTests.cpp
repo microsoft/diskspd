@@ -521,8 +521,8 @@ namespace UnitTests
         // 2 group, 2 procs/group
         SystemInformation system;
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)2, (BYTE)2, (WORD)0, (KAFFINITY)0x3);
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)2, (BYTE)2, (WORD)1, (KAFFINITY)0x3);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)2, (BYTE)2, (KAFFINITY)0x3);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)1, (BYTE)2, (BYTE)2, (KAFFINITY)0x3);
 
         TimeSpan timeSpan;
         Profile profile;
@@ -539,16 +539,16 @@ namespace UnitTests
 
         // shrink active mask
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)2, (BYTE)2, (WORD)0, (KAFFINITY)0x1);
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)2, (BYTE)2, (WORD)1, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)2, (BYTE)2, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)1, (BYTE)2, (BYTE)2, (KAFFINITY)0x1);
 
         // fail assignment to inactive procs
         VERIFY_IS_FALSE(profile.Validate(true, &system));
 
         // shrink procs, still fail
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)1, (BYTE)1, (WORD)0, (KAFFINITY)0x1);
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)1, (BYTE)1, (WORD)1, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)1, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
 
         // now fail
         VERIFY_IS_FALSE(profile.Validate(true, &system));
@@ -563,7 +563,7 @@ namespace UnitTests
 
         // shrink groups
         system.processorTopology._vProcessorGroupInformation.clear();
-        system.processorTopology._vProcessorGroupInformation.emplace_back((BYTE)1, (BYTE)1, (WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
 
         // now fail
         VERIFY_IS_FALSE(profile.Validate(true, &system));
@@ -1172,5 +1172,58 @@ namespace UnitTests
                 VERIFY_IS_TRUE(false);
             }
         }
+    }
+
+    void TopologyUnitTests::Test_MaskCount()
+    {
+        ULONG kaff_bits = sizeof(KAFFINITY) * 8;
+
+        // a complete enumeration could be interesting, but a nibble is enough to test the algorithm.
+        // take the given mask and its width (ordinal distance to the upper 1), shift it through the
+        // range of KAFFINITY to verify the popcnt is correct at all positions
+        //
+        // note that unique masks have msb/lsb set for all combinations of the interior bits. we don't
+        // test "10" (0x2) as a mask, because it's not unique - its the same as the first shift-up of
+        // "1" (0x1), etc.
+
+        struct {
+            KAFFINITY mask;
+            ULONG width;
+            ULONG bits;
+        } tests[] = {      // msb ... lsb
+            { 0x1, 1, 1 }, //    1
+            { 0x3, 2, 2 }, //   11
+            { 0x5, 3, 2 }, //  101
+            { 0x7, 3, 3 }, //  111
+            { 0x9, 4, 2 }, // 1001
+            { 0xb, 4, 3 }, // 1011
+            { 0xd, 4, 3 }, // 1101
+            { 0xf, 4, 4 }  // 1111
+        };
+
+        for (const auto &test : tests)
+        {
+            KAFFINITY mask = test.mask;
+            for (ULONG i = 0; i < kaff_bits - test.width; i++)
+            {
+                VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(mask), test.bits);
+                mask <<= 1;
+            }
+        }
+
+        // ... and a few explicit true/false
+        VERIFY_ARE_NOT_EQUAL(ProcessorTopology::MaskCount(0x0), (ULONG)1);
+        VERIFY_ARE_NOT_EQUAL(ProcessorTopology::MaskCount(0x3), (ULONG)0);
+        VERIFY_ARE_NOT_EQUAL(ProcessorTopology::MaskCount(0x5), (ULONG)3);
+
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0x0), (ULONG)0);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0x3), (ULONG)2);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0x5), (ULONG)2);
+
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0xffff), (ULONG)16);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0xfeef), (ULONG)14);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0xfeef00ff), (ULONG)22);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0xfe0000ff), (ULONG)15);
+        VERIFY_ARE_EQUAL(ProcessorTopology::MaskCount(0x7e0000ff), (ULONG)14);
     }
 }

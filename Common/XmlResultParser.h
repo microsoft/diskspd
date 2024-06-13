@@ -46,6 +46,7 @@ private:
     void _PrintTargetIops(const IoBucketizer& readBucketizer, const IoBucketizer& writeBucketizer, UINT32 bucketTimeInMs);
     void _PrintOverallIops(const Results& results, UINT32 bucketTimeInMs);
     void _PrintIops(const IoBucketizer& readBucketizer, const IoBucketizer& writeBucketizer, UINT32 bucketTimeInMs);
+    void _PrintWaitStats(const ThreadResults& threadResult);
 
     void _PrintV(const char *format, va_list listArg);
     void _Print(const char *format, ...);
