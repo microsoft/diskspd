@@ -30,7 +30,7 @@ Smaller IO sizes will see the most change.
   * topology elements only displayed in text results when > 1 are present (e.g. multi-socket systems)
   * CPU numbering remains group relative, as is the new Core numbering
   * highest Power Efficiency Class is marked with a `P` suffix (this will usually be `1P` v. `0`)
-  * **NOTE**: efficiency classes can have major impact; work on heterogenous systems **must** be aware of core properties in combination thread affinity rules (see `-a` and `-n `)
+  * **NOTE**: efficiency classes can have major impact; work on heterogenous systems **must** be aware of core properties in combination with thread affinity rules (see `-a` and `-n `)
 * New: active power scheme reporting
 * New: base target offset switch now allows range specification: `-Bbase[:length]`; replaces `-B` and `-f`
 * post-run latency histogram processing now significantly faster
