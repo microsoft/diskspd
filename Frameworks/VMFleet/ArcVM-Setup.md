@@ -24,7 +24,7 @@ Get-ClusterNode |% {
 
 ``` 
 
-Ensure that you create a “collect” volume.
+Ensure that you create a "collect" volume.
 
 You may run the following:
  
@@ -42,17 +42,17 @@ Download WS2019 Server Core ISO from the public website.
 
 Open Hyper-V Manager.
 
-Click “New”, then “Virtual Machine”.
+Click "New", then "Virtual Machine".
 
 Navigate through the prompts and pick a location to store your VM.
 
-Once your VM is created, boot up the VM and follow the instructions. This is where you will decide your VM password, or what we will later call, “adminpass”.
+Once your VM is created, boot up the VM and follow the instructions. This is where you will decide your VM password, or what we will later call, "adminpass".
 
 This is important as we will use this later, so make sure you write this down.
 
-Log out of the VM, and navigate to where you stored your VM. You should find a “Virtual Hard Disks” folder. Inside, you should find your new Server Core VHDX file.
+Log out of the VM, and navigate to where you stored your VM. You should find a "Virtual Hard Disks" folder. Inside, you should find your new Server Core VHDX file.
 
-Rename it to “Base1.vhdx”.
+Rename it to "Base1.vhdx".
 
 Copy or move the file to the cluster environment that you want to run VMFleet in.
 
@@ -63,7 +63,7 @@ Done!
 1. First, we need to install the new PowerShell Module from the PowerShell Gallery and then load it into our terminal. We also need to disable cache as it is not supported currently for ArcVMs. Run the following:
  
 ```
-Install-Module -Name “VMFleet”
+Install-Module -Name "VMFleet"
 Import-Module VMFleet
 Set-ClusterStorageSpacesDirect -CacheState Disabled; 
  
@@ -75,7 +75,7 @@ Set-ClusterStorageSpacesDirect -CacheState Disabled;
 
     Run "Get-Command -Module VMFleet" to obtain a list of functions included in the module.
 
-    We will now set up the directory structure within the “Collect” CSV created earlier. Run "Install-Fleet"
+    We will now set up the directory structure within the "Collect" CSV created earlier. Run "Install-Fleet"
 
     This creates the necessary VMFleet directories which include:
 
@@ -83,13 +83,13 @@ Set-ClusterStorageSpacesDirect -CacheState Disabled;
 
             Contains arc.json which stores Arc configuration and the scripts that the Virtual Machines continuously monitor.
 
-       * Control.ps1: the control script the VMs use to implement the control loop (what used to be called “master.ps1”).
+       * Control.ps1: the control script the VMs use to implement the control loop (what used to be called "master.ps1").
 
        * Run.ps1: The VMs continuously look for the most recent version of run.ps1 and runs the newly updated script (parameters).
 
        * Collect/flag
 
-            Location where the control script drops the “go”, “pause”, and “done” flag files. Users should not need to look at these files.
+            Location where the control script drops the "go", "pause", and "done" flag files. Users should not need to look at these files.
 
        * Collect/result
 
@@ -125,7 +125,7 @@ Set-ArcConfig -ResourceGroup [ENTER_RESOURCE_GROUP] -AzureRegistrationUser [ENTE
 
     Note: Please move the VHDX file into the collect folder. CSV Cache is also turned off by default.
 
-    We will now create our “fleet” of VMs by running:
+    We will now create our "fleet" of VMs by running:
     
 ```
 New-Fleet -basevhd <PATH TO VHDX> -vms [ENTER_NUM_VMS] -adminpass [ENTER_ADMINPASS] -connectuser [ENTER_NODE_USER] -connectpass [ENTER_NODE_PASS]
@@ -149,18 +149,18 @@ Set-Fleet -ProcessorCount 1 -MemoryStartupBytes 2048mb -MemoryMaximumBytes 2048m
 
 Note:
 
-If you specify “MemoryMaximumBytes”, you must specify “MemoryMinimumBytes”, which implies that your VMs will have dynamic memory.
+If you specify "MemoryMaximumBytes", you must specify "MemoryMinimumBytes", which implies that your VMs will have dynamic memory.
 
-If you omit “MemoryMaximumBytes” or “MemoryMinimumBytes”, it implies that your VMs will have static memory.
+If you omit "MemoryMaximumBytes" or "MemoryMinimumBytes", it implies that your VMs will have static memory.
 
 If MemoryStartupBytes = MemoryMinimumBytes = MemoryMaximumBytes, that also denotes static memory.
 
-“MemoryStartupBytes” is a mandatory parameter.
+"MemoryStartupBytes" is a mandatory parameter.
 
 
 ### Start Running VMFleet!
 
-7. Open 2 PowerShell terminals. In the first one, run Watch-Cluster and in the second one, run Start-Fleet. This second function will turn on all the VMs in a “paused” state.
+7. Open 2 PowerShell terminals. In the first one, run Watch-Cluster and in the second one, run Start-Fleet. This second function will turn on all the VMs in a "paused" state.
 
 8. At this point you can run Start-FleetSweep [ENTER_PARAMETERS] or take this time to explore and run any of the other functions!
 
@@ -200,7 +200,7 @@ Get-ClusterNode |% {
 }
 ```
 
-    Ensure that you create a “collect” volume.
+    Ensure that you create a "collect" volume.
 
 2. You may run the following:
  
@@ -216,16 +216,16 @@ New-Volume -StoragePoolFriendlyName SU1_Pool* -FriendlyName collect -FileSystem 
 
     Open Hyper-V Manager.
 
-    Click “New”, then “Virtual Machine”.
+    Click "New", then "Virtual Machine".
 
     Navigate through the prompts and pick a location to store your VM.
 
-    Once your VM is created, boot up the VM and follow the instructions. This is where you will decide your VM password, or what we will later call, “adminpass”.
+    Once your VM is created, boot up the VM and follow the instructions. This is where you will decide your VM password, or what we will later call, "adminpass".
 
     This is important as we will use this later, so make sure you write this down.
 
-    Log out of the VM, and navigate to where you stored your VM. You should find a “Virtual Hard Disks” folder. Inside, you should find your new Server Core VHDX file.
-    Rename it to “Base1.vhdx”.
+    Log out of the VM, and navigate to where you stored your VM. You should find a "Virtual Hard Disks" folder. Inside, you should find your new Server Core VHDX file.
+    Rename it to "Base1.vhdx".
 
     Copy or move the file to the cluster environment that you want to run VMFleet in.
 
@@ -235,7 +235,7 @@ New-Volume -StoragePoolFriendlyName SU1_Pool* -FriendlyName collect -FileSystem 
 5. Let’s begin deploying VMFleet. First, we need to install the new PowerShell Module from the PowerShell Gallery and then load it into the terminal. Run the following:
  
 ```
-Install-Module -Name “VMFleet”
+Install-Module -Name "VMFleet"
 Import-Module VMFleet
 Set-ClusterStorageSpacesDirect -CacheState Disabled; 
 ```
@@ -248,7 +248,7 @@ Set-ClusterStorageSpacesDirect -CacheState Disabled;
 
 7. Run "Get-Command -Module VMFleet" to obtain a list of commands included in the module.
 
-8. We will now set up the directory structure within the “Collect” CSV that we created earlier. Run "Install-Fleet"
+8. We will now set up the directory structure within the "Collect" CSV that we created earlier. Run "Install-Fleet"
 
 9. You need to create a new or use existing Resource group under the same subscription as the Resource bridge VM is under. Set-ArcConfig will take care of creating one if not already present.
 
@@ -276,7 +276,7 @@ Set-ArcConfig -ResourceGroup [ENTER_RESOURCE_GROUP] -AzureRegistrationUser [ENTE
 
     Note: Please move the VHDX file into the collect folder. CSV Cache is also turned off by default.
 
-    We will now create our “fleet” of VMs by running:
+    We will now create our "fleet" of VMs by running:
     
 ```
 New-Fleet -basevhd <PATH TO VHDX> -vms [ENTER_NUM_VMS] -adminpass [ENTER_ADMINPASS] -connectuser [ENTER_NODE_USER] -connectpass [ENTER_NODE_PASS]
