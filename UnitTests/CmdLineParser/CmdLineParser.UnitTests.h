@@ -44,7 +44,9 @@ namespace UnitTests
     private:
         void VerifyParseCmdLineDisableAllCache(Profile &profile);
         void VerifyParseCmdLineMappedIO(Profile &profile, MemoryMappedIoFlushMode FlushMode);
+        void VerifyParseCmdLineBypassIO(Profile &profile, BypassIoMode BypassIoMode);
         void VerifyParseCmdLineAccessHints(Profile &profile, bool RandomAccess, bool SequentialScan, bool TemporaryFile);
+        void VerifyParseCmdLineIoRing(Profile &profile, bool UseRegBuffer, UINT32 IoRingBatchSize);
 
     public:
         TEST_CLASS(CmdLineParserUnitTests)
@@ -90,6 +92,8 @@ namespace UnitTests
         TEST_METHOD(TestParseCmdLineInterlockedSequentialWithStride);
         TEST_METHOD(TestParseCmdLineIOPriority);
         TEST_METHOD(TestParseCmdLineMappedIO);
+        TEST_METHOD(TestParseCmdLineBypassIO);
+        TEST_METHOD(TestParseCmdLineBypassIOConflicts);
         TEST_METHOD(TestParseCmdLineMeasureLatency);
         TEST_METHOD(TestParseCmdLineOverlappedCountAndBaseOffset);
         TEST_METHOD(TestParseCmdLineRandomIOAlignment);
@@ -106,6 +110,8 @@ namespace UnitTests
         TEST_METHOD(TestParseCmdLineTotalThreadCountAndThroughput);
         TEST_METHOD(TestParseCmdLineTotalThreadCountAndTotalRequestCount);
         TEST_METHOD(TestParseCmdLineUseCompletionRoutines);
+        TEST_METHOD(TestParseCmdLineUseIoRing);
+        TEST_METHOD(TestParseCmdLineIoRingConflicts);
         TEST_METHOD(TestParseCmdLineUseLargePages);
         TEST_METHOD(TestParseCmdLineUseParallelAsyncIO);
         TEST_METHOD(TestParseCmdLineVerbose);
@@ -113,5 +119,8 @@ namespace UnitTests
         TEST_METHOD(TestParseCmdLineWriteBufferContentRandomNoFilePath);
         TEST_METHOD(TestParseCmdLineWriteBufferContentRandomWithFilePath);
         TEST_METHOD(TestParseCmdLineZeroWriteBuffers);
+        TEST_METHOD(TestParseCmdLineBufferSeparation);
+        TEST_METHOD(TestParseCmdLineCompletionDepth);
+        TEST_METHOD(TestParseCmdLineSystemInfoOnly);
     };
 }

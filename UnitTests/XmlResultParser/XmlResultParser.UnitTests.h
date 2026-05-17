@@ -43,5 +43,8 @@ namespace UnitTests
         TEST_METHOD(Test_ParseResults);
         TEST_METHOD(Test_ParseProfile);
         TEST_METHOD(Test_ParseTargetProfile);
+        TEST_METHOD(Test_ParseProfileBufferSeparationSystemDefault);
+        TEST_METHOD(Test_ParseProfileBufferSeparation);
+        TEST_METHOD(Test_ParseResultsBufferSeparation8KPage128BLine);
     };
 }

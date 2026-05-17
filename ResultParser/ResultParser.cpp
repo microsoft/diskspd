@@ -62,63 +62,15 @@ void ResultParser::_Print(const char *format, ...)
 // display file size in a user-friendly form
 //
 
-struct {
-    UINT32 sizeShift;
-    PCHAR name;
-} sizeUnits[] = {
-    { 40, "TiB" },
-    { 30, "GiB" },
-    { 20, "MiB" },
-    { 10, "KiB" }
-};
-
-void ResultParser::_DisplayFileSize(UINT64 fsize, UINT32 align)
+void ResultParser::_PrintFileSize(UINT64 fsize, UINT32 align)
 {
-    char fmtbuf[16];
+    string s = Util::GetSizeKMGT(fsize);
 
-    for (auto& s : sizeUnits)
+    if (align > s.size())
     {
-        UINT64 sz = (UINT64)1 << s.sizeShift;
-        if (fsize >= sz)
-        {
-            // Even multiple?
-            if ((fsize & (sz - 1)) == 0)
-            {
-                // note: guaranteed no loss of precision - TB shift guarantees
-                // 0 in high 32bits.
-                UINT32 f = static_cast<UINT32>(fsize >> s.sizeShift);
-
-                if (align)
-                {
-                    // "%<align>u%s"
-                    _snprintf_s(fmtbuf, sizeof(fmtbuf), "%%%uu%%s", align);
-                    _Print(fmtbuf, f, s.name);
-                }
-                else
-                {
-                    _Print("%u%s", f, s.name);
-                }
-                return;
-            }
-
-            // Not even, use fp.
-            double f = static_cast<double>(fsize) / sz;
-
-            if (align)
-            {
-                // "%<align>.2f%s"
-                _snprintf_s(fmtbuf, sizeof(fmtbuf), "%%%u.2f%%s", align);
-                _Print(fmtbuf, f, s.name);
-            }
-            else
-            {
-                _Print("%0.2f%s", f, s.name);
-            }
-            return;
-        }
+        _sResult.append(align - s.size(), ' ');
     }
-
-    _Print("%I64u", fsize);
+    _sResult += s;
 }
 
 /*****************************************************************************/
@@ -256,74 +208,6 @@ void ResultParser::_DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters E
     }
 }
 
-void ResultParser::_PrintDistribution(DistributionType dT, const vector<DistributionRange>& v, char* spc)
-{
-    if (dT == DistributionType::None)
-    {
-        return;
-    }
-
-    switch (dT)
-    {
-        case DistributionType::Percent:
-        for (const auto &r : v)
-        {
-            _Print(spc);
-            _Print("   %3u%% of IO => [%2I64u%% - %3I64u%%) of target\n",
-                    r._span,
-                    r._dst.first,
-                    r._dst.first + r._dst.second
-                );
-        }
-        break;
-
-        case DistributionType::Absolute:
-        {
-            const DistributionRange& last = *v.rbegin();
-            UINT32 max = last._src + last._span;
-
-            for (const auto &r : v)
-            {
-                _Print(spc);
-                // If this is a trimmed distribution (target was smaller than its range)
-                // then we need to rescale the trimmed IO% to 100%. Present this with a
-                // single decimal point, which may of course show rounding.
-                if (max < 100)
-                {
-                    _Print("    %0.1f%% of IO => [", (double) 100 * r._span / max);
-                }
-                // Otherwise it is a simple 1-100% and can avoid rounding artifacts.
-                else
-                {
-                    _Print("   %3u%% of IO => [", r._span);
-                }
-
-                if (r._dst.first == 0)
-                {
-                    // directly emit leading zero so we can align it
-                    _Print("     0   ");
-                }
-                else
-                {
-                    _DisplayFileSize(r._dst.first, 6);
-                }
-                _Print(" - ");
-                // zero length occurs (only) in specification is a placeholder for end of target
-                if (r._dst.second)
-                {
-                    _DisplayFileSize(r._dst.first + r._dst.second, 6);
-                    _Print(")\n");
-                }
-                else
-                {
-                    _Print("      end)\n");
-                }
-            }
-        }
-        break;
-    }
-}
-
 class DistributionRef {
 public:
 
@@ -348,12 +232,12 @@ public:
 namespace std
 {
     template<>
-    struct less<vector<DistributionRange> *>
+    struct less<const Distribution *>
     {
-        // map by pointer, compare with the distributions
-        bool operator()(const vector<DistributionRange> * const &lhs, const vector<DistributionRange> * const &rhs) const
+        // map by pointer, compare with the distribution ranges
+        bool operator()(const Distribution * const &lhs, const Distribution * const &rhs) const
         {
-            return *lhs < *rhs;
+            return lhs->GetRanges() < rhs->GetRanges();
         }
     };
 }
@@ -372,18 +256,18 @@ void ResultParser::_PrintEffectiveDistributions(const Results& results)
 
     bool header = false;
     UINT32 threadNo = 0;
-    map<vector<DistributionRange> *, DistributionRef> m;
+    map<const Distribution *, DistributionRef> m;
 
     for (auto& thResult : results.vThreadResults)
     {
         for (auto& tgtResult : thResult.vTargetResults)
         {
-            if (tgtResult.vDistributionRange.size())
+            if (tgtResult.distribution.HasRanges())
             {
-                auto it = m.find(const_cast<vector<DistributionRange> *>(&tgtResult.vDistributionRange));
+                auto it = m.find(&tgtResult.distribution);
                 if (it == m.end())
                 {
-                    m.emplace(make_pair(const_cast<vector<DistributionRange> *>(&tgtResult.vDistributionRange),
+                    m.emplace(make_pair(&tgtResult.distribution,
                                         DistributionRef(tgtResult.sPath, threadNo)));
                 }
                 else
@@ -403,7 +287,6 @@ void ResultParser::_PrintEffectiveDistributions(const Results& results)
             header = true;
             _Print("\nEffective IO Distributions\n--------------------------\n");
         }
-        // _Print("target: %s\n", r.second._sTargets.cbegin()->c_str());
         for (auto& tgt : r.second._mTargetThreads)
         {
             _Print("target: %s [thread:", tgt.first.c_str());
@@ -448,281 +331,7 @@ void ResultParser::_PrintEffectiveDistributions(const Results& results)
 
             _Print("]\n");
         }
-        _PrintDistribution(DistributionType::Absolute, *r.first, "");
-    }
-}
-
-void ResultParser::_PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fUseRequestsPerFile, bool fCompletionRoutines)
-{
-    if (target.GetPath().c_str()[0] == TEMPLATE_TARGET_PREFIX)
-    {
-        _Print("\tpath: template target '%s'\n", target.GetPath().c_str() + 1);
-    }
-    else
-    {
-        _Print("\tpath: '%s'\n", target.GetPath().c_str());
-    }
-    _Print("\t\tthink time: %ums\n", target.GetThinkTime());
-    _Print("\t\tburst size: %u\n", target.GetBurstSize());
-    // TODO: completion routines/ports
-
-    switch (target.GetCacheMode())
-    {
-        case TargetCacheMode::Cached:
-            _Print("\t\tusing software cache\n");
-            break;
-        case TargetCacheMode::DisableLocalCache:
-            _Print("\t\tlocal software cache disabled, remote cache enabled\n");
-            break;
-        case TargetCacheMode::DisableOSCache:
-            _Print("\t\tsoftware cache disabled\n");
-            break;
-    }
-
-    if (target.GetWriteThroughMode() == WriteThroughMode::On)
-    {
-        // context-appropriate comment on writethrough
-        // if sw cache is disabled, commenting on sw write cache is possibly confusing
-        switch (target.GetCacheMode())
-        {
-        case TargetCacheMode::Cached:
-        case TargetCacheMode::DisableLocalCache:
-            _Print("\t\thardware and software write caches disabled, writethrough on\n");
-            break;
-        case TargetCacheMode::DisableOSCache:
-            _Print("\t\thardware write cache disabled, writethrough on\n");
-            break;
-        }
-    }
-    else
-    {
-        _Print("\t\tusing hardware write cache, writethrough off\n");
-    }
-
-    if (target.GetMemoryMappedIoMode() == MemoryMappedIoMode::On)
-    {
-        _Print("\t\tmemory mapped I/O enabled");
-        switch(target.GetMemoryMappedIoFlushMode())
-        {
-        case MemoryMappedIoFlushMode::ViewOfFile:
-            _Print(", flush mode: FlushViewOfFile");
-            break;
-        case MemoryMappedIoFlushMode::NonVolatileMemory:
-            _Print(", flush mode: FlushNonVolatileMemory");
-            break;
-        case MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain:
-            _Print(", flush mode: FlushNonVolatileMemory with no drain");
-            break;
-        }
-        _Print("\n");
-    }
-
-    if (target.GetZeroWriteBuffers())
-    {
-        _Print("\t\tzeroing write buffers\n");
-    }
-
-    if (target.GetRandomDataWriteBufferSize() > 0)
-    {
-        _Print("\t\twrite buffer size: ");
-        _DisplayFileSize(target.GetRandomDataWriteBufferSize());
-        _Print("\n");
-
-        string sWriteBufferSourcePath = target.GetRandomDataWriteBufferSourcePath();
-        if (!sWriteBufferSourcePath.empty())
-        {
-            _Print("\t\twrite buffer source: '%s'\n", sWriteBufferSourcePath.c_str());
-        }
-        else
-        {
-            _Print("\t\twrite buffer source: random fill\n");
-        }
-    }
-
-    if (target.GetUseParallelAsyncIO())
-    {
-        _Print("\t\tusing parallel async I/O\n");
-    }
-
-    if (target.GetWriteRatio() == 0)
-    {
-        _Print("\t\tperforming read test\n");
-    }
-    else if (target.GetWriteRatio() == 100)
-    {
-        _Print("\t\tperforming write test\n");
-    }
-    else
-    {
-        _Print("\t\tperforming mix test (read/write ratio: %d/%d)\n", 100 - target.GetWriteRatio(), target.GetWriteRatio());
-    }
-
-    _Print("\t\tblock size: ");
-    _DisplayFileSize(target.GetBlockSizeInBytes());
-    _Print("\n");
-
-    if (target.GetRandomRatio() == 100)
-    {
-        _Print("\t\tusing random I/O (alignment: ");
-    }
-    else
-    {
-        if (target.GetRandomRatio() > 0)
-        {
-            _Print("\t\tusing mixed random/sequential I/O (%u%% random) (alignment/stride: ", target.GetRandomRatio());
-        }
-        else
-        {
-            _Print("\t\tusing%s sequential I/O (stride: ", target.GetUseInterlockedSequential() ? " interlocked":"");
-        }
-    }
-    _DisplayFileSize(target.GetBlockAlignmentInBytes());
-    _Print(")\n");
-
-    if (fUseRequestsPerFile)
-    {
-        _Print("\t\tnumber of outstanding I/O operations per thread: %d\n", target.GetRequestCount());
-    }
-    else
-    {
-        _Print("\t\trelative IO weight in thread pool: %u\n", target.GetWeight());
-    }
-
-    if (0 != target.GetBaseFileOffsetInBytes())
-    {
-        _Print("\t\tbase file offset: ");
-        _DisplayFileSize(target.GetBaseFileOffsetInBytes());
-        _Print("\n");
-    }
-
-    if (0 != target.GetMaxFileSize())
-    {
-        _Print("\t\tmax file size: ");
-        _DisplayFileSize(target.GetMaxFileSize());
-        _Print("\n");
-    }
-
-    if (0 != target.GetThreadStrideInBytes())
-    {
-        _Print("\t\tthread stride size: ");
-        _DisplayFileSize(target.GetThreadStrideInBytes());
-        _Print("\n");
-    }
-
-    if (target.GetSequentialScanHint())
-    {
-        _Print("\t\tusing FILE_FLAG_SEQUENTIAL_SCAN hint\n");
-    }
-
-    if (target.GetRandomAccessHint())
-    {
-        _Print("\t\tusing FILE_FLAG_RANDOM_ACCESS hint\n");
-    }
-
-    if (target.GetTemporaryFileHint())
-    {
-        _Print("\t\tusing FILE_ATTRIBUTE_TEMPORARY hint\n");
-    }
-
-    if (fUseThreadsPerFile)
-    {
-        _Print("\t\tthreads per file: %d\n", target.GetThreadsPerFile());
-    }
-    if (target.GetRequestCount() > 1 && fUseThreadsPerFile)
-    {
-        if (fCompletionRoutines)
-        {
-            _Print("\t\tusing completion routines (ReadFileEx/WriteFileEx)\n");
-        }
-        else
-        {
-            _Print("\t\tusing I/O Completion Ports\n");
-        }
-    }
-
-    if (target.GetIOPriorityHint() == IoPriorityHintVeryLow)
-    {
-        _Print("\t\tIO priority: very low\n");
-    }
-    else if (target.GetIOPriorityHint() == IoPriorityHintLow)
-    {
-        _Print("\t\tIO priority: low\n");
-    }
-    else if (target.GetIOPriorityHint() == IoPriorityHintNormal)
-    {
-        _Print("\t\tIO priority: normal\n");
-    }
-    else
-    {
-        _Print("\t\tIO priority: unknown\n");
-    }
-
-    if (target.GetThroughputIOPS())
-    {
-        _Print("\t\tthroughput rate-limited to %u IOPS\n", target.GetThroughputIOPS());
-    }
-    else if (target.GetThroughputInBytesPerMillisecond())
-    {
-        _Print("\t\tthroughput rate-limited to %u B/ms\n", target.GetThroughputInBytesPerMillisecond());
-    }
-
-    if (target.GetDistributionRange().size())
-    {
-        _Print("\t\tIO Distribution:\n");
-        _PrintDistribution(target.GetDistributionType(), target.GetDistributionRange(), "\t\t");
-    }
-}
-
-void ResultParser::_PrintTimeSpan(const TimeSpan& timeSpan)
-{
-    _Print("\tduration: %us\n", timeSpan.GetDuration());
-    _Print("\twarm up time: %us\n", timeSpan.GetWarmup());
-    _Print("\tcool down time: %us\n", timeSpan.GetCooldown());
-    if (timeSpan.GetDisableAffinity())
-    {
-        _Print("\taffinity disabled\n");
-    }
-    if (timeSpan.GetMeasureLatency())
-    {
-        _Print("\tmeasuring latency\n");
-    }
-    if (timeSpan.GetCalculateIopsStdDev())
-    {
-        _Print("\tgathering IOPS at intervals of %ums\n", timeSpan.GetIoBucketDurationInMilliseconds());
-    }
-    _Print("\trandom seed: %u\n", timeSpan.GetRandSeed());
-    if (timeSpan.GetThreadCount() != 0)
-    {
-        _Print("\tthread pool with %u threads\n", timeSpan.GetThreadCount());
-        _Print("\tnumber of outstanding I/O operations per thread: %d\n", timeSpan.GetRequestCount());
-    }
-
-    const auto& vAffinity = timeSpan.GetAffinityAssignments();
-    if ( vAffinity.size() > 0)
-    {
-        _Print("\tadvanced affinity round robin (group/core): ");
-        for (unsigned int x = 0; x < vAffinity.size(); ++x)
-        {
-            _Print("%u/%u", vAffinity[x].wGroup, vAffinity[x].bProc);
-            if (x < vAffinity.size() - 1)
-            {
-                _Print(", ");
-            }
-        }
-        _Print("\n");
-    }
-
-    if (timeSpan.GetRandomWriteData())
-    {
-        _Print("\tgenerating random data for each write IO\n");
-        _Print("\t  WARNING: this increases the CPU cost of issuing writes and should only\n");
-        _Print("\t           be compared to other results using the -Zr flag\n");
-    }
-
-    vector<Target> vTargets(timeSpan.GetTargets());
-    for (auto i = vTargets.begin(); i != vTargets.end(); i++)
-    {
-        _PrintTarget(*i, (timeSpan.GetThreadCount() == 0), (timeSpan.GetThreadCount() == 0 || timeSpan.GetRequestCount() == 0), timeSpan.GetCompletionRoutines());
+        _sResult += r.first->GetText(0);
     }
 }
 
@@ -738,16 +347,16 @@ void ResultParser::_PrintProfile(const Profile& profile)
     _Print("Input parameters:\n\n");
     if (profile.GetVerbose())
     {
-        _Print("\tusing verbose mode\n");
+        _Print("  using verbose mode\n");
     }
 
     const vector<TimeSpan>& vTimeSpans = profile.GetTimeSpans();
     int c = 1;
     for (auto i = vTimeSpans.begin(); i != vTimeSpans.end(); i++)
     {
-        _Print("\ttimespan: %3d\n", c++);
-        _Print("\t-------------\n");
-        _PrintTimeSpan(*i);
+        _Print("  timespan: %3d\n", c++);
+        _Print("  -------------\n");
+        _sResult += i->GetText(4);  // timespan properties at indent 4
         _Print("\n");
     }
 }
@@ -757,13 +366,113 @@ void ResultParser::_PrintSystemInfo(const SystemInformation& system)
     _Print(system.GetText().c_str());
 }
 
+string ResultParser::ParseSystemInformation(const SystemInformation& system)
+{
+    _sResult.clear();
+    _PrintSystemInfo(system);
+    return _sResult;
+}
+
+void ResultParser::_PrintCompactAffinity(const vector<AffinityAssignment>& v, bool fMultiGroup)
+{
+    auto vCompact = AffinityGroupMask::Compact(v);
+    for (size_t i = 0; i < vCompact.size(); i++)
+    {
+        if (i > 0)
+        {
+            _Print(" ");
+        }
+        if (fMultiGroup)
+        {
+            _Print("%u/", vCompact[i].wGroup);
+        }
+        _Print("%s", Util::MaskRanges(vCompact[i].mask).c_str());
+    }
+}
+
+void ResultParser::_PrintEffectiveAffinity(const TimeSpan& timeSpan, const SystemInformation& system)
+{
+    assert(timeSpan.IsFinalized());
+
+    if (timeSpan.GetDisableAffinity())
+    {
+        return;
+    }
+
+    const auto& vEffective = timeSpan.GetEffectiveAffinityAssignments();
+    if (vEffective.empty())
+    {
+        return;
+    }
+
+    bool fMultiGroup = system.processorTopology._vProcessorGroupInformation.size() > 1;
+
+    _Print(fMultiGroup ? "\neffective affinity (group/cpu): " : "\neffective affinity (cpu): ");
+    _PrintCompactAffinity(vEffective, fMultiGroup);
+    _Print("\n");
+}
+
+void ResultParser::_PrintHeterogeneousAffinityWarning(const TimeSpan& timeSpan, const SystemInformation& system)
+{
+    assert(timeSpan.IsFinalized());
+
+    if (system.processorTopology._ubPerformanceEfficiencyClass == 0)
+    {
+        return;
+    }
+
+    const auto& vEffective = timeSpan.GetEffectiveAffinityAssignments();
+    if (vEffective.empty())
+    {
+        return;
+    }
+
+    BYTE maxEffClass = system.processorTopology._ubPerformanceEfficiencyClass;
+
+    vector<AffinityAssignment> vPerf, vEff;
+    for (const auto& a : vEffective)
+    {
+        if (a.bEfficiencyClass == maxEffClass)
+        {
+            vPerf.emplace_back(a.wGroup, a.bProc);
+        }
+        else
+        {
+            vEff.emplace_back(a.wGroup, a.bProc);
+        }
+    }
+
+    if (vPerf.empty() || vEff.empty())
+    {
+        return;
+    }
+
+    //
+    // Provide a diagnostic comment on mixed core assignments. This is not a warning since
+    // it may be intentional, descriptive if valuable for confirmation by the analyst.
+    //
+
+    bool fMultiGroup = system.processorTopology._vProcessorGroupInformation.size() > 1;
+
+    _Print("\nNOTE: thread assignment spans different core types (P-core and E-core).\n");
+    _Print("      Performance results may reflect mixed core capabilities.\n");
+
+    _Print("      P-core cpus: ");
+    _PrintCompactAffinity(vPerf, fMultiGroup);
+    _Print("\n");
+
+    _Print("      E-core cpus: ");
+    _PrintCompactAffinity(vEff, fMultiGroup);
+    _Print("\n");
+}
+
 void ResultParser::_PrintCpuUtilization(const Results& results, const SystemInformation& system)
 {
     const auto& topo = system.processorTopology;
     size_t procCount = results.vSystemProcessorPerfInfo.size();
     size_t baseProc = 0;
     BYTE efficiencyClass = 0;
-    BYTE processorCore = 0;
+    WORD processorCore = 0;
 
     bool fMultiSocket = topo._vProcessorSocketInformation.size() > 1;
     bool fMultiNode = topo._vProcessorNumaInformation.size() > 1;
@@ -980,7 +689,7 @@ void ResultParser::_PrintSection(_SectionEnum section, const TimeSpan& timeSpan,
 
             _Print(" | %s (", targetResults.sPath.c_str());
 
-            _DisplayFileSize(targetResults.ullFileSize);
+            _PrintFileSize(targetResults.ullFileSize);
             _Print(")\n");
 
             ullTotalBytesCount += ullBytesCount;
@@ -1154,30 +863,126 @@ string ResultParser::ParseProfile(const Profile& profile)
     return _sResult;
 }
 
-void ResultParser::_PrintWaitStats(const Results &results)
+void ResultParser::_PrintWaitStats(const Results &results, const TimeSpan& timeSpan)
 {
-    _Print("Wait Statistics\n");
-    _Print("thread | completion wait | throttle wait  -  sleep | lookaside | 0 - 7+ complete per lookaside\n");
-    _Print("-----------------------------------------------------------------------------------------------\n");
+    // Output format hardcodes 8 bucket values per line; assert if changed.
+    static_assert(c_nCompletionBuckets == 8, "update _PrintWaitStats format strings for new bucket count");
+
+    bool fLookasideActive = timeSpan.GetMeasureLatency() || timeSpan.GetCalculateIopsStdDev();
+
+    // Determine if any thread had throttled targets
+    bool fAnyThrottled = false;
+    for (const auto& threadResults : results.vThreadResults)
+    {
+        if (threadResults.WaitStats.fThrottled)
+        {
+            fAnyThrottled = true;
+            break;
+        }
+    }
+
+    // Table 1: Regular waits with WaitCompletion counts
+    if (fAnyThrottled)
+    {
+        _Print("Wait Statistics - Completion Wait\n");
+        _Print("thread |         wait | throttle wait  -  sleep | 0 - 7+ complete per wait\n");
+        _Print("--------------------------------------------------------------------------\n");
+    }
+    else
+    {
+        _Print("Wait Statistics - Completion Wait\n");
+        _Print("thread |         wait | 0 - 7+ complete per wait\n");
+        _Print("------------------------------------------------\n");
+    }
+
+    for (unsigned int iThread = 0; iThread < results.vThreadResults.size(); ++iThread)
+    {
+        const WAIT_STATS& ws = results.vThreadResults[iThread].WaitStats;
+        if (ws.fThrottled)
+        {
+            _Print(
+                "%6u | %12llu | %13llu  - %6llu | %llu %llu %llu %llu %llu %llu %llu %llu\n",
+                iThread, ws.Wait,
+                ws.ThrottleWait, ws.ThrottleSleep,
+                ws.WaitCompletion[0], ws.WaitCompletion[1], ws.WaitCompletion[2], ws.WaitCompletion[3],
+                ws.WaitCompletion[4], ws.WaitCompletion[5], ws.WaitCompletion[6], ws.WaitCompletion[7]);
+        }
+        else
+        {
+            _Print(
+                fAnyThrottled
+                    ? "%6u | %12llu |               ---       | %llu %llu %llu %llu %llu %llu %llu %llu\n"
+                    : "%6u | %12llu | %llu %llu %llu %llu %llu %llu %llu %llu\n",
+                iThread, ws.Wait,
+                ws.WaitCompletion[0], ws.WaitCompletion[1], ws.WaitCompletion[2], ws.WaitCompletion[3],
+                ws.WaitCompletion[4], ws.WaitCompletion[5], ws.WaitCompletion[6], ws.WaitCompletion[7]);
+        }
+    }
+
+    // Table 2: Lookaside waits (only when latency measurement active)
+    if (fLookasideActive)
+    {
+        _Print("\nWait Statistics - Lookaside\n");
+        _Print("thread |    lookaside | 0 - 7+ complete per lookaside\n");
+        _Print("-----------------------------------------------------\n");
+        for (unsigned int iThread = 0; iThread < results.vThreadResults.size(); ++iThread)
+        {
+            const WAIT_STATS& ws = results.vThreadResults[iThread].WaitStats;
+            _Print(
+                "%6u | %12llu | %llu %llu %llu %llu %llu %llu %llu %llu\n",
+                iThread, ws.Lookaside,
+                ws.LookasideCompletion[0], ws.LookasideCompletion[1], ws.LookasideCompletion[2], ws.LookasideCompletion[3],
+                ws.LookasideCompletion[4], ws.LookasideCompletion[5], ws.LookasideCompletion[6], ws.LookasideCompletion[7]);
+        }
+    }
+}
+
+void ResultParser::_PrintIoRingStatsFieldNames()
+{
+    _Print("thread |  Submits/s \n");
+}
+
+void ResultParser::_PrintIoRingStatsBorderLine()
+{
+    _Print("--------------------\n");
+}
+
+//
+// Print IoRing statistics table (submits per second per thread)
+//
+void ResultParser::_PrintIoRingStats(const TimeSpan& timeSpan, const Results& results)
+{
+    double fTime = PerfTimer::PerfTimeToSeconds(results.ullTimeCount);
+    UINT64 ullTotalSubmitCount = 0;
+
+    // Skip if IoRing is not enabled
+    if (!timeSpan.GetUseIoRing())
+    {
+        return;
+    }
+
+    _Print("\n\nIoRing Statistics\n");
+    _PrintIoRingStatsFieldNames();
+    _PrintIoRingStatsBorderLine();
+
     for (unsigned int iThread = 0; iThread < results.vThreadResults.size(); ++iThread)
     {
         const ThreadResults& threadResults = results.vThreadResults[iThread];
-        _Print(
-            "%6u | %15llu | %13llu  - %6llu | %9llu | %llu %llu %llu %llu %llu %llu %llu %llu\n",
-            iThread,
-            threadResults.WaitStats.Wait,
-            threadResults.WaitStats.ThrottleWait,
-            threadResults.WaitStats.ThrottleSleep,
-            threadResults.WaitStats.Lookaside,
-            threadResults.WaitStats.LookasideCompletion[0],
-            threadResults.WaitStats.LookasideCompletion[1],
-            threadResults.WaitStats.LookasideCompletion[2],
-            threadResults.WaitStats.LookasideCompletion[3],
-            threadResults.WaitStats.LookasideCompletion[4],
-            threadResults.WaitStats.LookasideCompletion[5],
-            threadResults.WaitStats.LookasideCompletion[6],
-            threadResults.WaitStats.LookasideCompletion[7]);
+
+        _Print("%6u", iThread);
+
+        _Print(" | %11.2f", (double)threadResults.ullSubmitCount / fTime);
+
+        ullTotalSubmitCount += threadResults.ullSubmitCount;
+
+        _Print("\n");
     }
+    _PrintIoRingStatsBorderLine();
+    _Print("total:");
+
+    _Print(" | %11.2f", (double)ullTotalSubmitCount / fTime);
+
+    _Print("\n");
 }
 
 string ResultParser::ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults)
@@ -1220,6 +1025,8 @@ string ResultParser::ParseResults(const Profile& profile, const SystemInformatio
                 _Print("request count:\t\t%u\n", timeSpan.GetRequestCount());
             }
 
+            _PrintEffectiveAffinity(timeSpan, system);
+            _PrintHeterogeneousAffinityWarning(timeSpan, system);
             _PrintCpuUtilization(results, system);
             _PrintEffectiveDistributions(results);
 
@@ -1231,6 +1038,8 @@ string ResultParser::ParseResults(const Profile& profile, const SystemInformatio
 
             _Print("\nWrite IO\n");
             _PrintSection(_SectionEnum::WRITE, timeSpan, results);
+
+            _PrintIoRingStats(timeSpan, results);
 
             if (timeSpan.GetMeasureLatency())
             {
@@ -1248,7 +1057,7 @@ string ResultParser::ParseResults(const Profile& profile, const SystemInformatio
             if (profile.GetVerboseStats())
             {
                 _Print("\n");
-                _PrintWaitStats(results);
+                _PrintWaitStats(results, timeSpan);
             }
         }
     }

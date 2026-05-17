@@ -881,10 +881,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 3);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 3);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -918,10 +918,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 4);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 4);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -952,10 +952,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -979,10 +979,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 20);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1005,10 +1005,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 20);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1042,10 +1042,10 @@ namespace UnitTests
             if (n == 5)
             {
                 ThreadTargetState tts(&tp, 0, 100*KB);
-                vector<DistributionRange>& ev = tts._vDistributionRange;
+                const auto& ev = tts._distribution.GetRanges();
 
-                VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-                VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 3);
+                VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+                VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 3);
                 VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
                 VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 40);
                 VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1065,10 +1065,10 @@ namespace UnitTests
 
             {
                 ThreadTargetState tts(&tp, 0, 100*KB);
-                vector<DistributionRange>& ev = tts._vDistributionRange;
+                const auto& ev = tts._distribution.GetRanges();
 
-                VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-                VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
+                VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+                VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
                 VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
                 VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) m*10);
                 VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1110,10 +1110,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 200*GB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 3);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 3);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1143,10 +1143,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 200*GB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 3);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 3);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1175,10 +1175,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 200*GB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 20);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 20);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1202,10 +1202,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 200*GB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 20);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 20);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1236,10 +1236,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 20);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 20);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1262,10 +1262,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 20);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 20);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1287,10 +1287,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 1);
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 10);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 1);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 10);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);
@@ -1308,10 +1308,10 @@ namespace UnitTests
 
         {
             ThreadTargetState tts(&tp, 0, 100*KB);
-            vector<DistributionRange>& ev = tts._vDistributionRange;
+            const auto& ev = tts._distribution.GetRanges();
 
-            VERIFY_ARE_EQUAL(tts._vDistributionRange.size(), (size_t) 2);
-            VERIFY_ARE_EQUAL(tts._ioDistributionSpan, (UINT32) 100);
+            VERIFY_ARE_EQUAL(tts._distribution.GetRanges().size(), (size_t) 2);
+            VERIFY_ARE_EQUAL(tts._distribution.GetIOSpan(), (UINT32) 100);
             VERIFY_ARE_EQUAL(ev[0]._src, (UINT64) 0);
             VERIFY_ARE_EQUAL(ev[0]._span, (UINT64) 10);
             VERIFY_ARE_EQUAL(ev[0]._dst.first, (UINT64) 0);

@@ -31,6 +31,7 @@ SOFTWARE.
 #include "XmlResultParser.UnitTests.h"
 #include "Common.h"
 #include "xmlresultparser.h"
+#include "TextDiff.h"
 #include <stdlib.h>
 #include <vector>
 
@@ -73,9 +74,13 @@ namespace UnitTests
         target.SetCacheMode(TargetCacheMode::DisableOSCache);
         target.SetWriteThroughMode(WriteThroughMode::On);
         target.SetThroughputIOPS(1000);
+        target.SetBypassIoMode(BypassIoMode::Full);
 
         timeSpan.AddTarget(target);
         timeSpan.SetCalculateIopsStdDev(true);
+        timeSpan.SetUseIoRing(true);
+        timeSpan.SetIoRingBatchSize(75);
+        timeSpan.SetUseRegBuffer(true);
 
         TargetResults targetResults;
         targetResults.sPath = "testfile1.dat";
@@ -100,6 +105,7 @@ namespace UnitTests
 
         ThreadResults threadResults;
         threadResults.vTargetResults.push_back(targetResults);
+        threadResults.ullSubmitCount = 10;
         results.vThreadResults.push_back(threadResults);
 
         vector<Results> vResults;
@@ -113,8 +119,11 @@ namespace UnitTests
         SystemInformation system;
         system.ResetTime();
         system.sComputerName.clear();
+        system.sProcessorName.clear();
         system.sActivePolicyName.clear();
         system.sActivePolicyGuid.clear();
+
+        system.dwPageSize = 4096;
 
         system.processorTopology._ulProcessorCount = 3;
         system.processorTopology._ubPerformanceEfficiencyClass = 1;
@@ -132,6 +141,8 @@ namespace UnitTests
         system.processorTopology._vProcessorNumaInformation.push_back(node);
 
         ProcessorSocketInformation socket;
+        socket._ulSocketNumber = 0;
+        socket._ulProcCount = 0;
         socket._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
         socket._vProcessorMasks.emplace_back((WORD)1, (KAFFINITY)0x3);
         system.processorTopology._vProcessorSocketInformation.clear();
@@ -141,6 +152,19 @@ namespace UnitTests
         system.processorTopology._vProcessorCoreInformation.emplace_back((WORD)0, (KAFFINITY)0x1, (BYTE)0);
         system.processorTopology._vProcessorCoreInformation.emplace_back((WORD)1, (KAFFINITY)0x3, (BYTE)1);
 
+        system.processorTopology._vProcessorCacheInformation.clear();
+        {
+            ProcessorCacheInformation l3(3, 16, 64, 8 * 1024 * 1024, CacheUnified);
+            l3._processorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+            system.processorTopology._vProcessorCacheInformation.push_back(l3);
+        }
+
+        // Point timespan at the mock system for deterministic output
+        timeSpan.SetSystem(&system);
+
+        // Finalize effective buffer separation before adding to profile
+        timeSpan.Finalize();
+
         // finally, add the timespan to the profile and dump.
         profile.AddTimeSpan(timeSpan);
 
@@ -149,16 +173,18 @@ namespace UnitTests
         // stringify random text, quoting "'s and adding newline/preserving tabs
         // gc some.txt |% { write-host $("`"{0}\n`"" -f $($_ -replace "`"","\`"" -replace "`t","\t")) }
 
-        const char *pcszExpectedOutput = \
+        const char *pcszExpected = \
             "<Results>\n"
             "  <System>\n"
             "    <ComputerName></ComputerName>\n"
+            "    <ProcessorName></ProcessorName>\n"
             "    <Tool>\n"
             "      <Version>" DISKSPD_NUMERIC_VERSION_STRING "</Version>\n"
             "      <VersionDate>" DISKSPD_DATE_VERSION_STRING "</VersionDate>\n"
             "    </Tool>\n"
             "    <RunTime></RunTime>\n"
             "    <PowerScheme Name=\"\" Guid=\"\"/>\n"
+            "    <PageSize>4096</PageSize>\n"
             "    <ProcessorTopology Heterogeneous=\"true\">\n"
             "      <Group Group=\"0\" MaximumProcessors=\"1\" ActiveProcessors=\"1\" ActiveProcessorMask=\"0x1\"/>\n"
             "      <Group Group=\"1\" MaximumProcessors=\"4\" ActiveProcessors=\"2\" ActiveProcessorMask=\"0x3\"/>\n"
@@ -172,6 +198,9 @@ namespace UnitTests
             "      </Socket>\n"
             "      <Core Group=\"0\" Core=\"0\" Mask=\"0x1\" EfficiencyClass=\"0\"/>\n"
             "      <Core Group=\"1\" Core=\"0\" Mask=\"0x3\" EfficiencyClass=\"1\"/>\n"
+            "      <Cache Level=\"3\" Associativity=\"16\" LineSize=\"64\" CacheSize=\"8388608\" Type=\"Unified\">\n"
+            "        <Group Group=\"0\" Mask=\"0x1\"/>\n"
+            "      </Cache>\n"
             "    </ProcessorTopology>\n"
             "  </System>\n"
             "  <Profile>\n"
@@ -183,7 +212,6 @@ namespace UnitTests
             "        <CompletionRoutines>false</CompletionRoutines>\n"
             "        <MeasureLatency>false</MeasureLatency>\n"
             "        <CalculateIopsStdDev>true</CalculateIopsStdDev>\n"
-            "        <DisableAffinity>false</DisableAffinity>\n"
             "        <Duration>10</Duration>\n"
             "        <Warmup>5</Warmup>\n"
             "        <Cooldown>0</Cooldown>\n"
@@ -191,6 +219,13 @@ namespace UnitTests
             "        <RequestCount>0</RequestCount>\n"
             "        <IoBucketDuration>1000</IoBucketDuration>\n"
             "        <RandSeed>0</RandSeed>\n"
+            "        <IoRing>\n"
+            "          <IoRingBatchSize>75</IoRingBatchSize>\n"
+            "          <UseRegBuffer>true</UseRegBuffer>\n"
+            "        </IoRing>\n"
+            "        <DisableAffinity>false</DisableAffinity>\n"
+            "        <AffinityTraversal Group=\"Fill\" Efficiency=\"PFirst\">Cpu</AffinityTraversal>\n"
+            "        <BufferSeparation>PDECacheLine</BufferSeparation>\n"
             "        <Targets>\n"
             "          <Target>\n"
             "            <Path>testfile1.dat</Path>\n"
@@ -202,6 +237,7 @@ namespace UnitTests
             "            <UseLargePages>false</UseLargePages>\n"
             "            <DisableOSCache>true</DisableOSCache>\n"
             "            <WriteThrough>true</WriteThrough>\n"
+            "            <BypassIO>Full</BypassIO>\n"
             "            <WriteBufferContent>\n"
             "              <Pattern>sequential</Pattern>\n"
             "            </WriteBufferContent>\n"
@@ -226,6 +262,12 @@ namespace UnitTests
             "    <ThreadCount>1</ThreadCount>\n"
             "    <RequestCount>0</RequestCount>\n"
             "    <ProcCount>3</ProcCount>\n"
+            "    <EffectiveBufferSeparation>16777216</EffectiveBufferSeparation>\n"
+            "    <EffectiveAffinity>\n"
+            "      <Group Group=\"0\" Mask=\"0x1\"/>\n"
+            "      <Group Group=\"1\" Mask=\"0x3\"/>\n"
+            "    </EffectiveAffinity>\n"
+            "    <HeterogeneousAffinityWarning>true</HeterogeneousAffinityWarning>\n"
             "    <CpuUtilization>\n"
             "      <CPU>\n"
             "        <Socket>0</Socket>\n"
@@ -286,6 +328,7 @@ namespace UnitTests
             "    </Iops>\n"
             "    <Thread>\n"
             "      <Id>0</Id>\n"
+            "      <SubmitCount>10</SubmitCount>\n"
             "      <Target>\n"
             "        <Path>testfile1.dat</Path>\n"
             "        <BytesCount>6291456</BytesCount>\n"
@@ -314,25 +357,8 @@ namespace UnitTests
             "  </TimeSpan>\n"
             "</Results>";
 
-#if 0
-        HANDLE h;
-        DWORD written;
-        h = CreateFileW(L"g:\\xmlresult-received.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        WriteFile(h, sResults.c_str(), (DWORD)sResults.length(), &written, NULL);
-        VERIFY_ARE_EQUAL(sResults.length(), written);
-        CloseHandle(h);
-
-        h = CreateFileW(L"g:\\xmlresult-expected.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        WriteFile(h, pcszExpectedOutput, (DWORD)strlen(pcszExpectedOutput), &written, NULL);
-        VERIFY_ARE_EQUAL((DWORD)strlen(pcszExpectedOutput), written);
-        CloseHandle(h);
-
-        printf("--\n%s\n", sResults.c_str());
-        printf("-------------------------------------------------\n");
-        printf("--\n%s\n", pcszExpectedOutput);
-#endif
-
-        VERIFY_ARE_EQUAL(0, strcmp(sResults.c_str(), pcszExpectedOutput));
+        // Compare line by line, reporting the first difference for easier diagnosis
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResults);
     }
 
     void XmlResultParserUnitTests::Test_ParseProfile()
@@ -342,11 +368,13 @@ namespace UnitTests
         TimeSpan timeSpan;
         Target target;
 
+        // Profile XML contains only configuration, not finalized data.
+        // No system mock or finalization needed.
         timeSpan.AddTarget(target);
         profile.AddTimeSpan(timeSpan);
 
         string s = parser.ParseProfile(profile);
-        const char *pcszExpectedOutput = "<Profile>\n"
+        const char *pcszExpected = "<Profile>\n"
             "  <Progress>0</Progress>\n"
             "  <ResultFormat>text</ResultFormat>\n"
             "  <Verbose>false</Verbose>\n"
@@ -355,7 +383,6 @@ namespace UnitTests
             "      <CompletionRoutines>false</CompletionRoutines>\n"
             "      <MeasureLatency>false</MeasureLatency>\n"
             "      <CalculateIopsStdDev>false</CalculateIopsStdDev>\n"
-            "      <DisableAffinity>false</DisableAffinity>\n"
             "      <Duration>10</Duration>\n"
             "      <Warmup>5</Warmup>\n"
             "      <Cooldown>0</Cooldown>\n"
@@ -363,6 +390,9 @@ namespace UnitTests
             "      <RequestCount>0</RequestCount>\n"
             "      <IoBucketDuration>1000</IoBucketDuration>\n"
             "      <RandSeed>0</RandSeed>\n"
+            "      <DisableAffinity>false</DisableAffinity>\n"
+            "      <AffinityTraversal Group=\"Fill\" Efficiency=\"PFirst\">Cpu</AffinityTraversal>\n"
+            "      <BufferSeparation>PDECacheLine</BufferSeparation>\n"
             "      <Targets>\n"
             "        <Target>\n"
             "          <Path></Path>\n"
@@ -392,16 +422,14 @@ namespace UnitTests
             "  </TimeSpans>\n"
             "</Profile>\n";
 
-        //VERIFY_ARE_EQUAL(pcszExpectedOutput, s.c_str());
-        VERIFY_ARE_EQUAL(strlen(pcszExpectedOutput), s.length());
-        VERIFY_IS_TRUE(!strcmp(pcszExpectedOutput, s.c_str()));
+        VERIFY_MULTILINE_EQUAL(pcszExpected, s);
     }
 
     void XmlResultParserUnitTests::Test_ParseTargetProfile()
     {
         Target target;
         string sResults;
-        char pszExpectedOutput[4096];
+        char szExpected[4096];
         int nWritten;
 
         const char *pcszOutputTemplate = \
@@ -437,28 +465,187 @@ namespace UnitTests
 
         // Base case - no limit
 
-        nWritten = sprintf_s(pszExpectedOutput, sizeof(pszExpectedOutput),
+        nWritten = sprintf_s(szExpected, sizeof(szExpected),
                              pcszOutputTemplate, "", "0");
         VERIFY_IS_GREATER_THAN(nWritten, 0);
         sResults = target.GetXml(0);
-        VERIFY_ARE_EQUAL(sResults, pszExpectedOutput);
+        VERIFY_MULTILINE_EQUAL(szExpected, sResults);
 
         // IOPS - with units
 
         target.SetThroughputIOPS(1000);
-        nWritten = sprintf_s(pszExpectedOutput, sizeof(pszExpectedOutput),
+        nWritten = sprintf_s(szExpected, sizeof(szExpected),
                              pcszOutputTemplate, " unit=\"IOPS\"", "1000");
         VERIFY_IS_GREATER_THAN(nWritten, 0);
         sResults = target.GetXml(0);
-        VERIFY_ARE_EQUAL(sResults, pszExpectedOutput);
+        VERIFY_MULTILINE_EQUAL(szExpected, sResults);
 
         // BPMS - not specified with units in output
 
         target.SetThroughput(1000);
-        nWritten = sprintf_s(pszExpectedOutput, sizeof(pszExpectedOutput),
+        nWritten = sprintf_s(szExpected, sizeof(szExpected),
                              pcszOutputTemplate, "", "1000");
         VERIFY_IS_GREATER_THAN(nWritten, 0);
         sResults = target.GetXml(0);
-        VERIFY_ARE_EQUAL(sResults, pszExpectedOutput);
+        VERIFY_MULTILINE_EQUAL(szExpected, sResults);
+
+        // Test BypassIO
+
+        const char *pcszOutputTemplateBypassIO = \
+            "<Target>\n"
+            "  <Path>testfile1.dat</Path>\n"
+            "  <BlockSize>65536</BlockSize>\n"
+            "  <BaseFileOffset>0</BaseFileOffset>\n"
+            "  <SequentialScan>false</SequentialScan>\n"
+            "  <RandomAccess>false</RandomAccess>\n"
+            "  <TemporaryFile>false</TemporaryFile>\n"
+            "  <UseLargePages>false</UseLargePages>\n"
+            "  <DisableOSCache>true</DisableOSCache>\n"
+            "  <WriteThrough>true</WriteThrough>\n"
+            "  <BypassIO>%s</BypassIO>\n"
+            "  <WriteBufferContent>\n"
+            "    <Pattern>sequential</Pattern>\n"
+            "  </WriteBufferContent>\n"
+            "  <ParallelAsyncIO>false</ParallelAsyncIO>\n"
+            "  <StrideSize>65536</StrideSize>\n"
+            "  <InterlockedSequential>false</InterlockedSequential>\n"
+            "  <ThreadStride>0</ThreadStride>\n"
+            "  <MaxFileSize>0</MaxFileSize>\n"
+            "  <RequestCount>2</RequestCount>\n"
+            "  <WriteRatio>0</WriteRatio>\n"
+            "  <Throughput>0</Throughput>\n"
+            "  <ThreadsPerFile>1</ThreadsPerFile>\n"
+            "  <IOPriority>3</IOPriority>\n"
+            "  <Weight>1</Weight>\n"
+            "</Target>\n";
+
+        // Test BypassIO while allowing partial bypass
+        target.SetThroughput(0);
+        target.SetBypassIoMode(BypassIoMode::Partial);
+        nWritten = sprintf_s(szExpected, sizeof(szExpected),
+                             pcszOutputTemplateBypassIO, "Partial");
+        VERIFY_IS_GREATER_THAN(nWritten, 0);
+        sResults = target.GetXml(0);
+        VERIFY_MULTILINE_EQUAL(szExpected, sResults);
+
+        // Test full BypassIO
+
+        target.SetBypassIoMode(BypassIoMode::Full);
+        nWritten = sprintf_s(szExpected, sizeof(szExpected),
+                             pcszOutputTemplateBypassIO, "Full");
+        VERIFY_IS_GREATER_THAN(nWritten, 0);
+        sResults = target.GetXml(0);
+        VERIFY_MULTILINE_EQUAL(szExpected, sResults);
+    }
+
+    void XmlResultParserUnitTests::Test_ParseProfileBufferSeparationSystemDefault()
+    {
+        Profile profile;
+        TimeSpan timeSpan;
+        Target target;
+
+        timeSpan.SetBufferSeparation(BufferSeparation::SystemDefault);
+        timeSpan.AddTarget(target);
+        profile.AddTimeSpan(timeSpan);
+
+        string s = profile.GetXml(0);
+
+        // Profile XML should have BufferSeparation but NOT EffectiveBufferSeparation
+        VERIFY_IS_TRUE(s.find("<BufferSeparation>SystemDefault</BufferSeparation>") != string::npos);
+        VERIFY_IS_TRUE(s.find("EffectiveBufferSeparation") == string::npos);
+    }
+
+    void XmlResultParserUnitTests::Test_ParseProfileBufferSeparation()
+    {
+        Profile profile;
+        TimeSpan timeSpan;
+        Target target;
+
+        timeSpan.AddTarget(target);
+        profile.AddTimeSpan(timeSpan);
+
+        string s = profile.GetXml(0);
+
+        // Profile XML should have BufferSeparation but NOT EffectiveBufferSeparation
+        VERIFY_IS_TRUE(s.find("<BufferSeparation>PDECacheLine</BufferSeparation>") != string::npos);
+        VERIFY_IS_TRUE(s.find("EffectiveBufferSeparation") == string::npos);
+    }
+
+    void XmlResultParserUnitTests::Test_ParseResultsBufferSeparation8KPage128BLine()
+    {
+        //
+        // Verify that the XML result output uses the mock system's 8K/128B
+        // values (128MiB = 134217728 effective separation), not the real system.
+        //
+
+        Profile profile;
+        TimeSpan timeSpan;
+        Target target;
+        XmlResultParser parser;
+
+        Results results;
+        results.fUseETW = false;
+        results.ullTimeCount = PerfTimer::SecondsToPerfTime(10.0);
+
+        SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION spi = {};
+        results.vSystemProcessorPerfInfo.push_back(spi);
+
+        TargetResults targetResults;
+        targetResults.sPath = "testfile.dat";
+        targetResults.ullFileSize = 1024 * 1024;
+
+        ThreadResults threadResults;
+        threadResults.vTargetResults.push_back(targetResults);
+        results.vThreadResults.push_back(threadResults);
+
+        vector<Results> vResults;
+        vResults.push_back(results);
+
+        SystemInformation system;
+        system.ResetTime();
+        system.sComputerName.clear();
+        system.sProcessorName.clear();
+        system.sActivePolicyName.clear();
+        system.sActivePolicyGuid.clear();
+        system.dwPageSize = 8192;
+        system.processorTopology._ulProcessorCount = 1;
+        system.processorTopology._ubPerformanceEfficiencyClass = 0;
+        system.processorTopology._fSMT = false;
+        system.processorTopology._vProcessorGroupInformation.clear();
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
+        ProcessorNumaInformation node;
+        node._nodeNumber = 0;
+        node._ulProcCount = 0;
+        node._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorNumaInformation.clear();
+        system.processorTopology._vProcessorNumaInformation.push_back(node);
+        ProcessorSocketInformation socket;
+        socket._ulSocketNumber = 0;
+        socket._ulProcCount = 0;
+        socket._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorSocketInformation.clear();
+        system.processorTopology._vProcessorSocketInformation.push_back(socket);
+        system.processorTopology._vProcessorCoreInformation.clear();
+        system.processorTopology._vProcessorCoreInformation.emplace_back((WORD)0, (KAFFINITY)0x1, (BYTE)0);
+        system.processorTopology._vProcessorCacheInformation.clear();
+        ProcessorCacheInformation l3(3, 16, 128, 32 * 1024 * 1024, CacheUnified);
+        l3._processorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorCacheInformation.push_back(l3);
+
+        timeSpan.SetSystem(&system);
+        timeSpan.Finalize();
+        timeSpan.AddTarget(target);
+        profile.AddTimeSpan(timeSpan);
+
+        string sResults = parser.ParseResults(profile, system, vResults);
+
+        // Profile section: BufferSeparation present, EffectiveBufferSeparation absent
+        VERIFY_IS_TRUE(sResults.find("<BufferSeparation>PDECacheLine</BufferSeparation>") != string::npos);
+
+        // Result timespan section: EffectiveBufferSeparation with 8K/128B value
+        VERIFY_IS_TRUE(sResults.find("<EffectiveBufferSeparation>134217728</EffectiveBufferSeparation>") != string::npos);
+
+        // Verify page size in system info is 8K
+        VERIFY_IS_TRUE(sResults.find("<PageSize>8192</PageSize>") != string::npos);
     }
 }

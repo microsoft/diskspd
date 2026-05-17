@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <TestAdaptersPaths>C:\Program Files (x86)\Windows Kits\10\Testing\Runtimes\TAEF\arm64</TestAdaptersPaths>
+    <EnvironmentVariables>
+      <PATH>C:\Program Files (x86)\Windows Kits\10\Testing\Runtimes\TAEF\arm64;%PATH%</PATH>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

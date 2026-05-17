@@ -102,6 +102,10 @@ namespace UnitTests
                         "            <DisableAffinity>true</DisableAffinity>\n"
                         "            <CompletionRoutines>true</CompletionRoutines>\n"
                         "            <MeasureLatency>true</MeasureLatency>\n"
+                        "            <IoRing>\n"
+                        "                <IoRingBatchSize>75</IoRingBatchSize>\n"
+                        "                <UseRegBuffer>true</UseRegBuffer>\n"
+                        "            </IoRing>\n"
                         "            <Targets>\n"
                         "                <Target>\n"
                         "                    <Path>testfile.dat</Path>\n"
@@ -192,6 +196,28 @@ namespace UnitTests
                         "                </Target>\n"
                         "            </Targets>\n"
                         "        </TimeSpan>\n"
+                        "        <TimeSpan>\n"
+                        "            <Duration>10</Duration>\n"
+                        "            <Warmup>20</Warmup>\n"
+                        "            <Cooldown>30</Cooldown>\n"
+                        "            <RandSeed>40</RandSeed>\n"
+                        "            <ThreadCount>50</ThreadCount>\n"
+                        "            <MeasureLatency>true</MeasureLatency>\n"
+                        "            <Targets>\n"
+                        "                <Target>\n"
+                        "                    <Path>testfileBypass1.dat</Path>\n"
+                        "                    <BlockSize>128</BlockSize>\n"
+                        "                    <DisableOSCache>true</DisableOSCache>\n"
+                        "                    <BypassIO>Partial</BypassIO>\n"
+                        "                </Target>\n"
+                        "                <Target>\n"
+                        "                    <Path>testfileBypass2.dat</Path>\n"
+                        "                    <BlockSize>128</BlockSize>\n"
+                        "                    <DisableOSCache>true</DisableOSCache>\n"
+                        "                    <BypassIO>Full</BypassIO>\n"
+                        "                </Target>\n"
+                        "            </Targets>\n"
+                        "        </TimeSpan>\n"
                         "    </TimeSpans>\n"
                         "</Profile>\n");
 /*
@@ -223,7 +249,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(profile.GetEtwUseCyclesCounter() == false);
 
         vector<TimeSpan> vSpans(profile.GetTimeSpans());
-        VERIFY_ARE_EQUAL(vSpans.size(), (size_t)2);
+        VERIFY_ARE_EQUAL(vSpans.size(), (size_t)3);
         VERIFY_ARE_EQUAL(vSpans[0].GetDuration(), (UINT32)10);
         VERIFY_ARE_EQUAL(vSpans[0].GetWarmup(), (UINT32)20);
         VERIFY_ARE_EQUAL(vSpans[0].GetCooldown(), (UINT32)30);
@@ -233,131 +259,146 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == true);
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == true);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == true);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == true);
+        VERIFY_ARE_EQUAL(vSpans[0].GetIoRingBatchSize(), (UINT32)75);
+        VERIFY_IS_TRUE(vSpans[0].GetUseRegBuffer() == true);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)4);
-        Target t(vTargets[0]);
 
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
-        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)123);
-        VERIFY_IS_TRUE(t.GetRandomRatio() == 100);
-        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
-        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 234);
-        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 333);
-        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == true);
-        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
-        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
-        VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
-        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)3344);
-        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 4433);
-        VERIFY_IS_TRUE(t.GetCreateFile() == true);
-        VERIFY_ARE_EQUAL(t.GetFileSize(), 56);
-        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 561);
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
-        VERIFY_IS_TRUE(t.GetUseBurstSize() == true);
-        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)86);
-        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)88);
-        VERIFY_IS_TRUE(t.GetEnableThinkTime() == true);
-        VERIFY_IS_TRUE(t.GetSequentialScanHint() == true);
-        VERIFY_IS_TRUE(t.GetRandomAccessHint() == true);
-        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
-        VERIFY_IS_TRUE(t.GetUseLargePages() == true);
-        VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintNormal);
-        VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)60);
+        {
+            const auto& t = vTargets[0];
 
-        t = vTargets[1];
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile2.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
-        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
-        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
-        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
-        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
-        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
-        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
-        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
-        VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
-        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
-        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetCreateFile() == false);
-        VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)85);
-        VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
-        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
-        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
-        VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
-        VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
-        VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
-        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
-        VERIFY_IS_TRUE(t.GetUseLargePages() == false);
-        VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintLow);
-        VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::None);
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+            VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)123);
+            VERIFY_IS_TRUE(t.GetRandomRatio() == 100);
+            VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
+            VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 234);
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 333);
+            VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == true);
+            VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+            VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
+            VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
+            VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)3344);
+            VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 4433);
+            VERIFY_IS_TRUE(t.GetCreateFile() == true);
+            VERIFY_ARE_EQUAL(t.GetFileSize(), 56);
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 561);
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+            VERIFY_IS_TRUE(t.GetUseBurstSize() == true);
+            VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)86);
+            VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)88);
+            VERIFY_IS_TRUE(t.GetEnableThinkTime() == true);
+            VERIFY_IS_TRUE(t.GetSequentialScanHint() == true);
+            VERIFY_IS_TRUE(t.GetRandomAccessHint() == true);
+            VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
+            VERIFY_IS_TRUE(t.GetUseLargePages() == true);
+            VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintNormal);
+            VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)60);
+        }
+
+        {
+            const auto& t = vTargets[1];
+
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile2.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
+            VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
+            VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
+            VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
+            VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
+            VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+            VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+            VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
+            VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
+            VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetCreateFile() == false);
+            VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)85);
+            VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
+            VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
+            VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
+            VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
+            VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
+            VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
+            VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
+            VERIFY_IS_TRUE(t.GetUseLargePages() == false);
+            VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintLow);
+            VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::None);
+        }
 
         // verify DisableLocalCache
-        t = vTargets[2];
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile3.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
-        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
-        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
-        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
-        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
-        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
-        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableLocalCache);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
-        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
-        VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
-        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
-        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetCreateFile() == false);
-        VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)85);
-        VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
-        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
-        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
-        VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
-        VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
-        VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
-        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == true);
-        VERIFY_IS_TRUE(t.GetUseLargePages() == false);
-        VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintLow);
-        VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::None);
+        {
+            const auto& t = vTargets[2];
+
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile3.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
+            VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
+            VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
+            VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
+            VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
+            VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableLocalCache);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+            VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+            VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
+            VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
+            VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetCreateFile() == false);
+            VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)85);
+            VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
+            VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
+            VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
+            VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
+            VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
+            VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
+            VERIFY_IS_TRUE(t.GetTemporaryFileHint() == true);
+            VERIFY_IS_TRUE(t.GetUseLargePages() == false);
+            VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintLow);
+            VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::None);
+        }
 
         // verify DisableAllCache
-        t = vTargets[3];
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile4.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
-        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
-        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
-        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
-        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
-        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
-        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
-        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
-        VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
-        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
-        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetCreateFile() == false);
-        VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)85);
-        VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
-        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
-        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
-        VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
-        VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
-        VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
-        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == true);
-        VERIFY_IS_TRUE(t.GetUseLargePages() == false);
-        VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintLow);
-        VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::None);
+        {
+            const auto& t = vTargets[3];
+
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile4.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(200));
+            VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
+            VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
+            VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == true);
+            VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), 2222);
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
+            VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+            VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
+            VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
+            VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
+            VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetCreateFile() == false);
+            VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)85);
+            VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
+            VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
+            VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
+            VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
+            VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
+            VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
+            VERIFY_IS_TRUE(t.GetTemporaryFileHint() == true);
+            VERIFY_IS_TRUE(t.GetUseLargePages() == false);
+            VERIFY_IS_TRUE(t.GetIOPriorityHint() == IoPriorityHintLow);
+            VERIFY_IS_TRUE(profile.GetPrecreateFiles() == PrecreateFiles::None);
+        }
 
         VERIFY_ARE_EQUAL(vSpans[1].GetDuration(), (UINT32)10);
         VERIFY_ARE_EQUAL(vSpans[1].GetWarmup(), (UINT32)20);
@@ -371,35 +412,76 @@ namespace UnitTests
         vTargets = vSpans[1].GetTargets();
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)4);
 
-        t = vTargets[0];
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+        {
+            const auto& t = vTargets[0];
+
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+        }
 
         // verify FlushViewOfFile
-        t = vTargets[1];
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile1.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::ViewOfFile);
+        {
+            const auto& t = vTargets[1];
+
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile1.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::ViewOfFile);
+        }
 
         // verify RtlFlushNonVolatileMemory
-        t = vTargets[2];
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile2.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::NonVolatileMemory);
+        {
+            const auto& t = vTargets[2];
+
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile2.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::NonVolatileMemory);
+        }
 
         // verify RtlFlushNonVolatileMemoryNoDrain
-        t = vTargets[3];
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile3.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain);
+        {
+            const auto& t = vTargets[3];
+
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile3.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(100));
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain);
+        }
+
+        // verify BypassIO
+        VERIFY_ARE_EQUAL(vSpans[2].GetDuration(), (UINT32)10);
+        VERIFY_ARE_EQUAL(vSpans[2].GetWarmup(), (UINT32)20);
+        VERIFY_ARE_EQUAL(vSpans[2].GetCooldown(), (UINT32)30);
+        VERIFY_ARE_EQUAL(vSpans[2].GetRandSeed(), (UINT32)40);
+        VERIFY_ARE_EQUAL(vSpans[2].GetThreadCount(), (DWORD)50);
+        VERIFY_IS_TRUE(vSpans[2].GetMeasureLatency() == true);
+
+        vTargets = vSpans[2].GetTargets();
+        VERIFY_ARE_EQUAL(vTargets.size(), (size_t)2);
+
+        // verify BypassIO Partial mode
+        {
+            const auto& t = vTargets[0];
+            VERIFY_IS_TRUE(t.GetPath().compare("testfileBypass1.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(128));
+            VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
+            VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Partial);
+        }
+
+        // verify BypassIO Full mode
+        {
+            const auto& t = vTargets[1];
+            VERIFY_IS_TRUE(t.GetPath().compare("testfileBypass2.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(128));
+            VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
+            VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Full);
+        }
     }
 
     void XmlProfileParserUnitTests::Test_ParseFilePrecreateFilesUseMaxSize()
@@ -509,7 +591,7 @@ namespace UnitTests
         Profile profile;
         VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         VERIFY_IS_TRUE(profile.Validate(false));
-        vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+        const auto& vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         vector<Target> vTargets(vTimespans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -537,7 +619,7 @@ namespace UnitTests
                 "            </Targets>\n"
                 "            <Affinity>\n"
                 "                <AffinityGroupAssignment Group=\"0\" Processor =\"2\"/>\n"
-                "                <AffinityGroupAssignment Group=\"1\" Processor =\"32\"/>\n"
+                "                <AffinityGroupAssignment Group=\"1\" Processor =\"31\"/>\n"
                 "            </Affinity>\n"
                 "        </TimeSpan>\n"
                 "    </TimeSpans>\n"
@@ -548,15 +630,17 @@ namespace UnitTests
             Profile profile;
             VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
             VERIFY_IS_TRUE(profile.Validate(false));
-            vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+            const auto& vTimespans(profile.GetTimeSpans());
             VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
 
-            const auto& vAffinity(vTimespans[0].GetAffinityAssignments());
-            VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)2);
-            VERIFY_ARE_EQUAL(vAffinity[0].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[0].bProc, (BYTE)2);
-            VERIFY_ARE_EQUAL(vAffinity[1].wGroup, 1);
-            VERIFY_ARE_EQUAL(vAffinity[1].bProc, (BYTE)32);
+            // note: to cross-compile 32/64bit, the highest valid processor index for 32-bit KAFFINITY is 31
+
+            const auto& vMasks(vTimespans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x4);
+            VERIFY_ARE_EQUAL(vMasks[1].wGroup, (WORD)1);
+            VERIFY_ARE_EQUAL(vMasks[1].mask, ((KAFFINITY)1 << 31));
         }
 
         // out-of-range processor index (BYTE)
@@ -643,18 +727,865 @@ namespace UnitTests
         Profile profile;
         VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         VERIFY_IS_TRUE(profile.Validate(false));
-        vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+        const auto& vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
 
-        // Old style, group is wired to zero.
-        const auto& vAffinity(vTimespans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)2);
-        VERIFY_ARE_EQUAL(vAffinity[0].wGroup, 0);
-        VERIFY_ARE_EQUAL(vAffinity[0].bProc, (BYTE)1);
-        VERIFY_ARE_EQUAL(vAffinity[1].wGroup, 0);
-        VERIFY_ARE_EQUAL(vAffinity[1].bProc, (BYTE)31);
+        // Old style parses into group mask form. CPUs 1 and 31 merge (ascending, same group).
+        const auto& vMasks(vTimespans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+        VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+        VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x80000002);
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseGroupMaskAffinity()
+    {
+        // normal case: two groups with masks
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"0x7\"/>\n"
+                "                <Group Group=\"1\" Mask=\"0xA4\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+
+            const auto& vMasks(vTimespans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x7);
+            VERIFY_ARE_EQUAL(vMasks[1].wGroup, (WORD)1);
+            VERIFY_ARE_EQUAL(vMasks[1].mask, (KAFFINITY)0xA4);
+        }
+
+        // zero mask (whole-group effective)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"0x0\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+
+            const auto& vMasks(vTimespans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x0);
+        }
+
+        // mask with gaps (e.g., CPUs 0 and 3 = 0x9)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"0x9\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+
+            const auto& vMasks(vTimespans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x9);
+        }
+
+        // descending masks don't merge: 0x20 (bit 5) then 0x8 (bit 3)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"0x20\"/>\n"
+                "                <Group Group=\"0\" Mask=\"0x8\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+
+            const auto& vMasks(vTimespans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x20);
+            VERIFY_ARE_EQUAL(vMasks[1].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[1].mask, (KAFFINITY)0x8);
+        }
+
+        // out-of-range group
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"70000\" Mask=\"0x1\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // invalid mask format (not a number)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"junk\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // missing Mask attribute - schema validation should catch this
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // missing Group attribute - schema validation should catch this
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Mask=\"0x7\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // AffinityGroupAssignment missing Processor - now required by schema
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <AffinityGroupAssignment Group=\"0\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // AffinityGroupAssignment missing Group - now required by schema
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <AffinityGroupAssignment Processor=\"2\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
     }
     
+    void XmlProfileParserUnitTests::Test_ParseGroupMaskAffinityInputValidation()
+    {
+        // Mask with leading minus sign
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"-1\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // Mask with leading plus sign
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"+7\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // Mask exceeding KAFFINITY range (always >32-bit, also >64-bit)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"0x10000000000000000\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+#if defined(_M_IX86) || defined(_M_ARM)
+        // Mask exceeding 32-bit KAFFINITY (valid on 64-bit, rejected on 32-bit)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"0x100000001\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+#endif
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseNonGroupAffinityInputValidation()
+    {
+        // AffinityAssignment with leading minus sign
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <AffinityAssignment>-1</AffinityAssignment>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // AffinityAssignment with leading plus sign
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <AffinityAssignment>+5</AffinityAssignment>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // AffinityAssignment exceeding c_maxCpuIndexPerGroup
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+
+            // c_maxCpuIndexPerGroup is sizeof(KAFFINITY)*8 - 1 = 31 on x86, 63 on x64
+            // Use 200 which exceeds both
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <Affinity>\n"
+                "                <AffinityAssignment>200</AffinityAssignment>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+    }
+    
+    void XmlProfileParserUnitTests::Test_ParseAffinityTraversal()
+    {
+        // CoreAware traversal (default value, no EfficiencyOrder attribute)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal>CoreAware</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(false), AffinityGroupSpan::Unspecified);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(false), AffinityEfficiencyOrder::Unspecified);
+        }
+
+        // Cpu traversal, no EfficiencyOrder
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal>Cpu</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(false), AffinityGroupSpan::Unspecified);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(false), AffinityEfficiencyOrder::Unspecified);
+        }
+
+        // CoreAware + Span (via Group attribute), no Efficiency
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal Group=\"Span\">CoreAware</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(false), AffinityEfficiencyOrder::Unspecified);
+        }
+
+        // CoreAware with Efficiency="PFirst"
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal Efficiency=\"PFirst\">CoreAware</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(false), AffinityGroupSpan::Unspecified);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::PFirst);
+        }
+
+        // CoreAware with Efficiency="EFirst"
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal Efficiency=\"EFirst\">CoreAware</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(false), AffinityGroupSpan::Unspecified);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::EFirst);
+        }
+
+        // CoreAware + Span with Efficiency="FillPFirst"
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal Group=\"Span\" Efficiency=\"FillPFirst\">CoreAware</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillPFirst);
+        }
+
+        // Cpu with Efficiency="FillEFirst"
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal Efficiency=\"FillEFirst\">Cpu</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(false), AffinityGroupSpan::Unspecified);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillEFirst);
+        }
+
+        // AffinityTraversal combined with Group mask affinity
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal Efficiency=\"EFirst\">CoreAware</AffinityTraversal>\n"
+                "            <Affinity>\n"
+                "                <Group Group=\"0\" Mask=\"0xF\"/>\n"
+                "            </Affinity>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(false), AffinityGroupSpan::Unspecified);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::EFirst);
+            const auto& vMasks(vTimespans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0xF);
+        }
+
+        // Absent AffinityTraversal element - defaults unchanged (Cpu, Fill, Unspecified)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            const auto& vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityTraversal(false), AffinityTraversal::Unspecified);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityGroupSpan(false), AffinityGroupSpan::Unspecified);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetAffinityEfficiencyOrder(false), AffinityEfficiencyOrder::Unspecified);
+        }
+
+        // Invalid AffinityTraversal value - caught by XSD schema validation
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal>Bogus</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // Invalid EfficiencyOrder attribute value - caught by XSD schema validation
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "    <TimeSpans>\n"
+                "        <TimeSpan>\n"
+                "            <Targets>\n"
+                "                <Target>\n"
+                "                    <Path></Path>\n"
+                "                </Target>\n"
+                "            </Targets>\n"
+                "            <AffinityTraversal Efficiency=\"Bogus\">CoreAware</AffinityTraversal>\n"
+                "        </TimeSpan>\n"
+                "    </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+    }
+
     void XmlProfileParserUnitTests::Test_ParseFileWriteBufferContentZero()
     {
         FILE *pFile;
@@ -681,7 +1612,7 @@ namespace UnitTests
         Profile profile;
         VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         VERIFY_IS_TRUE(profile.Validate(false));
-        vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+        const auto& vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         vector<Target> vTargets(vTimespans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -715,7 +1646,7 @@ namespace UnitTests
         Profile profile;
         VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         VERIFY_IS_TRUE(profile.Validate(false));
-        vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+        const auto& vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         VERIFY_IS_TRUE(vTimespans[0].GetRandomWriteData() == true);
         vector<Target> vTargets(vTimespans[0].GetTargets());
@@ -755,7 +1686,7 @@ namespace UnitTests
         Profile profile;
         VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         VERIFY_IS_TRUE(profile.Validate(false));
-        vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+        const auto& vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         vector<Target> vTargets(vTimespans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -795,7 +1726,7 @@ namespace UnitTests
         Profile profile;
         VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         VERIFY_IS_TRUE(profile.Validate(false));
-        vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+        const auto& vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         vector<Target> vTargets(vTimespans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -848,7 +1779,7 @@ namespace UnitTests
         Profile profile;
         VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         VERIFY_IS_TRUE(profile.Validate(false));
-        vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+        const auto& vTimespans(profile.GetTimeSpans());
         VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
         VERIFY_ARE_EQUAL(vTimespans[0].GetThreadCount(), (DWORD)4);
         VERIFY_ARE_EQUAL(vTimespans[0].GetRequestCount(), (DWORD)6);
@@ -865,6 +1796,188 @@ namespace UnitTests
         VERIFY_ARE_EQUAL(vThreadTargets[2].GetWeight(), (UINT32)0);
         VERIFY_ARE_EQUAL(vTargets[1].GetWeight(), (UINT32)100);
         VERIFY_ARE_EQUAL(vTargets[1].GetThreadTargets().size(), (size_t)0);
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseFileIoRing()
+    {
+        // Test all IoRing XML elements
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                           "<Profile>\n"
+                           "    <TimeSpans>\n"
+                           "        <TimeSpan>\n"
+                           "            <IoRing>\n"
+                           "                <IoRingBatchSize>50</IoRingBatchSize>\n"
+                           "                <UseRegBuffer>true</UseRegBuffer>\n"
+                           "            </IoRing>\n"
+                           "            <Targets>\n"
+                           "                <Target>\n"
+                           "                    <Path></Path>\n"
+                           "                </Target>\n"
+                           "            </Targets>\n"
+                           "        </TimeSpan>\n"
+                           "    </TimeSpans>\n"
+                           "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_IS_TRUE(vTimespans[0].GetUseIoRing() == true);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSize(), (UINT32)50);
+            VERIFY_IS_TRUE(vTimespans[0].GetUseRegBuffer() == true);
+        }
+
+        // Test IoRingBatchSize minimum boundary (1)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                           "<Profile>\n"
+                           "    <TimeSpans>\n"
+                           "        <TimeSpan>\n"
+                           "            <IoRing>\n"
+                           "                <IoRingBatchSize>1</IoRingBatchSize>\n"
+                           "            </IoRing>\n"
+                           "            <Targets>\n"
+                           "                <Target>\n"
+                           "                    <Path></Path>\n"
+                           "                </Target>\n"
+                           "            </Targets>\n"
+                           "        </TimeSpan>\n"
+                           "    </TimeSpans>\n"
+                           "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_IS_TRUE(vTimespans[0].GetUseIoRing() == true);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSize(), (UINT32)1);
+        }
+
+        // Test IoRingBatchSize maximum boundary (100)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                           "<Profile>\n"
+                           "    <TimeSpans>\n"
+                           "        <TimeSpan>\n"
+                           "            <IoRing>\n"
+                           "                <IoRingBatchSize>100</IoRingBatchSize>\n"
+                           "            </IoRing>\n"
+                           "            <Targets>\n"
+                           "                <Target>\n"
+                           "                    <Path></Path>\n"
+                           "                </Target>\n"
+                           "            </Targets>\n"
+                           "        </TimeSpan>\n"
+                           "    </TimeSpans>\n"
+                           "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_IS_TRUE(vTimespans[0].GetUseIoRing() == true);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSize(), (UINT32)100);
+        }
+
+        // Test IoRingBatchSize = 0 (invalid, must be >= 1)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                           "<Profile>\n"
+                           "    <TimeSpans>\n"
+                           "        <TimeSpan>\n"
+                           "            <IoRing>\n"
+                           "                <IoRingBatchSize>0</IoRingBatchSize>\n"
+                           "            </IoRing>\n"
+                           "            <Targets>\n"
+                           "                <Target>\n"
+                           "                    <Path></Path>\n"
+                           "                </Target>\n"
+                           "            </Targets>\n"
+                           "        </TimeSpan>\n"
+                           "    </TimeSpans>\n"
+                           "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // Test IoRingBatchSize = 101 (invalid, must be <= 100)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                           "<Profile>\n"
+                           "    <TimeSpans>\n"
+                           "        <TimeSpan>\n"
+                           "            <IoRing>\n"
+                           "                <IoRingBatchSize>101</IoRingBatchSize>\n"
+                           "            </IoRing>\n"
+                           "            <Targets>\n"
+                           "                <Target>\n"
+                           "                    <Path></Path>\n"
+                           "                </Target>\n"
+                           "            </Targets>\n"
+                           "        </TimeSpan>\n"
+                           "    </TimeSpans>\n"
+                           "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+
+        // Test IoRingBatchSize = -1 (invalid, negative value)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                           "<Profile>\n"
+                           "    <TimeSpans>\n"
+                           "        <TimeSpan>\n"
+                           "            <IoRing>\n"
+                           "                <IoRingBatchSize>-1</IoRingBatchSize>\n"
+                           "            </IoRing>\n"
+                           "            <Targets>\n"
+                           "                <Target>\n"
+                           "                    <Path></Path>\n"
+                           "                </Target>\n"
+                           "            </Targets>\n"
+                           "        </TimeSpan>\n"
+                           "    </TimeSpans>\n"
+                           "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
     }
 
     void XmlProfileParserUnitTests::Test_ParseThroughput()
@@ -1668,5 +2781,213 @@ namespace UnitTests
             VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[0].GetTargets()[0].GetPath().c_str(), "foo.bin"));
             VERIFY_IS_TRUE(!strcmp(profile.GetTimeSpans()[1].GetTargets()[0].GetPath().c_str(), "bar.bin"));
         }        
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseBufferSeparation()
+    {
+        // SystemDefault
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <BufferSeparation>SystemDefault</BufferSeparation>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetBufferSeparation(), BufferSeparation::SystemDefault);
+            VERIFY_IS_TRUE(profile.GetTimeSpans()[0].IsBufferSeparationExplicit());
+        }
+
+        // PDECacheLine
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <BufferSeparation>PDECacheLine</BufferSeparation>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetBufferSeparation(), BufferSeparation::PDECacheLine);
+            VERIFY_IS_TRUE(profile.GetTimeSpans()[0].IsBufferSeparationExplicit());
+        }
+
+        // Absent defaults to PDECacheLine (not explicit)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetBufferSeparation(), BufferSeparation::PDECacheLine);
+            VERIFY_IS_FALSE(profile.GetTimeSpans()[0].IsBufferSeparationExplicit());
+        }
+
+        // Invalid value fails
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <BufferSeparation>InvalidValue</BufferSeparation>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+        }
+    }
+
+    void XmlProfileParserUnitTests::Test_ParseCompletionDepth()
+    {
+        // Valid value
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <CompletionDepth>8</CompletionDepth>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetCompletionDepth(), (DWORD)8);
+            VERIFY_IS_TRUE(profile.GetTimeSpans()[0].IsCompletionDepthExplicit());
+            VERIFY_IS_TRUE(profile.Validate(false));
+        }
+
+        // Absent defaults to c_defaultCompletionDepth, not explicit
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_ARE_EQUAL(profile.GetTimeSpans()[0].GetCompletionDepth(), c_defaultCompletionDepth);
+            VERIFY_IS_FALSE(profile.GetTimeSpans()[0].IsCompletionDepthExplicit());
+        }
+
+        // Value 0 fails validation (below minimum)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <CompletionDepth>0</CompletionDepth>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_FALSE(profile.Validate(false));
+        }
+
+        // Value 17 fails validation (above maximum)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <CompletionDepth>17</CompletionDepth>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_FALSE(profile.Validate(false));
+        }
+
+        // Conflict with CompletionRoutines
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Profile>\n"
+                "  <TimeSpans>\n"
+                "    <TimeSpan>\n"
+                "      <CompletionDepth>4</CompletionDepth>\n"
+                "      <CompletionRoutines>true</CompletionRoutines>\n"
+                "      <Targets><Target><Path>testfile.dat</Path></Target></Targets>\n"
+                "    </TimeSpan>\n"
+                "  </TimeSpans>\n"
+                "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_FALSE(profile.Validate(false));
+        }
     }
 }

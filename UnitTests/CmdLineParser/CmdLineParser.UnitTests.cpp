@@ -208,8 +208,8 @@ namespace UnitTests
             VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
             VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
 
-            const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-            VERIFY_IS_TRUE(vAffinity.empty());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_IS_TRUE(vMasks.empty());
         }
 
         // base case
@@ -222,8 +222,8 @@ namespace UnitTests
             VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
             VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
 
-            const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-            VERIFY_IS_TRUE(vAffinity.empty());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_IS_TRUE(vMasks.empty());
         }
 
         // no group spec case
@@ -236,14 +236,11 @@ namespace UnitTests
             VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
             VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
 
-            const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-            VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)3);
-            VERIFY_ARE_EQUAL(vAffinity[0].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[0].bProc, (BYTE)1);
-            VERIFY_ARE_EQUAL(vAffinity[1].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[1].bProc, (BYTE)4);
-            VERIFY_ARE_EQUAL(vAffinity[2].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[2].bProc, (BYTE)6);
+            // CPUs 1,4,6 ascending in group 0 -> merged into one mask
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x52);
         }
 
         // single group spec
@@ -256,14 +253,10 @@ namespace UnitTests
             VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
             VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
 
-            const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-            VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)3);
-            VERIFY_ARE_EQUAL(vAffinity[0].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[0].bProc, (BYTE)1);
-            VERIFY_ARE_EQUAL(vAffinity[1].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[1].bProc, (BYTE)4);
-            VERIFY_ARE_EQUAL(vAffinity[2].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[2].bProc, (BYTE)6);
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x52);
         }
 
         // multiple group spec
@@ -276,20 +269,13 @@ namespace UnitTests
             VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
             VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
 
-            const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-            VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)6);
-            VERIFY_ARE_EQUAL(vAffinity[0].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[0].bProc, (BYTE)1);
-            VERIFY_ARE_EQUAL(vAffinity[1].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[1].bProc, (BYTE)4);
-            VERIFY_ARE_EQUAL(vAffinity[2].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[2].bProc, (BYTE)6);
-            VERIFY_ARE_EQUAL(vAffinity[3].wGroup, 1);
-            VERIFY_ARE_EQUAL(vAffinity[3].bProc, (BYTE)2);
-            VERIFY_ARE_EQUAL(vAffinity[4].wGroup, 1);
-            VERIFY_ARE_EQUAL(vAffinity[4].bProc, (BYTE)5);
-            VERIFY_ARE_EQUAL(vAffinity[5].wGroup, 1);
-            VERIFY_ARE_EQUAL(vAffinity[5].bProc, (BYTE)7);
+            // group 0 CPUs 1,4,6 -> 0x52; group 1 CPUs 2,5,7 -> 0xA4
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x52);
+            VERIFY_ARE_EQUAL(vMasks[1].wGroup, (WORD)1);
+            VERIFY_ARE_EQUAL(vMasks[1].mask, (KAFFINITY)0xA4);
         }
 
         // multiple group spec across two instances of -ag
@@ -302,28 +288,26 @@ namespace UnitTests
             VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
             VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
 
-            const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-            VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)6);
-            VERIFY_ARE_EQUAL(vAffinity[0].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[0].bProc, (BYTE)1);
-            VERIFY_ARE_EQUAL(vAffinity[1].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[1].bProc, (BYTE)4);
-            VERIFY_ARE_EQUAL(vAffinity[2].wGroup, 0);
-            VERIFY_ARE_EQUAL(vAffinity[2].bProc, (BYTE)6);
-            VERIFY_ARE_EQUAL(vAffinity[3].wGroup, 1);
-            VERIFY_ARE_EQUAL(vAffinity[3].bProc, (BYTE)2);
-            VERIFY_ARE_EQUAL(vAffinity[4].wGroup, 1);
-            VERIFY_ARE_EQUAL(vAffinity[4].bProc, (BYTE)5);
-            VERIFY_ARE_EQUAL(vAffinity[5].wGroup, 1);
-            VERIFY_ARE_EQUAL(vAffinity[5].bProc, (BYTE)7);
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x52);
+            VERIFY_ARE_EQUAL(vMasks[1].wGroup, (WORD)1);
+            VERIFY_ARE_EQUAL(vMasks[1].mask, (KAFFINITY)0xA4);
         }
 
         // now various syntax error cases
-        // just group spec
+        // just group spec - NOW LEGAL: whole-group effective
         {
             Profile profile;
             const char *argv[] = { "foo", "-ag0", "testfile.dat" };
-            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0);
         }
 
         // multiple g
@@ -361,7 +345,7 @@ namespace UnitTests
             VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
         }
 
-        // trailing group spec form
+        // mixed CPU and whole-group in one switch, not allowed
         {
             Profile profile;
             const char *argv[] = { "foo", "-ag1,0,g2", "testfile.dat" };
@@ -386,6 +370,387 @@ namespace UnitTests
         {
             Profile profile;
             const char *argv[] = { "foo", "-ag70000,1", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // range spec: -ag0,0-2
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag0,0-2", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x7);
+        }
+
+        // range spec with gap: -ag0,0-2,5-7
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag0,0-2,5-7", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0xE7);
+        }
+
+        // mixed range and individual: -ag0,0,3-5,7
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag0,0,3-5,7", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0xB9);
+        }
+
+        // range across groups: -ag0,0-2,g1,5-7
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag0,0-2,g1,5-7", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x7);
+            VERIFY_ARE_EQUAL(vMasks[1].wGroup, (WORD)1);
+            VERIFY_ARE_EQUAL(vMasks[1].mask, (KAFFINITY)0xE0);
+        }
+
+        // equivalence: -ag0,0-10,15-20 and -ag0,0-10,g0,15-20 produce same result
+        {
+            // bits 0-10 = 0x7FF, bits 15-20 = 0x1F8000, total = 0x1F87FF
+            Profile p1, p2;
+            const char *argv1[] = { "foo", "-ag0,0-10,15-20", "testfile.dat" };
+            const char *argv2[] = { "foo", "-ag0,0-10,g0,15-20", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv1), argv1, &p1, &s) == true);
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv2), argv2, &p2, &s) == true);
+
+            const auto& m1(p1.GetTimeSpans()[0].GetAffinityGroupMasks());
+            const auto& m2(p2.GetTimeSpans()[0].GetAffinityGroupMasks());
+
+            // Both should produce a single merged mask entry for group 0
+            VERIFY_ARE_EQUAL(m1.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(m1[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(m1[0].mask, (KAFFINITY)0x1F87FF);
+
+            VERIFY_ARE_EQUAL(m2.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(m2[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(m2[0].mask, (KAFFINITY)0x1F87FF);
+        }
+
+        // multi whole-group in one switch: NOW ILLEGAL (use separate -a switches)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag1,g0", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // multi whole-group across separate -a switches: legal
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag1", "-ag0", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)1);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0);
+            VERIFY_ARE_EQUAL(vMasks[1].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[1].mask, (KAFFINITY)0);
+        }
+
+        // descending CPUs don't merge: -ag0,5,3
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag0,5,3", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x20);
+            VERIFY_ARE_EQUAL(vMasks[1].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[1].mask, (KAFFINITY)0x8);
+        }
+
+        // inverted range error: -ag0,5-3
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag0,5-3", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // trailing dash: -ag0,5-
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag0,5-", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -acs: CoreAware + Span
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-acs", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            VERIFY_IS_TRUE(vSpans[0].GetAffinityGroupMasks().empty());
+        }
+
+        // -ac with separate -ag spec
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ac", "-ag0,1,2", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Fill);
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x6);
+        }
+
+        // -as with separate whole-group
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-as", "-ag0", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+            VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0);
+        }
+
+        // -acs with multiple -ag specs
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-acs", "-ag0", "-ag1,0-3", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+            VERIFY_ARE_EQUAL(vMasks.size(), (size_t)2);
+        }
+
+        // default is Cpu, Fill
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ag0,0-3", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Fill);
+        }
+
+        // -aP: FillPFirst efficiency order
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aP", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillPFirst);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+        }
+
+        // -ae: EFirst efficiency order
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ae", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::EFirst);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+        }
+
+        // -aE: FillEFirst efficiency order
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aE", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillEFirst);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+        }
+
+        // -ap: explicit PFirst
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ap", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::PFirst);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+        }
+
+        // -acsE: composed CoreAware + Span + FillEFirst
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-acsE", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillEFirst);
+        }
+
+        // -acs -aE: separate CoreAware+Span + FillEFirst
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-acs", "-aE", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillEFirst);
+        }
+
+        // -aPcs: composed FillPFirst + CoreAware + Span (any order)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aPcs", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillPFirst);
+        }
+
+        // -aP -ac: separate FillPFirst + CoreAware
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aP", "-ac", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Fill);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillPFirst);
+        }
+
+        // -aPE: multiple efficiency orders conflict
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aPE", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -asP: Span + FillPFirst
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-asP", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::FillPFirst);
+        }
+
+        // -ase: Span + EFirst
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ase", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::Cpu);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityGroupSpan(), AffinityGroupSpan::Span);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::EFirst);
+        }
+
+        // -apsx: trailing invalid character
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-apsx", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -acc: idempotent (c is on/off, repeating is benign)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-acc", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+        }
+
+        // -aup: unset efficiency ordering
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aup", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::Unordered);
+        }
+
+        // -aup -ac: unordered composes with core-awareness (separate switches)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aup", "-ac", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+
+            vector<TimeSpan> vSpans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityEfficiencyOrder(), AffinityEfficiencyOrder::Unordered);
+            VERIFY_ARE_EQUAL(vSpans[0].GetAffinityTraversal(), AffinityTraversal::CoreAware);
+        }
+
+        // -aup -aE: conflict (unset + explicit)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aup", "-aE", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -aE -aup: conflict (explicit + unset, reversed)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aE", "-aup", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -au alone: error (requires sub-option)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-au", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -aux: unknown -au option
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aux", "testfile.dat" };
             VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
         }
     }
@@ -426,77 +791,82 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)3);
-        VERIFY_ARE_EQUAL(vAffinity[0].wGroup, 0);
-        VERIFY_ARE_EQUAL(vAffinity[0].bProc, (BYTE)1);
-        VERIFY_ARE_EQUAL(vAffinity[1].wGroup, 0);
-        VERIFY_ARE_EQUAL(vAffinity[1].bProc, (BYTE)4);
-        VERIFY_ARE_EQUAL(vAffinity[2].wGroup, 0);
-        VERIFY_ARE_EQUAL(vAffinity[2].bProc, (BYTE)6);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+        VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+        VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x52);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)2);
-        Target t(vTargets[0]);
 
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(4 * 1024));
-        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
-        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
-        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
-        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), t.GetBlockSizeInBytes());
-        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
-        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
-        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
-        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
-        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetCreateFile() == false);
-        VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
-        VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
-        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
-        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
-        VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
-        VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
-        VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
-        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
-        VERIFY_IS_TRUE(t.GetUseLargePages() == false);
-        VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+        {
+            const auto& t = vTargets[0];
 
-        t = vTargets[1];
-        VERIFY_IS_TRUE(t.GetPath().compare("testfile2.dat") == 0);
-        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(4 * 1024));
-        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
-        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
-        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
-        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), t.GetBlockSizeInBytes());
-        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
-        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
-        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
-        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
-        VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
-        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
-        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
-        VERIFY_IS_TRUE(t.GetCreateFile() == false);
-        VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
-        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
-        VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
-        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
-        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
-        VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
-        VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
-        VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
-        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
-        VERIFY_IS_TRUE(t.GetUseLargePages() == false);
-        VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(4 * 1024));
+            VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
+            VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
+            VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
+            VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), t.GetBlockSizeInBytes());
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
+            VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
+            VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+            VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
+            VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
+            VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetCreateFile() == false);
+            VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+            VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
+            VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
+            VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
+            VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
+            VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
+            VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
+            VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
+            VERIFY_IS_TRUE(t.GetUseLargePages() == false);
+            VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+        }
+
+        {
+            const auto& t = vTargets[1];
+
+            VERIFY_IS_TRUE(t.GetPath().compare("testfile2.dat") == 0);
+            VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(4 * 1024));
+            VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
+            VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
+            VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
+            VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), t.GetBlockSizeInBytes());
+            VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
+            VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
+            VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+            VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+            VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
+            VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
+            VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
+            VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
+            VERIFY_IS_TRUE(t.GetCreateFile() == false);
+            VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
+            VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+            VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
+            VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
+            VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
+            VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
+            VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
+            VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
+            VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
+            VERIFY_IS_TRUE(t.GetUseLargePages() == false);
+            VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+        }
     }
 
     void CmdLineParserUnitTests::TestParseCmdLineBlockSize()
@@ -535,15 +905,12 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)3);
-        VERIFY_ARE_EQUAL(vAffinity[0].wGroup, 0);
-        VERIFY_ARE_EQUAL(vAffinity[0].bProc, (BYTE)1);
-        VERIFY_ARE_EQUAL(vAffinity[1].wGroup, 0);
-        VERIFY_ARE_EQUAL(vAffinity[1].bProc, (BYTE)4);
-        VERIFY_ARE_EQUAL(vAffinity[2].wGroup, 0);
-        VERIFY_ARE_EQUAL(vAffinity[2].bProc, (BYTE)6);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)1);
+        VERIFY_ARE_EQUAL(vMasks[0].wGroup, (WORD)0);
+        VERIFY_ARE_EQUAL(vMasks[0].mask, (KAFFINITY)0x52);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -561,6 +928,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -616,9 +984,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -636,6 +1005,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -877,9 +1247,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -897,6 +1268,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -970,9 +1342,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -990,6 +1363,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1138,9 +1512,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1158,6 +1533,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1179,12 +1555,84 @@ namespace UnitTests
     void CmdLineParserUnitTests::TestParseCmdLineDisableAffinityConflict()
     {
         CmdLineParser p;
-        Profile profile;
         struct Synchronization s = {};
-        const char *argv[] = { "foo", "-b128K", "-w84", "-n", "-a1,2", "testfile.dat" };
 
-        // -n cannot be used with -a
-        VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == false);
+        // -n cannot be used with -a (explicit masks)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-b128K", "-w84", "-n", "-a1,2", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -n cannot be used with -ac (core-aware traversal)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-n", "-ac", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -n cannot be used with -as (span)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-n", "-as", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -n cannot be used with -aP (efficiency ordering)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-n", "-aP", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -n cannot be used with -ae (efficiency ordering)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-n", "-ae", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -n cannot be used with -aup (efficiency opt-out)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-n", "-aup", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -n cannot be used with -acs (composed core-aware + span)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-n", "-acs", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -n cannot be used with -ap (explicit default efficiency)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-n", "-ap", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // reversed order: -ac then -n
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-ac", "-n", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // reversed order: -aP then -n
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-aP", "-n", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -n cannot be used with whole-group affinity
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-n", "-ag0", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
     }
 
     void CmdLineParserUnitTests::TestParseCmdLineVerbose()
@@ -1223,9 +1671,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1243,6 +1692,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1297,9 +1747,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1317,6 +1768,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1371,9 +1823,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1391,6 +1844,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1445,9 +1899,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1465,6 +1920,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::On);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1514,9 +1970,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1534,6 +1991,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::On);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == FlushMode);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1595,6 +2053,167 @@ namespace UnitTests
         }
     }
 
+    void CmdLineParserUnitTests::VerifyParseCmdLineBypassIO(Profile &profile, BypassIoMode BypassIoMode)
+    {
+        VERIFY_IS_TRUE(profile.GetVerbose() == false);
+        VERIFY_IS_TRUE(profile.GetProgress() == 0);
+
+        VERIFY_IS_TRUE(profile.GetEtwEnabled() == false);
+        VERIFY_IS_TRUE(profile.GetEtwProcess() == false);
+        VERIFY_IS_TRUE(profile.GetEtwThread() == false);
+        VERIFY_IS_TRUE(profile.GetEtwImageLoad() == false);
+        VERIFY_IS_TRUE(profile.GetEtwDiskIO() == false);
+        VERIFY_IS_TRUE(profile.GetEtwMemoryPageFaults() == false);
+        VERIFY_IS_TRUE(profile.GetEtwMemoryHardFaults() == false);
+        VERIFY_IS_TRUE(profile.GetEtwNetwork() == false);
+        VERIFY_IS_TRUE(profile.GetEtwRegistry() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUsePagedMemory() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUsePerfTimer() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUseSystemTimer() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUseCyclesCounter() == false);
+
+        vector<TimeSpan> vSpans(profile.GetTimeSpans());
+        VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
+        VERIFY_ARE_EQUAL(vSpans[0].GetDuration(), (UINT32)10);
+        VERIFY_ARE_EQUAL(vSpans[0].GetWarmup(), (UINT32)5);
+        VERIFY_ARE_EQUAL(vSpans[0].GetCooldown(), (UINT32)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetRandSeed(), (UINT32)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetThreadCount(), (DWORD)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetRequestCount(), (DWORD)0);
+        VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
+
+        VERIFY_IS_TRUE(vSpans[0].GetAffinityGroupMasks().empty());
+
+        vector<Target> vTargets(vSpans[0].GetTargets());
+        VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
+        Target t(vTargets[0]);
+
+        VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
+        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(128 * 1024));
+        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
+        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
+        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
+        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), t.GetBlockSizeInBytes());
+        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
+        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
+        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::DisableOSCache);
+        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode);
+        VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
+        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
+        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
+        VERIFY_IS_TRUE(t.GetCreateFile() == false);
+        VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
+        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
+        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)0);
+        VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
+        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
+        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
+        VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
+        VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
+        VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
+        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
+        VERIFY_IS_TRUE(t.GetUseLargePages() == false);
+        VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+    }
+
+    void CmdLineParserUnitTests::TestParseCmdLineBypassIO()
+    {
+        // Test BypassIO while allowing partial bypass (-Sy)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-Su", "-Sy", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -Su -Sy testfile.dat") == 0);
+            VerifyParseCmdLineBypassIO(profile, BypassIoMode::Partial);
+        }
+
+        // Test BypassIO (-SY)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-Su", "-SY", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -Su -SY testfile.dat") == 0);
+            VerifyParseCmdLineBypassIO(profile, BypassIoMode::Full);
+        }
+    }
+
+    void CmdLineParserUnitTests::TestParseCmdLineBypassIOConflicts()
+    {
+        CmdLineParser p;
+        struct Synchronization s = {};
+
+        // multiple with -Sy/-Sy
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Su", "-Sy", "-Sy", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // multiple with -SY/-SY
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Su", "-SY", "-SY", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // conflict Sy/SY
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Su", "-Sy", "-SY", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // BypassIO (-SY or -Sy) requires unbuffered IO (-Su)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Sy", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-SY", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // BypassIO (-SY or -Sy) can't be used with write operations (-w)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Su", "-Sy", "-w50", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Su", "-SY", "-w50", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // BypassIO (-SY or -Sy) can't be used with memory mapped IO (-Sm)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Sy", "-Sm", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-SY", "-Sm", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+    }
+
     void CmdLineParserUnitTests::TestParseCmdLineUseCompletionRoutines()
     {
         CmdLineParser p;
@@ -1631,9 +2250,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == true);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1651,6 +2271,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1667,6 +2288,145 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
         VERIFY_IS_TRUE(t.GetUseLargePages() == false);
         VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+    }
+
+    void CmdLineParserUnitTests::VerifyParseCmdLineIoRing(Profile &profile, bool UseRegBuffer, UINT32 IoRingBatchSize)
+    {
+        VERIFY_IS_TRUE(profile.GetVerbose() == false);
+        VERIFY_IS_TRUE(profile.GetProgress() == 0);
+
+        VERIFY_IS_TRUE(profile.GetEtwEnabled() == false);
+        VERIFY_IS_TRUE(profile.GetEtwProcess() == false);
+        VERIFY_IS_TRUE(profile.GetEtwThread() == false);
+        VERIFY_IS_TRUE(profile.GetEtwImageLoad() == false);
+        VERIFY_IS_TRUE(profile.GetEtwDiskIO() == false);
+        VERIFY_IS_TRUE(profile.GetEtwMemoryPageFaults() == false);
+        VERIFY_IS_TRUE(profile.GetEtwMemoryHardFaults() == false);
+        VERIFY_IS_TRUE(profile.GetEtwNetwork() == false);
+        VERIFY_IS_TRUE(profile.GetEtwRegistry() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUsePagedMemory() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUsePerfTimer() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUseSystemTimer() == false);
+        VERIFY_IS_TRUE(profile.GetEtwUseCyclesCounter() == false);
+
+        vector<TimeSpan> vSpans(profile.GetTimeSpans());
+        VERIFY_ARE_EQUAL(vSpans.size(), (size_t)1);
+        VERIFY_ARE_EQUAL(vSpans[0].GetDuration(), (UINT32)10);
+        VERIFY_ARE_EQUAL(vSpans[0].GetWarmup(), (UINT32)5);
+        VERIFY_ARE_EQUAL(vSpans[0].GetCooldown(), (UINT32)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetRandSeed(), (UINT32)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetThreadCount(), (DWORD)0);
+        VERIFY_ARE_EQUAL(vSpans[0].GetRequestCount(), (DWORD)0);
+        VERIFY_IS_TRUE(vSpans[0].GetDisableAffinity() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == true);
+        VERIFY_ARE_EQUAL(vSpans[0].GetIoRingBatchSize(), IoRingBatchSize);
+        VERIFY_IS_TRUE(vSpans[0].GetUseRegBuffer() == UseRegBuffer);
+
+        VERIFY_IS_TRUE(vSpans[0].GetAffinityGroupMasks().empty());
+
+        vector<Target> vTargets(vSpans[0].GetTargets());
+        VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
+        Target t(vTargets[0]);
+
+        VERIFY_IS_TRUE(t.GetPath().compare("testfile.dat") == 0);
+        VERIFY_ARE_EQUAL(t.GetBlockSizeInBytes(), (DWORD)(128 * 1024));
+        VERIFY_ARE_EQUAL(t.GetRequestCount(), (DWORD)2);
+        VERIFY_IS_TRUE(t.GetRandomRatio() == 0);
+        VERIFY_IS_TRUE(t.GetUseInterlockedSequential() == false);
+        VERIFY_ARE_EQUAL(t.GetBlockAlignmentInBytes(), t.GetBlockSizeInBytes());
+        VERIFY_ARE_EQUAL(t.GetBaseFileOffsetInBytes(), 0);
+        VERIFY_IS_TRUE(t.GetUseParallelAsyncIO() == false);
+        VERIFY_IS_TRUE(t.GetCacheMode() == TargetCacheMode::Cached);
+        VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
+        VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
+        VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
+        VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
+        VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
+        VERIFY_IS_TRUE(t.GetCreateFile() == false);
+        VERIFY_ARE_EQUAL(t.GetFileSize(), 0);
+        VERIFY_ARE_EQUAL(t.GetMaxFileSize(), 0);
+        VERIFY_ARE_EQUAL(t.GetWriteRatio(), (DWORD)84);
+        VERIFY_IS_TRUE(t.GetUseBurstSize() == false);
+        VERIFY_ARE_EQUAL(t.GetBurstSize(), (DWORD)0);
+        VERIFY_ARE_EQUAL(t.GetThinkTime(), (DWORD)0);
+        VERIFY_IS_TRUE(t.GetEnableThinkTime() == false);
+        VERIFY_IS_TRUE(t.GetSequentialScanHint() == false);
+        VERIFY_IS_TRUE(t.GetRandomAccessHint() == false);
+        VERIFY_IS_TRUE(t.GetTemporaryFileHint() == false);
+        VERIFY_IS_TRUE(t.GetUseLargePages() == false);
+        VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
+    }
+
+    void CmdLineParserUnitTests::TestParseCmdLineUseIoRing()
+    {
+        // Test IoRing (-u)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-u", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -u testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, false, 25);
+        }
+
+        // Test IoRing with registered buffers (-ub)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-ub", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -ub testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, true, 25);
+        }
+
+        // Test IoRing with custom batch size (-u50)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-u50", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -u50 testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, false, 50);
+        }
+
+        // Test IoRing with registered buffers and custom batch size (-ub75)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-ub75", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -ub75 testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, true, 75);
+        }
+    }
+
+    void CmdLineParserUnitTests::TestParseCmdLineIoRingConflicts()
+    {
+        CmdLineParser p;
+        struct Synchronization s = {};
+
+        // -u (IoRing) cannot be used with -x (Completion Routines)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-u", "-x", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -u (IoRing) cannot be used with -Sm (Memory Mapped IO)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-u", "-Sm", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
     }
 
     void CmdLineParserUnitTests::TestParseCmdLineRandSeed()
@@ -1705,9 +2465,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1725,6 +2486,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1779,9 +2541,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1799,6 +2562,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1853,9 +2617,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1873,6 +2638,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -1927,9 +2693,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -1947,6 +2714,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2001,9 +2769,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2021,6 +2790,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2075,9 +2845,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2095,6 +2866,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2149,9 +2921,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2169,6 +2942,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2223,9 +2997,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2243,6 +3018,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2297,9 +3073,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2317,6 +3094,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2371,9 +3149,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2391,6 +3170,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2445,9 +3225,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2465,6 +3246,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2519,9 +3301,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2539,6 +3322,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2593,9 +3377,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2613,6 +3398,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)23);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), (512 * 1024));
@@ -2667,9 +3453,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2687,6 +3474,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2741,9 +3529,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2761,6 +3550,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2815,9 +3605,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2835,6 +3626,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2889,9 +3681,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2909,6 +3702,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -2963,9 +3757,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -2983,6 +3778,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3037,9 +3833,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3057,6 +3854,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3111,9 +3909,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3131,6 +3930,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3185,9 +3985,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3205,6 +4006,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3259,9 +4061,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3279,6 +4082,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3333,9 +4137,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3353,6 +4158,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3407,9 +4213,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3427,6 +4234,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3481,9 +4289,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3501,6 +4310,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3555,9 +4365,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3575,6 +4386,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3630,9 +4442,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == true);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3650,6 +4463,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3704,9 +4518,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3724,6 +4539,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == true);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3780,9 +4596,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == true);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3800,6 +4617,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -3927,9 +4745,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -3947,6 +4766,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -4001,9 +4821,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -4021,6 +4842,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -4075,9 +4897,10 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetCompletionRoutines() == false);
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == false);
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
+        VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == false);
 
-        const auto& vAffinity(vSpans[0].GetAffinityAssignments());
-        VERIFY_ARE_EQUAL(vAffinity.size(), (size_t)0);
+        const auto& vMasks(vSpans[0].GetAffinityGroupMasks());
+        VERIFY_ARE_EQUAL(vMasks.size(), (size_t)0);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
         VERIFY_ARE_EQUAL(vTargets.size(), (size_t)1);
@@ -4095,6 +4918,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(t.GetWriteThroughMode() == WriteThroughMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoMode() == MemoryMappedIoMode::Off);
         VERIFY_IS_TRUE(t.GetMemoryMappedIoFlushMode() == MemoryMappedIoFlushMode::Undefined);
+        VERIFY_IS_TRUE(t.GetBypassIoMode() == BypassIoMode::Undefined);
         VERIFY_IS_TRUE(t.GetZeroWriteBuffers() == false);
         VERIFY_ARE_EQUAL(t.GetThreadsPerFile(), (DWORD)1);
         VERIFY_ARE_EQUAL(t.GetThreadStrideInBytes(), 0);
@@ -4765,6 +5589,197 @@ namespace UnitTests
         {
             Profile profile;
             const char *argv[] = { "foo", "testfile.dat" , "-r", "testfile2.dat"};
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+    }
+
+    void CmdLineParserUnitTests::TestParseCmdLineBufferSeparation()
+    {
+        CmdLineParser p;
+        struct Synchronization s = {};
+
+        // -bsp sets PDECacheLine
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-bsp", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(v[0].GetBufferSeparation(), BufferSeparation::PDECacheLine);
+            VERIFY_IS_TRUE(v[0].IsBufferSeparationExplicit());
+        }
+
+        // -bsn sets SystemDefault
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-bsn", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(v[0].GetBufferSeparation(), BufferSeparation::SystemDefault);
+            VERIFY_IS_TRUE(v[0].IsBufferSeparationExplicit());
+        }
+
+        // -bs (no flag) fails
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-bs", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -bsx (invalid flag) fails
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-bsx", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -bspx (extra chars) fails
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-bspx", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -b4k still works (block size)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-b4k", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            vector<Target> vt(v[0].GetTargets());
+            VERIFY_ARE_EQUAL(vt[0].GetBlockSizeInBytes(), (DWORD)(4 * 1024));
+        }
+
+        // -b4k and -bsp together
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-b4k", "-bsp", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(v[0].GetBufferSeparation(), BufferSeparation::PDECacheLine);
+            VERIFY_IS_TRUE(v[0].IsBufferSeparationExplicit());
+            vector<Target> vt(v[0].GetTargets());
+            VERIFY_ARE_EQUAL(vt[0].GetBlockSizeInBytes(), (DWORD)(4 * 1024));
+        }
+
+        // Default (no -bs) should be PDECacheLine but not explicit
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(v[0].GetBufferSeparation(), BufferSeparation::PDECacheLine);
+            VERIFY_IS_FALSE(v[0].IsBufferSeparationExplicit());
+        }
+    }
+
+    void CmdLineParserUnitTests::TestParseCmdLineCompletionDepth()
+    {
+        CmdLineParser p;
+        struct Synchronization s = {};
+
+        // -oc8 sets CompletionDepth to 8
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-oc8", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(v[0].GetCompletionDepth(), (DWORD)8);
+            VERIFY_IS_TRUE(v[0].IsCompletionDepthExplicit());
+        }
+
+        // -oc1 valid (minimum)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-oc1", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(v[0].GetCompletionDepth(), (DWORD)1);
+        }
+
+        // -oc16 valid (maximum)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-oc16", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(v[0].GetCompletionDepth(), (DWORD)16);
+        }
+
+        // -oc0 invalid
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-oc0", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -oc17 invalid (over maximum)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-oc17", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // Default (no -oc) is c_defaultCompletionDepth and not explicit
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            vector<TimeSpan> v(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(v[0].GetCompletionDepth(), c_defaultCompletionDepth);
+            VERIFY_IS_FALSE(v[0].IsCompletionDepthExplicit());
+        }
+
+        // -oc with -x conflicts (caught during validation in ParseCmdLine)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-oc4", "-x", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+    }
+
+    void CmdLineParserUnitTests::TestParseCmdLineSystemInfoOnly()
+    {
+        CmdLineParser p;
+        struct Synchronization s = {};
+
+        // -Rs (text, default format)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Rs" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            VERIFY_IS_TRUE(profile.GetSystemInformationOnly());
+            VERIFY_ARE_EQUAL(ResultsFormat::Text, profile.GetResultsFormat());
+        }
+
+        // -Rstext (text, explicit)
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Rstext" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            VERIFY_IS_TRUE(profile.GetSystemInformationOnly());
+            VERIFY_ARE_EQUAL(ResultsFormat::Text, profile.GetResultsFormat());
+        }
+
+        // -Rsxml
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Rsxml" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+            VERIFY_IS_TRUE(profile.GetSystemInformationOnly());
+            VERIFY_ARE_EQUAL(ResultsFormat::Xml, profile.GetResultsFormat());
+        }
+
+        // -Rs with extra args fails
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Rs", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // -Rs with other parameters fails
+        {
+            Profile profile;
+            const char *argv[] = { "foo", "-Rs", "-d10" };
             VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
         }
     }

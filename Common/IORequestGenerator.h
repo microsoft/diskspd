@@ -32,8 +32,6 @@ SOFTWARE.
 #include <Evntrace.h>   //ETW
 #include <Winternl.h>   //ntdll.dll
 
-
-void PrintError(const char *format, ...);
 namespace UnitTests
 {
     class IORequestGeneratorUnitTests;
@@ -63,10 +61,10 @@ private:
     void _AbortWorkerThreads(HANDLE hStartEvent, vector<HANDLE>& vhThreads) const;
     void _CloseOpenFiles(vector<HANDLE>& vhFiles) const;
     DWORD _CreateDirectoryPath(const char *path) const;
-    bool _CreateFile(UINT64 ullFileSize, const char *pszFilename, bool fZeroBuffers, bool fVerbose) const;
+    bool _CreateFile(UINT64 ullFileSize, const char *pszFilename, bool fZeroBuffers) const;
     bool _GetActiveGroupsAndProcs() const;
     struct ETWSessionInfo _GetResultETWSession(const EVENT_TRACE_PROPERTIES *pTraceProperties) const;
-    bool _GetSystemPerfInfo(vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION>& vSPPI, bool fVerbose) const;
+    bool _GetSystemPerfInfo(vector<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION>& vSPPI) const;
     void _InitializeGlobalParameters();
     bool _LoadDLLs();
     bool _StopETW(bool fUseETW, TRACEHANDLE hTraceSession) const;

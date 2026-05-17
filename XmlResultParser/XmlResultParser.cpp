@@ -91,31 +91,7 @@ void XmlResultParser::_PrintTargetResults(const TargetResults& results)
     _Print("<WriteBytes>%I64u</WriteBytes>\n", results.ullWriteBytesCount);
     _Print("<WriteCount>%I64u</WriteCount>\n", results.ullWriteIOCount);
 
-    if (results.vDistributionRange.size())
-    {
-        _PrintInc("<Distribution>\n");
-        _PrintInc("<Absolute>\n");
-
-        //
-        // Render hole(s) in effective distribution. Keep track of the expected base
-        // of the next range and render a hole (IO = 0) over the gap as needed.
-        //
-
-        UINT64 expectBase = 0;
-        for (auto& r : results.vDistributionRange)
-        {
-            if (r._dst.first != expectBase)
-            {
-                _Print("<Range IO=\"%u\">%I64u</Range>\n", 0, r._dst.first - expectBase);
-            }
-
-            _Print("<Range IO=\"%u\">%I64u</Range>\n", r._span, r._dst.second);
-            expectBase = r._dst.first + r._dst.second;
-        }
-
-        _PrintDec("</Absolute>\n");
-        _PrintDec("</Distribution>\n");
-    }
+    _sResult += results.distribution.GetXml(_indent, true);
 }
 
 void XmlResultParser::_PrintTargetLatency(const TargetResults& results)
@@ -264,7 +240,7 @@ void XmlResultParser::_PrintCpuUtilization(const Results& results, const SystemI
     size_t procCount = results.vSystemProcessorPerfInfo.size();
     size_t baseProc = 0;
     BYTE efficiencyClass = 0;
-    BYTE processorCore = 0;
+    WORD processorCore = 0;
 
     _PrintInc("<CpuUtilization>\n");
 
@@ -506,13 +482,31 @@ string XmlResultParser::ParseProfile(const Profile& profile)
     return _sResult;
 }
 
+string XmlResultParser::ParseSystemInformation(const SystemInformation& system)
+{
+    _sResult = system.GetXml(0);
+    return _sResult;
+}
+
 void XmlResultParser::_PrintWaitStats(const ThreadResults &threadResult)
 {
+    // Output format hardcodes 8 bucket values per element; assert if changed.
+    static_assert(c_nCompletionBuckets == 8, "update _PrintWaitStats format strings for new bucket count");
+
     _PrintInc("<WaitStatistics>\n");
     _Print("<CompletionWait>%llu</CompletionWait>\n", threadResult.WaitStats.Wait);
     _Print("<ThrottleWait>%llu</ThrottleWait>\n", threadResult.WaitStats.ThrottleWait);
     _Print("<ThrottleSleep>%llu</ThrottleSleep>\n", threadResult.WaitStats.ThrottleSleep);
     _Print("<Lookaside>%llu</Lookaside>\n", threadResult.WaitStats.Lookaside);
+    _Print("<WaitCompletion>%llu %llu %llu %llu %llu %llu %llu %llu</WaitCompletion>\n",
+        threadResult.WaitStats.WaitCompletion[0],
+        threadResult.WaitStats.WaitCompletion[1],
+        threadResult.WaitStats.WaitCompletion[2],
+        threadResult.WaitStats.WaitCompletion[3],
+        threadResult.WaitStats.WaitCompletion[4],
+        threadResult.WaitStats.WaitCompletion[5],
+        threadResult.WaitStats.WaitCompletion[6],
+        threadResult.WaitStats.WaitCompletion[7]);
     _Print("<LookasideCompletion>%llu %llu %llu %llu %llu %llu %llu %llu</LookasideCompletion>\n",
         threadResult.WaitStats.LookasideCompletion[0],
         threadResult.WaitStats.LookasideCompletion[1],
@@ -552,6 +546,58 @@ string XmlResultParser::ParseResults(const Profile& profile, const SystemInforma
             _Print("<RequestCount>%u</RequestCount>\n", timeSpan.GetRequestCount());
             _Print("<ProcCount>%u</ProcCount>\n", system.processorTopology._ulProcessorCount);
 
+            // TimeSpan was finalized before IO generation began
+            assert(timeSpan.IsFinalized());
+
+            _Print("<EffectiveBufferSeparation>%u</EffectiveBufferSeparation>\n",
+                timeSpan.GetEffectiveBufferSeparation());
+
+            if (!timeSpan.GetDisableAffinity())
+            {
+                const auto& vEffective = timeSpan.GetEffectiveAffinityAssignments();
+                auto vCompact = AffinityGroupMask::Compact(vEffective);
+                char buffer[128];
+
+                _PrintInc("<EffectiveAffinity>\n");
+                for (const auto& gm : vCompact)
+                {
+                    sprintf_s(buffer, _countof(buffer),
+                        "<Group Group=\"%u\" Mask=\"0x%Ix\"/>\n",
+                        gm.wGroup, gm.mask);
+                    _Print("%s", buffer);
+                }
+                _PrintDec("</EffectiveAffinity>\n");
+
+                // Flag heterogeneous assignment if assignment spans P and E cores. Since this may be intentional, we leave
+                // the marker in the results but don't throw a warning on STDERR/similar.
+                    if (system.processorTopology._ubPerformanceEfficiencyClass > 0)
+                {
+                    BYTE maxEffClass = system.processorTopology._ubPerformanceEfficiencyClass;
+                    bool fHasPerf = false, fHasEff = false;
+
+                    for (const auto& a : vEffective)
+                    {
+                        if (a.bEfficiencyClass == maxEffClass)
+                        {
+                            fHasPerf = true;
+                        }
+                        else
+                        {
+                            fHasEff = true;
+                        }
+                        if (fHasPerf && fHasEff)
+                        {
+                            break;
+                        }
+                    }
+
+                    if (fHasPerf && fHasEff)
+                    {
+                        _Print("<HeterogeneousAffinityWarning>true</HeterogeneousAffinityWarning>\n");
+                    }
+                }
+            }
+
             _PrintCpuUtilization(results, system);
 
             if (timeSpan.GetMeasureLatency())
@@ -575,6 +621,10 @@ string XmlResultParser::ParseResults(const Profile& profile, const SystemInforma
                 const ThreadResults& threadResults = results.vThreadResults[iThread];
                 _PrintInc("<Thread>\n");
                 _Print("<Id>%u</Id>\n", iThread);
+                if (timeSpan.GetUseIoRing())
+                {
+                    _Print("<SubmitCount>%I64u</SubmitCount>\n", threadResults.ullSubmitCount);
+                }
                 for (const auto& targetResults : threadResults.vTargetResults)
                 {
                     _PrintInc("<Target>\n");
