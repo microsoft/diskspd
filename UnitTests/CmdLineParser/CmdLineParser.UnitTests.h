@@ -46,7 +46,7 @@ namespace UnitTests
         void VerifyParseCmdLineMappedIO(Profile &profile, MemoryMappedIoFlushMode FlushMode);
         void VerifyParseCmdLineBypassIO(Profile &profile, BypassIoMode BypassIoMode);
         void VerifyParseCmdLineAccessHints(Profile &profile, bool RandomAccess, bool SequentialScan, bool TemporaryFile);
-        void VerifyParseCmdLineIoRing(Profile &profile, bool UseRegBuffer, UINT32 IoRingBatchSize);
+        void VerifyParseCmdLineIoRing(Profile &profile, bool UseRegBuffer, UINT32 IoRingBatchSize, bool IoRingBatchSizeIsPercent);
 
     public:
         TEST_CLASS(CmdLineParserUnitTests)

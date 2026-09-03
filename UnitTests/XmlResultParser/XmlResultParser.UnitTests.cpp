@@ -80,6 +80,7 @@ namespace UnitTests
         timeSpan.SetCalculateIopsStdDev(true);
         timeSpan.SetUseIoRing(true);
         timeSpan.SetIoRingBatchSize(75);
+        timeSpan.SetIoRingBatchSizeIsPercent(false);
         timeSpan.SetUseRegBuffer(true);
 
         TargetResults targetResults;
@@ -220,7 +221,7 @@ namespace UnitTests
             "        <IoBucketDuration>1000</IoBucketDuration>\n"
             "        <RandSeed>0</RandSeed>\n"
             "        <IoRing>\n"
-            "          <IoRingBatchSize>75</IoRingBatchSize>\n"
+            "          <IoRingBatchSize Percent=\"false\">75</IoRingBatchSize>\n"
             "          <UseRegBuffer>true</UseRegBuffer>\n"
             "        </IoRing>\n"
             "        <DisableAffinity>false</DisableAffinity>\n"

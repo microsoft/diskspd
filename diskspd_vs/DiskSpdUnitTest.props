@@ -13,6 +13,17 @@
     <IncludePath>$(MSBuildThisFileDirectory)..\UnitTests\Shared;$(WindowsSDKDir)\Testing\Development\inc;$(IncludePath)</IncludePath>
     <LibraryPath>$(WindowsSDKDir)\Testing\Development\lib\$(PlatformTarget);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
+  <!--
+      Tell VS Test Explorer which runsettings file to use for each platform, so
+      the TAEF adapter (TestAdaptersPaths in the runsettings) is discovered
+      automatically without requiring each user to pick it via
+      Test > Configure Run Settings > Select Solution Wide Runsettings File.
+  -->
+  <PropertyGroup>
+    <RunSettingsFilePath Condition="'$(Platform)'=='Win32'">$(MSBuildThisFileDirectory)diskspd.win32.runsettings</RunSettingsFilePath>
+    <RunSettingsFilePath Condition="'$(Platform)'=='x64'">$(MSBuildThisFileDirectory)diskspd.x64.runsettings</RunSettingsFilePath>
+    <RunSettingsFilePath Condition="'$(Platform)'=='ARM64'">$(MSBuildThisFileDirectory)diskspd.arm64.runsettings</RunSettingsFilePath>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Debug'">
     <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
@@ -25,7 +36,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>Common.lib;powrprof.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Common.lib;powrprof.lib;onecore.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>

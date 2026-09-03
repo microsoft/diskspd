@@ -261,6 +261,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetMeasureLatency() == true);
         VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == true);
         VERIFY_ARE_EQUAL(vSpans[0].GetIoRingBatchSize(), (UINT32)75);
+        VERIFY_ARE_EQUAL(vSpans[0].GetIoRingBatchSizeIsPercent(), false);
         VERIFY_IS_TRUE(vSpans[0].GetUseRegBuffer() == true);
 
         vector<Target> vTargets(vSpans[0].GetTargets());
@@ -1801,6 +1802,7 @@ namespace UnitTests
     void XmlProfileParserUnitTests::Test_ParseFileIoRing()
     {
         // Test all IoRing XML elements
+        // Test IoRingBatchSize = 50, default integer mode
         {
             FILE *pFile;
             fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
@@ -1831,10 +1833,11 @@ namespace UnitTests
             VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
             VERIFY_IS_TRUE(vTimespans[0].GetUseIoRing() == true);
             VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSize(), (UINT32)50);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSizeIsPercent(), false);
             VERIFY_IS_TRUE(vTimespans[0].GetUseRegBuffer() == true);
         }
 
-        // Test IoRingBatchSize minimum boundary (1)
+        // Test IoRingBatchSize minimum boundary (1), integer mode
         {
             FILE *pFile;
             fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
@@ -1864,9 +1867,10 @@ namespace UnitTests
             VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
             VERIFY_IS_TRUE(vTimespans[0].GetUseIoRing() == true);
             VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSize(), (UINT32)1);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSizeIsPercent(), false);
         }
 
-        // Test IoRingBatchSize maximum boundary (100)
+        // Test IoRingBatchSize maximum boundary (65536), integer mode
         {
             FILE *pFile;
             fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
@@ -1876,7 +1880,7 @@ namespace UnitTests
                            "    <TimeSpans>\n"
                            "        <TimeSpan>\n"
                            "            <IoRing>\n"
-                           "                <IoRingBatchSize>100</IoRingBatchSize>\n"
+                           "                <IoRingBatchSize>65536</IoRingBatchSize>\n"
                            "            </IoRing>\n"
                            "            <Targets>\n"
                            "                <Target>\n"
@@ -1895,7 +1899,8 @@ namespace UnitTests
             vector<TimeSpan> vTimespans(profile.GetTimeSpans());
             VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
             VERIFY_IS_TRUE(vTimespans[0].GetUseIoRing() == true);
-            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSize(), (UINT32)100);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSize(), (UINT32)65536);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSizeIsPercent(), false);
         }
 
         // Test IoRingBatchSize = 0 (invalid, must be >= 1)
@@ -1925,7 +1930,7 @@ namespace UnitTests
             VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         }
 
-        // Test IoRingBatchSize = 101 (invalid, must be <= 100)
+        // Test IoRingBatchSize = -1 (invalid, negative value)
         {
             FILE *pFile;
             fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
@@ -1935,7 +1940,7 @@ namespace UnitTests
                            "    <TimeSpans>\n"
                            "        <TimeSpan>\n"
                            "            <IoRing>\n"
-                           "                <IoRingBatchSize>101</IoRingBatchSize>\n"
+                           "                <IoRingBatchSize>-1</IoRingBatchSize>\n"
                            "            </IoRing>\n"
                            "            <Targets>\n"
                            "                <Target>\n"
@@ -1952,7 +1957,7 @@ namespace UnitTests
             VERIFY_IS_FALSE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
         }
 
-        // Test IoRingBatchSize = -1 (invalid, negative value)
+        // Test IoRingBatchSize with percentage mode
         {
             FILE *pFile;
             fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
@@ -1962,7 +1967,40 @@ namespace UnitTests
                            "    <TimeSpans>\n"
                            "        <TimeSpan>\n"
                            "            <IoRing>\n"
-                           "                <IoRingBatchSize>-1</IoRingBatchSize>\n"
+                           "                <IoRingBatchSize Percent=\"true\">75</IoRingBatchSize>\n"
+                           "            </IoRing>\n"
+                           "            <Targets>\n"
+                           "                <Target>\n"
+                           "                    <Path></Path>\n"
+                           "                </Target>\n"
+                           "            </Targets>\n"
+                           "        </TimeSpan>\n"
+                           "    </TimeSpans>\n"
+                           "</Profile>\n");
+            fclose(pFile);
+
+            XmlProfileParser p;
+            Profile profile;
+            VERIFY_IS_TRUE(p.ParseFile(_sTempFilePath.c_str(), &profile, nullptr, _hModule));
+            VERIFY_IS_TRUE(profile.Validate(false));
+            vector<TimeSpan> vTimespans(profile.GetTimeSpans());
+            VERIFY_ARE_EQUAL(vTimespans.size(), (size_t)1);
+            VERIFY_IS_TRUE(vTimespans[0].GetUseIoRing() == true);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSize(), (UINT32)75);
+            VERIFY_ARE_EQUAL(vTimespans[0].GetIoRingBatchSizeIsPercent(), true);
+        }
+
+        // Test IoRingBatchSize = 101 with percentage mode (invalid, > 100)
+        {
+            FILE *pFile;
+            fopen_s(&pFile, _sTempFilePath.c_str(), "wb");
+            VERIFY_IS_TRUE(pFile != nullptr);
+            fprintf(pFile, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                           "<Profile>\n"
+                           "    <TimeSpans>\n"
+                           "        <TimeSpan>\n"
+                           "            <IoRing>\n"
+                           "                <IoRingBatchSize Percent=\"true\">101</IoRingBatchSize>\n"
                            "            </IoRing>\n"
                            "            <Targets>\n"
                            "                <Target>\n"

@@ -298,11 +298,11 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "  -T<offs>              starting separation between I/O operations performed on the same target by different threads\n"
         "                          [default=0] (starting offset = base target offset + (thread number * <offs>)\n"
         "                          only applies to -s sequential IO with #threads > 1, conflicts with -r and -si\n"
-        "  -u[b]<percentage>     use IoRing for submitting I/O requests with optional registered buffers and batch size\n"
-        "                          [default: 25%% batch size, no registered buffers]\n"
-        "                          With b, use registered buffers with IoRing\n"
-        "                          With batch size, specify the percentage of I/O requests to be queued before submitting\n"
-        "                          Batch size is given as percentage of outstanding I/O requests per thread\n"
+        "  -u[n]<batchsize>[p]   use IoRing for submitting I/O requests with registered buffers and batch size\n"
+        "                          [default: 25%% batch size, registered buffers enabled]\n"
+        "                          With n, opt out of registered buffers with IoRing (use unregistered buffer references)\n"
+        "                          <batchsize> specifies the number of I/O requests to be queued before submitting\n"
+        "                          With p suffix, <batchsize> is a percentage of outstanding I/O requests\n"
         "  -v[s]                 verbose mode - with s, only provide additional summary statistics\n"
         "  -w<percentage>        percentage of write requests (-w and -w0 are equivalent and result in a read-only workload).\n"
         "                        absence of this switch indicates 100%% reads\n"
@@ -2142,39 +2142,76 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
         case 'u':    //IoRing
             {
-                // Parse IoRing -u[b][percentage] format
+                // Parse IoRing -u[n]<batchsize>[p] format
                 const char *c = arg + 1;
-                bool useRegisteredBuffers = false;
+                bool useRegisteredBuffers = true;
 
-                // Check for optional 'b' qualifier for registered buffers
-                if (*c == 'b')
+                // Check for optional 'n' qualifier to opt out of registered buffers
+                if (*c == 'n')
                 {
-                    useRegisteredBuffers = true;
+                    useRegisteredBuffers = false;
                     c++;
                 }
 
-                // Parse percentage value if provided
+                // Parse batch size value if provided
                 if (*c != '\0')
                 {
-                    int percentage = atoi(c);
-                    if (percentage > 0 && percentage <= 100)
+                    char *end = nullptr;
+                    unsigned long value = strtoul(c, &end, 10);
+
+                    if (end == c || value == 0)
                     {
-                        timeSpan.SetIoRingBatchSize(percentage);
+                        fprintf(stderr, "ERROR: invalid IoRing batch size\n");
+                        fError = true;
+                        break;
+                    }
+
+                    // Check for 'p' suffix indicating percentage mode
+                    if (*end == 'p')
+                    {
+                        end++;
+                        if (*end != '\0')
+                        {
+                            fprintf(stderr, "ERROR: invalid IoRing batch size\n");
+                            fError = true;
+                            break;
+                        }
+
+                        if (value > 100)
+                        {
+                            fprintf(stderr, "ERROR: IoRing batch size percentage must be between 1 and 100\n");
+                            fError = true;
+                            break;
+                        }
+
+                        timeSpan.SetIoRingBatchSize(static_cast<UINT32>(value));
+                        timeSpan.SetIoRingBatchSizeIsPercent(true);
+                    }
+                    else if (*end != '\0')
+                    {
+                        fprintf(stderr, "ERROR: invalid IoRing batch size\n");
+                        fError = true;
+                        break;
                     }
                     else
                     {
-                        fprintf(stderr, "ERROR: invalid IoRing batch size percentage\n");
-                        fError = true;
-                        break;
+                        // Integer mode (number of IOs), capped at maximum request count
+                        if (value > c_maximumRequestCount)
+                        {
+                            fprintf(stderr, "ERROR: IoRing batch size of %lu exceeds maximum of %u\n",
+                                value, c_maximumRequestCount);
+                            fError = true;
+                            break;
+                        }
+
+                        timeSpan.SetIoRingBatchSize(static_cast<UINT32>(value));
+                        timeSpan.SetIoRingBatchSizeIsPercent(false);
                     }
                 }
 
                 // Set IoRing parameters
                 timeSpan.SetUseIoRing(true);
-                if (useRegisteredBuffers)
-                {
-                    timeSpan.SetUseRegBuffer(true);
-                }
+                timeSpan.SetUseRegBuffer(useRegisteredBuffers);
             }
             break;
 

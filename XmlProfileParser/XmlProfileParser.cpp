@@ -1535,21 +1535,69 @@ HRESULT XmlProfileParser::_ParseIoRing(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpa
         // Use IoRing
         pTimeSpan->SetUseIoRing(true);
 
-        // Parse IoRingBatchSize
         if (SUCCEEDED(hr))
         {
-            UINT32 ulIoRingBatchSize;
-            hr = _GetUINT32(spNode, "IoRingBatchSize", &ulIoRingBatchSize);
-            if (SUCCEEDED(hr) && (hr != S_FALSE))
+            // Parse IoRingBatchSize
+            CComPtr<IXMLDOMNode> spBatchNode = nullptr;
+            CComVariant queryBatch("IoRingBatchSize");
+            hr = spNode->selectSingleNode(queryBatch.bstrVal, &spBatchNode);
+            if (SUCCEEDED(hr) && (hr != S_FALSE) && spBatchNode != nullptr)
             {
-                if (ulIoRingBatchSize > 0 && ulIoRingBatchSize <= 100)
+                // Read batch size value from element text
+                BSTR bstrText;
+                hr = spBatchNode->get_text(&bstrText);
+                if (SUCCEEDED(hr))
                 {
-                    pTimeSpan->SetIoRingBatchSize(ulIoRingBatchSize);
-                }
-                else
-                {
-                    fprintf(stderr, "ERROR: IoRing BatchSize must be between 1 and 100\n");
-                    hr = E_INVALIDARG;
+                    UINT32 ulIoRingBatchSize = _wtoi((wchar_t *)bstrText);
+                    SysFreeString(bstrText);
+
+                    // Read optional Percent attribute (default false)
+                    bool fIsPercent = false;
+                    CComPtr<IXMLDOMNamedNodeMap> spAttrMap = nullptr;
+                    HRESULT hrAttr = spBatchNode->get_attributes(&spAttrMap);
+                    if (SUCCEEDED(hrAttr) && spAttrMap != nullptr)
+                    {
+                        CComBSTR percentAttrName("Percent");
+                        CComPtr<IXMLDOMNode> spPercentNode = nullptr;
+                        hrAttr = spAttrMap->getNamedItem(percentAttrName, &spPercentNode);
+                        if (SUCCEEDED(hrAttr) && hrAttr != S_FALSE && spPercentNode != nullptr)
+                        {
+                            BSTR bstrAttr;
+                            hrAttr = spPercentNode->get_text(&bstrAttr);
+                            if (SUCCEEDED(hrAttr))
+                            {
+                                fIsPercent = (_wcsicmp(L"true", (wchar_t *)bstrAttr) == 0);
+                                SysFreeString(bstrAttr);
+                            }
+                        }
+                    }
+
+                    if (fIsPercent)
+                    {
+                        if (ulIoRingBatchSize > 0 && ulIoRingBatchSize <= 100)
+                        {
+                            pTimeSpan->SetIoRingBatchSize(ulIoRingBatchSize);
+                            pTimeSpan->SetIoRingBatchSizeIsPercent(true);
+                        }
+                        else
+                        {
+                            fprintf(stderr, "ERROR: IoRing BatchSize percentage must be between 1 and 100\n");
+                            hr = E_INVALIDARG;
+                        }
+                    }
+                    else
+                    {
+                        if (ulIoRingBatchSize > 0 && ulIoRingBatchSize <= c_maximumRequestCount)
+                        {
+                            pTimeSpan->SetIoRingBatchSize(ulIoRingBatchSize);
+                            pTimeSpan->SetIoRingBatchSizeIsPercent(false);
+                        }
+                        else
+                        {
+                            fprintf(stderr, "ERROR: IoRing BatchSize must be between 1 and %u\n", c_maximumRequestCount);
+                            hr = E_INVALIDARG;
+                        }
+                    }
                 }
             }
         }

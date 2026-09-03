@@ -335,9 +335,17 @@
                     <xs:element name="IoRing" minOccurs="0" maxOccurs="1">
                       <xs:complexType>
                         <xs:all>
-                          <!-- UINT32 _ulIoRingBatchSize (number of I/O requests per IoRing submission, 1-100) -->
-                          <xs:element name="IoRingBatchSize" type="PercentNZ" minOccurs="0" maxOccurs="1"/>
-                          <!-- BOOL _fUseRegBuffer (use pre-registered IoRing buffers) -->
+                          <!-- UINT32 _ulIoRingBatchSize (number of I/O requests per IoRing submission) -->
+                          <xs:element name="IoRingBatchSize" minOccurs="0" maxOccurs="1">
+                            <xs:complexType>
+                              <xs:simpleContent>
+                                <xs:extension base="xs:unsignedInt">
+                                  <xs:attribute name="Percent" type="xs:boolean"/>
+                                </xs:extension>
+                              </xs:simpleContent>
+                            </xs:complexType>
+                          </xs:element>
+                          <!-- BOOL _fUseRegBuffer (use IoRing with registered buffers, default true) -->
                           <xs:element name="UseRegBuffer" type="xs:boolean" minOccurs="0" maxOccurs="1"/>
                         </xs:all>
                       </xs:complexType>

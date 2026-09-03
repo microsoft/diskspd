@@ -146,16 +146,8 @@ constexpr DWORD c_maxCpuIndexPerGroup = sizeof(KAFFINITY) * 8 - 1;
 // any rational workload.
 constexpr DWORD c_maximumRequestCount = 65536;
 
-// VirtualAlloc2 function pointer type - uses PVOID for MEM_EXTENDED_PARAMETER
-// to avoid header dependencies on memoryapi.h extended parameter types.
-typedef PVOID (__stdcall *VirtualAlloc2FnPtr)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, PVOID, ULONG);
-
-// Resolve VirtualAlloc2 for later use. Returns true if available.
-// Must be called before AllocateAlignedBuffer with alignment > 0.
-bool ResolveVirtualAlloc2();
-
 // Allocate a buffer with optional alignment. If alignment > 0, uses
-// VirtualAlloc2 (must have been resolved via ResolveVirtualAlloc2).
+// VirtualAlloc2 with a MEM_ADDRESS_REQUIREMENTS extended parameter.
 // If alignment is 0, uses plain VirtualAlloc.
 BYTE* AllocateAlignedBuffer(size_t cb, DWORD alignment);
 
@@ -2195,7 +2187,8 @@ public:
         _fCompletionDepthExplicit(false),
         _fUseIoRing(false),
         _ulIoRingBatchSize(25),
-        _fUseRegBuffer(false)
+        _fIoRingBatchSizeIsPercent(true),
+        _fUseRegBuffer(true)
     {
     }
 
@@ -2357,6 +2350,9 @@ public:
     void SetIoRingBatchSize(UINT32 ulIoRingBatchSize) { _ulIoRingBatchSize = ulIoRingBatchSize; }
     UINT32 GetIoRingBatchSize() const { return _ulIoRingBatchSize; }
 
+    void SetIoRingBatchSizeIsPercent(bool fIsPercent) { _fIoRingBatchSizeIsPercent = fIsPercent; }
+    bool GetIoRingBatchSizeIsPercent() const { return _fIoRingBatchSizeIsPercent; }
+
     void SetUseRegBuffer(bool fUseRegBuffer) { _fUseRegBuffer = fUseRegBuffer; }
     bool GetUseRegBuffer() const { return _fUseRegBuffer; }
 
@@ -2372,17 +2368,6 @@ private:
             _bufferSeparation,
             _pSystem->dwPageSize,
             _pSystem->processorTopology.GetLargestCacheLineSize());
-
-        //
-        // Fallback to system default if VirtualAlloc2 is not available.
-        // Buffer separation requires VirtualAlloc2 and if explicitly
-        // requested, was already validated with the profile.
-        //
-
-        if (_dwEffectiveBufferSeparation > 0 && !ResolveVirtualAlloc2())
-        {
-            _dwEffectiveBufferSeparation = 0;
-        }
     }
 
     void _FinalizeAffinity() const
@@ -2607,6 +2592,7 @@ private:
 
     bool _fUseIoRing;
     UINT32 _ulIoRingBatchSize;
+    bool _fIoRingBatchSizeIsPercent;
     bool _fUseRegBuffer;
 
     friend class UnitTests::ProfileUnitTests;

@@ -2290,7 +2290,7 @@ namespace UnitTests
         VERIFY_ARE_EQUAL(t.GetThroughputInBytesPerMillisecond(), (DWORD)0);
     }
 
-    void CmdLineParserUnitTests::VerifyParseCmdLineIoRing(Profile &profile, bool UseRegBuffer, UINT32 IoRingBatchSize)
+    void CmdLineParserUnitTests::VerifyParseCmdLineIoRing(Profile &profile, bool UseRegBuffer, UINT32 IoRingBatchSize, bool IoRingBatchSizeIsPercent)
     {
         VERIFY_IS_TRUE(profile.GetVerbose() == false);
         VERIFY_IS_TRUE(profile.GetProgress() == 0);
@@ -2323,6 +2323,7 @@ namespace UnitTests
         VERIFY_IS_TRUE(vSpans[0].GetRandomWriteData() == false);
         VERIFY_IS_TRUE(vSpans[0].GetUseIoRing() == true);
         VERIFY_ARE_EQUAL(vSpans[0].GetIoRingBatchSize(), IoRingBatchSize);
+        VERIFY_ARE_EQUAL(vSpans[0].GetIoRingBatchSizeIsPercent(), IoRingBatchSizeIsPercent);
         VERIFY_IS_TRUE(vSpans[0].GetUseRegBuffer() == UseRegBuffer);
 
         VERIFY_IS_TRUE(vSpans[0].GetAffinityGroupMasks().empty());
@@ -2364,7 +2365,7 @@ namespace UnitTests
 
     void CmdLineParserUnitTests::TestParseCmdLineUseIoRing()
     {
-        // Test IoRing (-u)
+        // Test IoRing (-u) - default batch size 25%, registered buffers enabled by default
         {
             CmdLineParser p;
             Profile profile;
@@ -2372,21 +2373,21 @@ namespace UnitTests
             const char *argv[] = { "foo", "-b128K", "-w84", "-u", "testfile.dat" };
             VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
             VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -u testfile.dat") == 0);
-            VerifyParseCmdLineIoRing(profile, false, 25);
+            VerifyParseCmdLineIoRing(profile, true, 25, true);
         }
 
-        // Test IoRing with registered buffers (-ub)
+        // Test IoRing with unregistered buffers (-un) - opt out of registered buffers
         {
             CmdLineParser p;
             Profile profile;
             struct Synchronization s = {};
-            const char *argv[] = { "foo", "-b128K", "-w84", "-ub", "testfile.dat" };
+            const char *argv[] = { "foo", "-b128K", "-w84", "-un", "testfile.dat" };
             VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
-            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -ub testfile.dat") == 0);
-            VerifyParseCmdLineIoRing(profile, true, 25);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -un testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, false, 25, true);
         }
 
-        // Test IoRing with custom batch size (-u50)
+        // Test IoRing with integer batch size (-u50) - 50 IOs, registered buffers by default
         {
             CmdLineParser p;
             Profile profile;
@@ -2394,18 +2395,105 @@ namespace UnitTests
             const char *argv[] = { "foo", "-b128K", "-w84", "-u50", "testfile.dat" };
             VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
             VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -u50 testfile.dat") == 0);
-            VerifyParseCmdLineIoRing(profile, false, 50);
+            VerifyParseCmdLineIoRing(profile, true, 50, false);
         }
 
-        // Test IoRing with registered buffers and custom batch size (-ub75)
+        // Test IoRing with unregistered buffers and integer batch size (-un75) - 75 IOs
         {
             CmdLineParser p;
             Profile profile;
             struct Synchronization s = {};
-            const char *argv[] = { "foo", "-b128K", "-w84", "-ub75", "testfile.dat" };
+            const char *argv[] = { "foo", "-b128K", "-w84", "-un75", "testfile.dat" };
             VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
-            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -ub75 testfile.dat") == 0);
-            VerifyParseCmdLineIoRing(profile, true, 75);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -un75 testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, false, 75, false);
+        }
+
+        // Test IoRing with percentage batch size (-u25p) - 25%, registered buffers by default
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-u25p", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -u25p testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, true, 25, true);
+        }
+
+        // Test IoRing with unregistered buffers and percentage (-un50p) - 50%
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-un50p", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -un50p testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, false, 50, true);
+        }
+
+        // Test IoRing with max boundary integer batch size (-u65536) - 65536 IOs
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-b128K", "-w84", "-u65536", "testfile.dat" };
+            VERIFY_IS_TRUE(p.ParseCmdLine(_countof(argv), argv, &profile, &s) == true);
+            VERIFY_IS_TRUE(profile.GetCmdLine().compare("foo -b128K -w84 -u65536 testfile.dat") == 0);
+            VerifyParseCmdLineIoRing(profile, true, 65536, false);
+        }
+
+        // Error: -u0 (batch size 0)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-u0", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // Error: -u101p (percentage > 100)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-u101p", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // Error: -uabc (non-numeric)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-uabc", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // Error: -u25x (trailing junk)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-u25x", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // Error: -u65537 (exceeds max boundary 65536)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-u65537", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
+        }
+
+        // Error: -up (no digits before p)
+        {
+            CmdLineParser p;
+            Profile profile;
+            struct Synchronization s = {};
+            const char *argv[] = { "foo", "-up", "testfile.dat" };
+            VERIFY_IS_FALSE(p.ParseCmdLine(_countof(argv), argv, &profile, &s));
         }
     }
 

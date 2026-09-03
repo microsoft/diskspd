@@ -1691,6 +1691,7 @@ namespace UnitTests
         }
     }
 
+    // Verify XML output for IoRing with default settings (-u: 25%, registered buffers enabled by default)
     void TimeSpanUnitTests::Test_TimeSpanGetXmlUseIoRing()
     {
         TimeSpan timeSpan;
@@ -1709,8 +1710,8 @@ namespace UnitTests
             "  <IoBucketDuration>1000</IoBucketDuration>\n"
             "  <RandSeed>0</RandSeed>\n"
             "  <IoRing>\n"
-            "    <IoRingBatchSize>25</IoRingBatchSize>\n"
-            "    <UseRegBuffer>false</UseRegBuffer>\n"
+            "    <IoRingBatchSize Percent=\"true\">25</IoRingBatchSize>\n"
+            "    <UseRegBuffer>true</UseRegBuffer>\n"
             "  </IoRing>\n"
             "  <DisableAffinity>false</DisableAffinity>\n"
             "  <AffinityTraversal Group=\"Fill\" Efficiency=\"PFirst\">Cpu</AffinityTraversal>\n"
@@ -1721,11 +1722,13 @@ namespace UnitTests
         VERIFY_MULTILINE_EQUAL(pcszExpected, sXml);
     }
 
+    // Verify XML output for IoRing with custom integer batch size and registered buffers (-u75)
     void TimeSpanUnitTests::Test_TimeSpanGetXmlUseIoRingWithBatchSizeAndRegBuffer()
     {
         TimeSpan timeSpan;
         timeSpan.SetUseIoRing(true);
         timeSpan.SetIoRingBatchSize(75);
+        timeSpan.SetIoRingBatchSizeIsPercent(false);
         timeSpan.SetUseRegBuffer(true);
         string sXml = timeSpan.GetXml(0);
         const char *pcszExpected =
@@ -1741,7 +1744,7 @@ namespace UnitTests
             "  <IoBucketDuration>1000</IoBucketDuration>\n"
             "  <RandSeed>0</RandSeed>\n"
             "  <IoRing>\n"
-            "    <IoRingBatchSize>75</IoRingBatchSize>\n"
+            "    <IoRingBatchSize Percent=\"false\">75</IoRingBatchSize>\n"
             "    <UseRegBuffer>true</UseRegBuffer>\n"
             "  </IoRing>\n"
             "  <DisableAffinity>false</DisableAffinity>\n"
@@ -2469,13 +2472,6 @@ namespace UnitTests
     void ThreadParametersUnitTests::Test_AllocateAndFillBufferForTarget_Aligned()
     {
         // Use buffer separation with known alignment.
-        // Requires VirtualAlloc2 -- skip if unavailable.
-        if (!ResolveVirtualAlloc2())
-        {
-            Log::Comment(L"VirtualAlloc2 not available, skipping aligned allocation test");
-            return;
-        }
-
         SystemInformation mockSystem;
         mockSystem.dwPageSize = 4096;
         mockSystem.processorTopology._vProcessorCacheInformation.emplace_back(
@@ -2517,12 +2513,6 @@ namespace UnitTests
     {
         // Verify that buffer separation creates a per-thread copy of the
         // write source buffer when alignment is active.
-        if (!ResolveVirtualAlloc2())
-        {
-            Log::Comment(L"VirtualAlloc2 not available, skipping write source separation test");
-            return;
-        }
-
         SystemInformation mockSystem;
         mockSystem.dwPageSize = 4096;
         mockSystem.processorTopology._vProcessorCacheInformation.emplace_back(

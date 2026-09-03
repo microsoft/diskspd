@@ -47,7 +47,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalDependencies>$(OutDir)xmlprofileparser.lib;$(OutDir)iorequestgenerator.lib;$(OutDir)resultparser.lib;$(OutDir)xmlresultparser.lib;$(OutDir)common.lib;powrprof.lib;msxml6.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(OutDir)xmlprofileparser.lib;$(OutDir)iorequestgenerator.lib;$(OutDir)resultparser.lib;$(OutDir)xmlresultparser.lib;$(OutDir)common.lib;powrprof.lib;onecore.lib;msxml6.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

@@ -27,8 +27,8 @@ SOFTWARE.
 
 */
 
-// versioning material. for simplicity in consumption, please ensure that the date string
-// parses via the System.Datetime constructor as follows (in Powershell):
+// versioning material. ensure that the date string parses via the
+// System.Datetime constructor as follows(in Powershell) :
 //
 //      [datetime] "string"
 //
@@ -49,4 +49,4 @@ SOFTWARE.
 #define DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_MAJORMINOR_VERSION_STRING(DISKSPD_MAJOR, DISKSPD_MINOR, DISKSPD_BUILD)
 
 #define DISKSPD_NUMERIC_VERSION_STRING DISKSPD_MAJORMINOR_VERSION_STR DISKSPD_REVISION DISKSPD_RELEASE_TAG
-#define DISKSPD_DATE_VERSION_STRING "2026/05/08"
+#define DISKSPD_DATE_VERSION_STRING "2026/06/15"

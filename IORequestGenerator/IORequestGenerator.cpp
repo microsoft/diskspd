@@ -1225,21 +1225,31 @@ static bool doWorkUsingIoRing(ThreadParameters *p)
     HRESULT hr = S_OK;
     const BOOL fLatencyStats = p->pTimeSpan->GetMeasureLatency() || p->pTimeSpan->GetCalculateIopsStdDev();
     const BOOL fThrottles = p->vThroughputMeters.size() != 0;
-    
+    p->pResults->WaitStats.fThrottled = (fThrottles != FALSE);
+
     IORING_CQE cqe;
     OverlappedQueue requestQueue;
     const size_t cIORequests = p->vIORequest.size();
-    // Compute batch size as a ceiling percentage of total request count.
-    // Profile::Validate caps request count at c_maximumRequestCount (65536)
-    // and batch size percent is at most 100, so the product is bounded well
-    // within UINT32 range. Use QuotientCeiling for clarity.
-    UINT32 cIoRingBatchSizePercent = p->pTimeSpan->GetIoRingBatchSize();
-    UINT32 cIoRingBatchSize = max(static_cast<UINT32>(Util::QuotientCeiling(cIORequests * (size_t)cIoRingBatchSizePercent, (size_t)100)), (UINT32)1);
+    // Compute effective batch size from configured value.
+    // In percentage mode, compute as ceiling percentage of total request count.
+    // In integer mode, use the value directly, capped to actual request count.
+    UINT32 cIoRingBatchSize;
+    if (p->pTimeSpan->GetIoRingBatchSizeIsPercent())
+    {
+        UINT32 cIoRingBatchSizePercent = p->pTimeSpan->GetIoRingBatchSize();
+        cIoRingBatchSize = max(static_cast<UINT32>(Util::QuotientCeiling(cIORequests * (size_t)cIoRingBatchSizePercent, (size_t)100)), (UINT32)1);
+    }
+    else
+    {
+        cIoRingBatchSize = min(p->pTimeSpan->GetIoRingBatchSize(), static_cast<UINT32>(cIORequests));
+        cIoRingBatchSize = max(cIoRingBatchSize, (UINT32)1);
+    }
     size_t cUntilThrottle = cIORequests;    // number of IOs to process before we hit the throttle limit
 
     DWORD dwMinSleepTime = INFINITE;
     DWORD dwWaitOperations = 0;
     DWORD dwWaitTime = 0;
+    bool fSubmit = false;
     UINT32 cQueued = 0;    // number of IOs queued to IoRing SQ but not yet submitted
     UINT64 ullSubmitCount = 0;
     UINT64 ullCompletionTime = 0;
@@ -1307,15 +1317,33 @@ static bool doWorkUsingIoRing(ThreadParameters *p)
 
         dwWaitOperations = 0;
         dwWaitTime = 0;
+        fSubmit = false;
 
-        // queue is empty - all available IORequests have been dispatched
-        if (!requestQueue.GetCount())
+        // batch target reached - submit
+        if (cQueued >= cIoRingBatchSize)
         {
-            // if queue is empty, all non-throttled IOs were dispatched, so cUntilThrottle must be 0
+            fSubmit = true;
+            if (requestQueue.GetCount())
+            {
+                // more IOs to dispatch - lookaside for latency, otherwise wait for what's needed for next batch
+                dwWaitOperations = fLatencyStats ? 0 : (UINT32)max(0, (int)cIoRingBatchSize - (int)requestQueue.GetCount());
+            }
+            else
+            {
+                // all dispatched - wait for completions to refill the queue
+                assert(!(fThrottles && cUntilThrottle));
+                dwWaitOperations = fLatencyStats ? 1 : cQueued;
+            }
+            dwWaitTime = dwMinSleepTime = INFINITE;
+            p->pResults->WaitStats.Wait += 1;
+        }
+
+        // queue empty, below batch target - submit remaining and wait
+        else if (!requestQueue.GetCount())
+        {
             assert(!(fThrottles && cUntilThrottle));
-            
-            // if queue is empty, submit IOs and wait for completions
-            dwWaitOperations = min(cQueued, cIoRingBatchSize);
+            fSubmit = true;
+            dwWaitOperations = fLatencyStats ? 1 : cQueued;
             dwWaitTime = dwMinSleepTime = INFINITE;
             p->pResults->WaitStats.Wait += 1;
         }
@@ -1340,24 +1368,26 @@ static bool doWorkUsingIoRing(ThreadParameters *p)
                 // throttled, but some dispatched - submit and wait for completions during throttle
                 if (cQueued > 0)
                 {
+                    fSubmit = true;
                     dwWaitOperations = min(cQueued, cIoRingBatchSize);
                     p->pResults->WaitStats.ThrottleWait += 1;
                 }
             }
         }
 
-        // queue is not empty and not throttled ...
-        // lookaside for completions - don't submit just fall through to pop completions
+        // queue is not empty, not throttled, below batch target ...
+        // lookaside only for latency measurement
         else
         {
-            if (fLatencyStats)
+            if (!fLatencyStats)
             {
-                p->pResults->WaitStats.Lookaside += 1;
+                continue;
             }
+            p->pResults->WaitStats.Lookaside += 1;
         }
         
         // submit IOs
-        if (dwWaitOperations > 0)
+        if (fSubmit)
         {
             hr = s_pfnSubmitIoRing(p->ioRing.GetHandle(), dwWaitOperations, dwWaitTime, NULL);
 
@@ -1370,7 +1400,10 @@ static bool doWorkUsingIoRing(ThreadParameters *p)
             }
 
             // increment submit count for IoRing stats
-            ullSubmitCount += 1;
+            if (*p->pfAccountingOn)
+            {
+                ullSubmitCount += 1;
+            }
 
             // reset cQueued count after successful submission
             cQueued = 0;
@@ -1384,10 +1417,27 @@ static bool doWorkUsingIoRing(ThreadParameters *p)
             ullCompletionTime = PerfTimer::GetTime();
         }
 
-        // dequeue all available completions, capture stats, and requeue the IORequests.
-        // NOTE: We drain whatever completions are ready without waiting for all requests to complete.
-        cCompleted = 0;
-        while (true)
+        // when measuring latency, pop all completions to minimize latency measurement gap.
+        // otherwise, for throttled workloads try to pop up to batchsize completions.
+        // for non-throttled workloads pop only what's needed to fill the next batch.
+        UINT32 cPopCap;
+        if (fLatencyStats)
+        {
+            // pop all completions to minimize latency measurement gap
+            cPopCap = UINT32_MAX;
+        }
+        else if (fThrottles)
+        {
+            // pop up to batchSize completions to ensure next batch can be filled
+            cPopCap = cIoRingBatchSize;
+        }
+        else
+        {
+            // pop only what's needed to fill the next batch
+            cPopCap = (UINT32)max(0, (int)cIoRingBatchSize - (int)requestQueue.GetCount());
+        }
+
+        for (cCompleted = 0; cCompleted < cPopCap; cCompleted++)
         {
             hr = s_pfnPopIoRingCompletion(p->ioRing.GetHandle(), &cqe);
 
@@ -1420,8 +1470,6 @@ static bool doWorkUsingIoRing(ThreadParameters *p)
 
             completeIOat(p, pCompletedIORequest, (UINT32)cqe.Information, ullCompletionTime);
             requestQueue.Add(pCompletedIORequest->GetOverlapped());
-
-            cCompleted += 1;
         }
         
         // reset throttle counter
@@ -1434,6 +1482,10 @@ static bool doWorkUsingIoRing(ThreadParameters *p)
         if (dwWaitTime == 0 && dwWaitOperations == 0)
         {
             p->pResults->WaitStats.LookasideCompletion[cCompleted < _countof(p->pResults->WaitStats.LookasideCompletion) ? cCompleted : _countof(p->pResults->WaitStats.LookasideCompletion) - 1] += 1;
+        }
+        else
+        {
+            p->pResults->WaitStats.WaitCompletion[cCompleted < _countof(p->pResults->WaitStats.WaitCompletion) ? cCompleted : _countof(p->pResults->WaitStats.WaitCompletion) - 1] += 1;
         }
     } // end work loop
 

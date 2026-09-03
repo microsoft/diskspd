@@ -93,34 +93,10 @@ void Diagnostics::PrintVerbose(const char *format, ...)
     va_end(argList);
 }
 
-static VirtualAlloc2FnPtr g_pfnVirtualAlloc2 = nullptr;
-
-bool ResolveVirtualAlloc2()
-{
-    if (g_pfnVirtualAlloc2 != nullptr)
-    {
-        return true;
-    }
-
-    // kernelbase.dll is always loaded in every process; use GetModuleHandle
-    // to avoid an unnecessary reference count increment.
-    HMODULE hDll = GetModuleHandleW(L"kernelbase.dll");
-    if (hDll == nullptr)
-    {
-        return false;
-    }
-
-    g_pfnVirtualAlloc2 = (VirtualAlloc2FnPtr)GetProcAddress(hDll, "VirtualAlloc2");
-
-    return g_pfnVirtualAlloc2 != nullptr;
-}
-
 BYTE* AllocateAlignedBuffer(size_t cb, DWORD alignment)
 {
     if (alignment > 0)
     {
-        assert(g_pfnVirtualAlloc2 != nullptr);
-
         MEM_ADDRESS_REQUIREMENTS addressRequirements = {};
         MEM_EXTENDED_PARAMETER memParam = {};
 
@@ -128,9 +104,9 @@ BYTE* AllocateAlignedBuffer(size_t cb, DWORD alignment)
         memParam.Type = MemExtendedParameterAddressRequirements;
         memParam.Pointer = &addressRequirements;
 
-        return (BYTE*)g_pfnVirtualAlloc2(nullptr, nullptr, cb,
-                                          MEM_COMMIT, PAGE_READWRITE,
-                                          &memParam, 1);
+        return (BYTE*)VirtualAlloc2(nullptr, nullptr, cb,
+                                    MEM_COMMIT, PAGE_READWRITE,
+                                    &memParam, 1);
     }
 
     return (BYTE*)VirtualAlloc(nullptr, cb, MEM_COMMIT, PAGE_READWRITE);
@@ -2067,12 +2043,17 @@ string TimeSpan::GetText(UINT32 indent) const
 
     if (GetUseIoRing())
     {
-        sprintf_s(buf, _countof(buf), "using IoRing (batch size: %u)\n", GetIoRingBatchSize());
+        if (GetIoRingBatchSizeIsPercent())
+        {
+            sprintf_s(buf, _countof(buf), "using IoRing (batch size: %u%%) %s registered buffers\n",
+                GetIoRingBatchSize(), GetUseRegBuffer() ? "with" : "without");
+        }
+        else
+        {
+            sprintf_s(buf, _countof(buf), "using IoRing (batch size: %u) %s registered buffers\n",
+                GetIoRingBatchSize(), GetUseRegBuffer() ? "with" : "without");
+        }
         sText += sIndent + buf;
-    }
-    if (GetUseRegBuffer())
-    {
-        sText += sIndent + "using IoRing registered buffers\n";
     }
 
     if (GetDisableAffinity())
@@ -2231,7 +2212,8 @@ string TimeSpan::GetXml(UINT32 indent) const
     if (_fUseIoRing)
     {
         AddXmlInc(sXml, "<IoRing>\n");
-        sprintf_s(buffer, _countof(buffer), "<IoRingBatchSize>%u</IoRingBatchSize>\n", _ulIoRingBatchSize);
+        sprintf_s(buffer, _countof(buffer), "<IoRingBatchSize Percent=\"%s\">%u</IoRingBatchSize>\n",
+            _fIoRingBatchSizeIsPercent ? "true" : "false", _ulIoRingBatchSize);
         AddXml(sXml, buffer);
         AddXml(sXml, _fUseRegBuffer ? "<UseRegBuffer>true</UseRegBuffer>\n" : "<UseRegBuffer>false</UseRegBuffer>\n");
         AddXmlDec(sXml, "</IoRing>\n");
@@ -2454,21 +2436,9 @@ bool Profile::Validate(bool fSingleSpec, SystemInformation *pSystem) const
                 }
             }
 
-            // Validate BufferSeparation: if non-default, resolve VirtualAlloc2.
+            // Validate BufferSeparation: warn about -bsp + -l interaction.
             if (timeSpan.GetBufferSeparation() != BufferSeparation::SystemDefault)
             {
-                if (!ResolveVirtualAlloc2())
-                {
-                    if (timeSpan.IsBufferSeparationExplicit())
-                    {
-                        fprintf(stderr, "ERROR: buffer separation requires VirtualAlloc2 which is not available on this system\n");
-                        fOk = false;
-                    }
-                    // If not explicitly set, Finalize will
-                    // fall back to alignment 0 (system default) when
-                    // VirtualAlloc2 is unavailable.
-                }
-
                 // When the user explicitly specifies -bsp alongside -l, warn that
                 // large pages take priority for IO buffers. Don't warn when buffer
                 // separation is just the default - that would disrupt pre-existing
@@ -3029,7 +2999,7 @@ size_t ThreadParameters::GetTargetBufferLength(const Target& target) const
 IoRing::IoRing() :
     _tp(NULL),
     _hIoRing(NULL),
-    _useRegBuffer(false),
+    _useRegBuffer(true),
     _pBufferInfo(NULL),
     _bufferCount(0)
 {
