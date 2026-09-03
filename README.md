@@ -17,7 +17,7 @@ What's New?
 
 ## DISKSPD
 
-# DISKSPD 2.3 <release-date>
+# DISKSPD 2.3 9/3/2026
 
 **NOTE:** two default changes may require rebaselining. Thread affinity now orders P-cores before E-cores within each group by default (`-aup` restores unordered assignment), which changes placement on heterogeneous systems. I/O buffers are now separated by PDE cache line by default (`-bsp`; use `-bsn` for the prior system-default allocation).
 
