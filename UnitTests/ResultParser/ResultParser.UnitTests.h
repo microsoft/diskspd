@@ -47,6 +47,13 @@ namespace UnitTests
         TEST_METHOD(Test_PrintTargetDistributionAbs);
         TEST_METHOD(Test_PrintEffectiveDistributionPct);
         TEST_METHOD(Test_PrintEffectiveDistributionAbs);
+        TEST_METHOD(Test_PrintProfileBufferSeparationSystemDefault);
+        TEST_METHOD(Test_PrintProfileBufferSeparation8KPage128BLine);
+        TEST_METHOD(Test_PrintResultsBufferSeparation8KPage128BLine);
+        TEST_METHOD(Test_PrintWaitStatsNoThrottleNoLookaside);
+        TEST_METHOD(Test_PrintWaitStatsWithThrottle);
+        TEST_METHOD(Test_PrintWaitStatsWithLookaside);
+        TEST_METHOD(Test_PrintAffinityPolicy);
     };
 }
 

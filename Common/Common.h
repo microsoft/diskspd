@@ -39,11 +39,13 @@ SOFTWARE.
 #include <ctime>
 #include <vector>
 #include <algorithm>
+#include <map>
 #include <set>
 #include <locale>
 #include <codecvt>
 #include <Winternl.h>   //ntdll.dll
 #include <assert.h>
+#include "IoRingWrapper.h"
 #include "Histogram.h"
 #include "IoBucketizer.h"
 #include "ThroughputMeter.h"
@@ -59,11 +61,67 @@ TRACELOGGING_DECLARE_PROVIDER(g_hEtwProvider);
 
 typedef void (WINAPI *PRINTF)(const char*, va_list);                            //function used for displaying formatted data (printf style)
 
-#define ROUND_DOWN(_x,_alignment)                           \
+#define ROUND_DOWN(_x,_alignment) \
     ( ((_x)/(_alignment)) * (_alignment) )
 
-#define ROUND_UP(_x,_alignment)                             \
+#define ROUND_UP(_x,_alignment) \
     ROUND_DOWN((_x) + (_alignment) - 1, (_alignment))
+
+#define DECLARE_DISABLE_COPY(xClass) \
+    xClass(xClass const &) = delete; \
+    xClass & operator=(xClass const &) = delete;
+
+template <class T>
+class CScopeGuardF
+{
+public:
+    CScopeGuardF(T const & function) : _function(function), _fDismissed(false) {}
+    explicit CScopeGuardF(CScopeGuardF && other) noexcept
+        :
+        _function(std::move(other._function)),
+        _fDismissed(other._fDismissed)
+    {
+        other.Dismiss();
+    }
+    CScopeGuardF const & operator=(CScopeGuardF && other) noexcept
+    {
+        _function = std::move(other._function);
+        _fDismissed = other._fDismissed;
+        other.Dismiss();
+        return *this;
+    }
+
+    ~CScopeGuardF() { Execute(); }
+    void Execute() noexcept
+    {
+        if (!_fDismissed)
+        {
+            try {
+                _fDismissed = true;
+                _function();
+            }
+            catch (...)
+            {
+                // If the function throws an exception, terminate (noexcept)
+                std::terminate();
+            }
+        }
+    }
+
+    void Dismiss() noexcept { _fDismissed = true; }
+
+private:
+    T                   _function;
+    bool                _fDismissed;
+
+    DECLARE_DISABLE_COPY(CScopeGuardF);
+};
+
+template <class T>
+CScopeGuardF<T> make_sg(T const & function)
+{
+    return CScopeGuardF<T>(function);
+}
 
 #define TB (((UINT64)1)<<40)
 #define GB (((UINT64)1)<<30)
@@ -72,6 +130,49 @@ typedef void (WINAPI *PRINTF)(const char*, va_list);                            
 
 #define EXPERIMENT_TPUT_CALC        0x1 // precise ms sleep calculation for low rate throughput control
 extern ULONG g_ExperimentFlags;
+
+// Default and maximum number of IO completions to dequeue per
+// batched GetQueuedCompletionStatusEx call. The default starts at the maximum;
+// -oc allows users to reduce the batch depth for experimental purposes.
+constexpr DWORD c_defaultCompletionDepth = 16;
+constexpr DWORD c_maximumCompletionDepth = 16;
+
+// Maximum processor number within a group, determined by KAFFINITY bit width.
+constexpr DWORD c_maxCpuIndexPerGroup = sizeof(KAFFINITY) * 8 - 1;
+
+// Maximum outstanding IO request count per target (or globally via -O).
+// Capped so that requestCount * batchSizePercent stays within UINT32 range
+// for IoRing batch size calculation. 65536 outstanding IOs is far beyond
+// any rational workload.
+constexpr DWORD c_maximumRequestCount = 65536;
+
+// Allocate a buffer with optional alignment. If alignment > 0, uses
+// VirtualAlloc2 with a MEM_ADDRESS_REQUIREMENTS extended parameter.
+// If alignment is 0, uses plain VirtualAlloc.
+BYTE* AllocateAlignedBuffer(size_t cb, DWORD alignment);
+
+//
+// Thread-safe diagnostic output. Initialize() must be called once at startup.
+// SetVerbose() controls whether PrintVerbose() produces output.
+// All output is serialized through a critical section to prevent interleaving
+// when multiple threads print concurrently.
+//
+
+class Diagnostics
+{
+public:
+    static void Initialize();
+    static void SetVerbose(bool fVerbose) { s_fVerbose = fVerbose; }
+    static bool GetVerbose() { return s_fVerbose; }
+
+    static void PrintError(const char *format, ...);
+    static void PrintVerbose(const char *format, ...);
+
+private:
+    static CRITICAL_SECTION s_cs;
+    static bool s_fVerbose;
+    static bool s_fInitialized;
+};
 
 struct ETWEventCounters
 {
@@ -148,6 +249,7 @@ namespace UnitTests
     class PerfTimerUnitTests;
     class ProfileUnitTests;
     class TargetUnitTests;
+    class ThreadParametersUnitTests;
     class IORequestGeneratorUnitTests;
 }
 
@@ -239,6 +341,16 @@ public:
     T2 _dst;
 };
 
+//
+// A DistributionRange maps an IO percentage range to a target range.
+//
+//   _src:          starting IO% for this range (0-based cumulative)
+//   _span:         IO% width of this range (0 = hole, no IO issued here)
+//   _dst.first:    target range start (% for Percent, bytes for Absolute/finalized)
+//   _dst.second:   target range length (% for Percent, bytes for Absolute/finalized;
+//                  0 in last position = open end, resolved at Finalize)
+//
+
 typedef Range<UINT32, pair<UINT64, UINT64>> DistributionRange;
 
 enum class DistributionType
@@ -246,6 +358,81 @@ enum class DistributionType
     None,
     Absolute,
     Percent
+};
+
+enum class BufferSeparation
+{
+    SystemDefault,
+    PDECacheLine
+};
+
+enum class AffinityTraversal
+{
+    Unspecified,            // Internal: not yet set by user (resolves to Cpu)
+    CoreAware,              // Core-first pigeon-hole assignment (-ac)
+    Cpu                     // Direct CPU order, no core-aware reordering (default)
+};
+
+enum class AffinityGroupSpan
+{
+    Unspecified,            // Internal: not yet set by user (resolves to Fill)
+    Fill,                   // Fill each scope unit before moving to next (default)
+    Span                    // Span across all scope units (-as)
+};
+
+enum class AffinityEfficiencyOrder
+{
+    Unspecified,            // Internal: not yet set by user (resolves to PFirst)
+    Unordered,              // No efficiency ordering (-aup)
+    PFirst,                 // P-cores before E-cores within each pass (default, -ap)
+    EFirst,                 // E-cores before P-cores within each pass (-ae)
+    FillPFirst,             // All P-core passes before any E-core (-aP)
+    FillEFirst              // All E-core passes before any P-core (-aE)
+};
+
+class Distribution
+{
+public:
+    Distribution() : _type(DistributionType::None), _ioSpan(100) {}
+
+    //
+    // Set the stated distribution from command line parsing.
+    // Places the final tail element if IO% < 100.
+    //
+    void Set(const vector<DistributionRange>& v, DistributionType t);
+
+    //
+    // Finalize the distribution against target geometry.
+    // Resolves percent/absolute ranges to aligned byte offsets.
+    // relTargetSizeAligned: max aligned offset for IO
+    // relTargetSize: actual usable target size (for absolute end-of-target)
+    // blockSize: IO block size
+    // blockAlignment: IO alignment
+    //
+    void Finalize(UINT64 relTargetSizeAligned, UINT64 relTargetSize,
+                  UINT32 blockSize, UINT64 blockAlignment);
+
+    // Rendering
+    string GetText(UINT32 indent) const;
+    string GetXml(UINT32 indent, bool fRenderHoles = false) const;
+
+    //
+    // Validate the stated distribution. Returns true if valid.
+    // Reports errors to stderr.
+    //
+    bool Validate(UINT32 blockSize) const;
+
+    // Accessors
+    DistributionType GetType() const { return _type; }
+    const vector<DistributionRange>& GetRanges() const { return _vRanges; }
+    UINT32 GetIOSpan() const { return _ioSpan; }
+    bool IsEmpty() const { return _type == DistributionType::None; }
+    bool HasRanges() const { return !_vRanges.empty(); }
+
+private:
+    DistributionType _type;
+    vector<DistributionRange> _vRanges;  // stated or finalized ranges
+    UINT32 _ioSpan;                      // total IO% span (100 normally, < 100 for trimmed absolute)
 };
 
 //
@@ -288,11 +475,11 @@ struct PercentileDescriptor
     string Name;
 };
 
-class Util
+namespace Util
 {
-public:
-    static string DoubleToStringHelper(const double);
-    template<typename T> static T QuotientCeiling(T dividend, T divisor)
+    string DoubleToStringHelper(const double);
+
+    template<typename T> T QuotientCeiling(T dividend, T divisor)
     {
         return (dividend + divisor - 1) / divisor;
     }
@@ -302,7 +489,7 @@ public:
     //  0 will never occur (always false)
     //  100 will always occur (always true)
 
-    static bool BooleanRatio(Random *pRand, UINT32 ulRatio)
+    inline bool BooleanRatio(Random *pRand, UINT32 ulRatio)
     {
         return ((pRand->Rand32() % 100 + 1) <= ulRatio);
     }
@@ -318,7 +505,7 @@ public:
     //
 
     template<typename T>
-    static bool ParseUInt(const char* Input, T& Output, const char*& Continue)
+    bool ParseUInt(const char* Input, T& Output, const char*& Continue)
     {
         T current = 0, last = 0;
         const char* input = Input;
@@ -361,6 +548,82 @@ public:
         }
 
         return parsed;
+    }
+
+    //
+    // Format a power-of-2 size as a human-readable string (e.g., "32KiB", "1.25MiB").
+    // Uses IEC binary suffixes (KiB, MiB, GiB, TiB, PiB) and "B" for sizes below 1KiB.
+    // Trailing fractional zeros are stripped (e.g., "1.5KiB" not "1.50KiB").
+    //
+
+    string GetSizeKMGT(UINT64 size);
+
+    //
+    // Compute the buffer alignment size for the given separation mode.
+    // Returns 0 for SystemDefault (no alignment).
+    // For PDECacheLine, the alignment ensures that each allocation
+    // begins on a VA boundary such that no two allocations share the cache
+    // lines holding their PTE page pointers (PDEs).
+    //
+    // The alignment is: (CacheLineSize / MMPTE_SIZE) * (PageSize / MMPTE_SIZE) * PageSize
+    //   - PageSize / MMPTE_SIZE = PTEs per PTE page (e.g. 4096/8 = 512)
+    //   - CacheLineSize / MMPTE_SIZE = PDE pointers per cache line (e.g. 64/8 = 8)
+    //   - Each PTE page covers PTEsPerPage * PageSize of VA (e.g. 512 * 4K = 2MiB)
+    //   - A cache line of PDEs covers 8 * 2MiB = 16MiB
+    //
+    // MMPTE_SIZE is 8 bytes on all current Windows platforms: x64/arm64 natively and x86
+    // under PAE (default since XP SP2 / Server 2003 SP1 for DEP). If future
+    // platforms change the PTE size, this constant must be updated.
+    //
+    // pageSize: system page size from GetNativeSystemInfo
+    // cacheLineSize: largest cache line from ProcessorTopology (0 falls back to 64)
+    //
+
+    DWORD GetBufferAlignmentSize(BufferSeparation mode, DWORD pageSize, WORD cacheLineSize);
+
+    // Format a ULONG_PTR bitmask as ranges of set bits: "0-3,7,10-12"
+    string MaskRanges(ULONG_PTR mask);
+
+    // Format a sorted vector of WORD values as compressed ranges: {0,1,2} -> "0-2"
+    string IntRanges(const vector<WORD>& values);
+
+    // Trim and collapse whitespace in-place: strip leading/trailing whitespace,
+    // collapse internal runs of spaces/tabs to a single space
+    inline void ShrinkContiguousWhitespace(string& s)
+    {
+        auto dst = s.begin();
+        bool prevSpace = true; // true to strip leading whitespace
+        for (auto src = s.begin(); src != s.end(); ++src)
+        {
+            if (*src == ' ' || *src == '\t')
+            {
+                // copy exactly the first space for a run
+                if (!prevSpace)
+                {
+                    *dst++ = ' ';
+                }
+                prevSpace = true;
+            }
+            else
+            {
+                // copy non-space character iff dst/src have diverged due to shrinking
+                if (dst != src)
+                {
+                    *dst = *src;
+                }
+                ++dst;
+                prevSpace = false;
+            }
+        }
+
+        // reject final trailing space?
+        if (dst != s.begin() && *(dst - 1) == ' ')
+        {
+            --dst;
+        }
+
+        // shrink the string to the trimmed length
+        s.resize(dst - s.begin());
     }
 };
 
@@ -466,15 +729,21 @@ public:
     IoBucketizer writeBucketizer;
 
     // Effective distribution after applying to target size (if specified/non-empty)
-    vector<DistributionRange> vDistributionRange;
+    Distribution distribution;
 };
+
+// Number of completion-count buckets in WAIT_STATS.
+// Bucket 0 = zero completions, 1 = one, ... (N-1) = (N-1) or more.
+constexpr DWORD c_nCompletionBuckets = 8;
 
 typedef struct _WAIT_STATS {
     ULONGLONG Wait;
     ULONGLONG ThrottleWait;
     ULONGLONG ThrottleSleep;
     ULONGLONG Lookaside;
-    ULONGLONG LookasideCompletion[8]; // 0 == none, 1 == 1, ... 7 = 7+
+    ULONGLONG WaitCompletion[c_nCompletionBuckets];       // completions per regular wait
+    ULONGLONG LookasideCompletion[c_nCompletionBuckets];  // completions per lookaside
+    bool fThrottled;                   // true if this thread had throttled targets
 } WAIT_STATS;
 
 class ThreadResults
@@ -485,8 +754,14 @@ public:
         WaitStats = { 0 };
     }
 
+    void AddIoRingSubmitCount(UINT64 ullCount)
+    {
+        ullSubmitCount += ullCount;
+    }
+
     WAIT_STATS WaitStats;
     vector<TargetResults> vTargetResults;
+    UINT64 ullSubmitCount = 0;      //number of submits performed by IoRing per thread
 };
 
 class Results
@@ -563,7 +838,7 @@ public:
     WORD _groupNumber;
     KAFFINITY _processorMask;
     BYTE _efficiencyClass;
-    BYTE _groupCoreNumber;
+    WORD _groupCoreNumber;
 
     ProcessorCoreInformation() = delete;
     ProcessorCoreInformation(
@@ -586,6 +861,65 @@ public:
     vector<pair<WORD, KAFFINITY>> _vProcessorMasks;
 };
 
+class ProcessorCacheInformation
+{
+public:
+    BYTE _level;            // 1, 2, or 3 (L1/L2/L3)
+    BYTE _associativity;    // 0xFF = fully associative
+    WORD _lineSize;         // bytes
+    DWORD _cacheSize;       // bytes
+    PROCESSOR_CACHE_TYPE _type; // CacheUnified, CacheInstruction, CacheData, CacheTrace
+    vector<pair<WORD, KAFFINITY>> _processorMasks; // group+mask pairs sharing this cache
+
+    ProcessorCacheInformation() = delete;
+    ProcessorCacheInformation(
+        BYTE Level,
+        BYTE Associativity,
+        WORD LineSize,
+        DWORD CacheSize,
+        PROCESSOR_CACHE_TYPE Type) :
+        _level(Level),
+        _associativity(Associativity),
+        _lineSize(LineSize),
+        _cacheSize(CacheSize),
+        _type(Type)
+    {
+    }
+
+    static const char* TypeName(PROCESSOR_CACHE_TYPE type)
+    {
+        switch (type)
+        {
+        case CacheUnified:     return "Unified";
+        case CacheInstruction: return "Instruction";
+        case CacheData:        return "Data";
+        case CacheTrace:       return "Trace";
+        default:               return "Unknown";
+        }
+    }
+
+    static const char* TypeAbbreviation(PROCESSOR_CACHE_TYPE type)
+    {
+        switch (type)
+        {
+        case CacheUnified:     return "";
+        case CacheInstruction: return "i";
+        case CacheData:        return "d";
+        case CacheTrace:       return "t";
+        default:               return "?";
+        }
+    }
+
+    bool SameGeometry(const ProcessorCacheInformation& other) const
+    {
+        return _level == other._level &&
+               _type == other._type &&
+               _cacheSize == other._cacheSize &&
+               _lineSize == other._lineSize &&
+               _associativity == other._associativity;
+    }
+};
+
 class ProcessorTopology
 {
 public:
@@ -593,6 +927,7 @@ public:
     vector<ProcessorNumaInformation> _vProcessorNumaInformation;
     vector<ProcessorSocketInformation> _vProcessorSocketInformation;
     vector<ProcessorCoreInformation> _vProcessorCoreInformation;
+    vector<ProcessorCacheInformation> _vProcessorCacheInformation;
 
     DWORD _ulProcessorCount;            // total number of (active) processors
     BYTE _ubPerformanceEfficiencyClass; // highest performance class present
@@ -843,7 +1178,7 @@ public:
 
             // Assign group-relative core number
 
-            BYTE coreNumber = 0;
+            WORD coreNumber = 0;
             WORD group = 0;
             for (auto& core : _vProcessorCoreInformation)
             {
@@ -856,7 +1191,52 @@ public:
             }
         }
 
-        // TODO: Get the cache relationships as well???
+        ////
+        // Cache Relations
+        ////
+
+        ReturnedLength = AllocSize;
+        fResult = GetLogicalProcessorInformationEx(RelationCache, pInformation, &ReturnedLength);
+        if (!fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            delete [] pInformation;
+            AllocSize = ReturnedLength;
+            pInformation = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) new char[AllocSize];
+            fResult = GetLogicalProcessorInformationEx(RelationCache, pInformation, &ReturnedLength);
+        }
+
+        if (fResult)
+        {
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX cur = pInformation;
+
+            while (ReturnedLength != 0)
+            {
+                assert(ReturnedLength >= cur->Size);
+
+                if (cur->Size > ReturnedLength)
+                {
+                    break;
+                }
+
+                ProcessorCacheInformation cache(
+                    cur->Cache.Level,
+                    cur->Cache.Associativity,
+                    cur->Cache.LineSize,
+                    cur->Cache.CacheSize,
+                    cur->Cache.Type);
+
+                for (WORD i = 0; i < (cur->Cache.GroupCount ? cur->Cache.GroupCount : 1); i++)
+                {
+                    cache._processorMasks.emplace_back(cur->Cache.GroupMasks[i].Group,
+                                                       cur->Cache.GroupMasks[i].Mask);
+                }
+
+                _vProcessorCacheInformation.push_back(cache);
+
+                ReturnedLength -= cur->Size;
+                cur = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((PCHAR)cur + cur->Size);
+            }
+        }
 
         delete [] pInformation;
     }
@@ -945,7 +1325,7 @@ public:
         return 0;
     }
 
-    BYTE GetCoreOfProcessor(WORD Group, BYTE Processor, BYTE& EfficiencyClass) const
+    WORD GetCoreOfProcessor(WORD Group, BYTE Processor, BYTE& EfficiencyClass) const
     {
         for (const auto& core : _vProcessorCoreInformation)
         {
@@ -958,6 +1338,25 @@ public:
 
         assert(false);
         return 0;
+    }
+
+    //
+    // Return the largest cache line size for the given cache level (1, 2, 3).
+    // If level is 0, return the largest cache line size across all levels.
+    // Returns 0 if no matching caches are present.
+    //
+
+    WORD GetLargestCacheLineSize(BYTE level = 0) const
+    {
+        WORD largestLineSize = 0;
+        for (const auto& cache : _vProcessorCacheInformation)
+        {
+            if ((level == 0 || cache._level == level) && cache._lineSize > largestLineSize)
+            {
+                largestLineSize = cache._lineSize;
+            }
+        }
+        return largestLineSize;
     }
 
     static unsigned int MaskCount(KAFFINITY Mask)
@@ -976,6 +1375,20 @@ public:
 
         return count;
     }
+
+    enum class Section {
+        All,
+        Topology,
+        Cache
+    };
+
+    string GetText(UINT32 indent, Section section = Section::All) const;
+    string GetXml(UINT32 indent, Section section = Section::All) const;
+
+    // Format a set of (group, mask) pairs as group mask range string.
+    // Single group (fMultiGroup=false): "0-3,7" (no group prefix)
+    // Multi group: "0/0-3 1/0-7" (space-separated group entries)
+    static string GroupMaskRanges(const vector<pair<WORD, KAFFINITY>>& masks, bool fMultiGroup);
 };
 
 //
@@ -999,8 +1412,10 @@ private:
 public:
     ProcessorTopology processorTopology;
     string sComputerName;
+    string sProcessorName;
     string sActivePolicyName;
     string sActivePolicyGuid;
+    DWORD dwPageSize;
 
     SystemInformation()
     {
@@ -1009,11 +1424,34 @@ public:
         GUID *guid = NULL;
         BOOL fResult;
 
+        SYSTEM_INFO sysInfo = {};
+        GetNativeSystemInfo(&sysInfo);
+        dwPageSize = sysInfo.dwPageSize;
+
 #pragma prefast(suppress:38020, "Yes, we're aware this is an ANSI API in a UNICODE project")
         fResult = GetComputerNameExA(ComputerNamePhysicalDnsHostname, buffer, &cb);
         if (fResult)
         {
             sComputerName = buffer;
+        }
+
+        // capture processor name from registry (same source as Task Manager)
+        cb = _countof(buffer);
+        if (RegGetValueA(HKEY_LOCAL_MACHINE,
+                         "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                         "ProcessorNameString",
+                         RRF_RT_REG_SZ,
+                         NULL,
+                         buffer,
+                         &cb) == ERROR_SUCCESS)
+        {
+            sProcessorName = buffer;
+            Util::ShrinkContiguousWhitespace(sProcessorName);
+        }
+
+        if (sProcessorName.empty())
+        {
+            sProcessorName = "<unknown>";
         }
 
         // capture start time
@@ -1043,7 +1481,7 @@ public:
 
             if (pwrBuffer != (PVOID) buffer)
             {
-                delete pwrBuffer;
+                delete[] pwrBuffer;
             }
         }
 
@@ -1067,24 +1505,37 @@ public:
     }
 
     // for unit test, squelch variable timestamp
-    void SystemInformation::ResetTime()
+    void ResetTime()
     {
         StartTime = { 0 };
     }
 
-    string SystemInformation::GetText() const
+    // Update the start timestamp to current time
+    void CaptureTime()
     {
-        char szBuffer[128]; // guid (36ch), timestamp and power friendly (up to 64ch)
-        int nWritten;
-        string sText("System information:\n\n");
+        GetSystemTime(&StartTime);
+    }
 
-        // identify computer which ran the test
-        sText += "\tcomputer name: ";
+    string GetText(UINT32 indent = 0) const
+    {
+        int nWritten;
+        string sText;
+        string sIndent(indent, ' ');
+
+        sText += "System information:\n\n";
+
+        sText += sIndent + "  computer name:        ";
         sText += sComputerName;
         sText += "\n";
 
-        sText += "\tstart time: ";
+        sText += sIndent + "  processor name:       ";
+        sText += sProcessorName;
+        sText += "\n";
+
+        sText += sIndent + "  start time:           ";
         if (StartTime.wYear) {
+
+            char szBuffer[128];
 
             nWritten = sprintf_s(szBuffer, _countof(szBuffer),
                 "%u/%02u/%02u %02u:%02u:%02u UTC",
@@ -1097,21 +1548,9 @@ public:
             assert(nWritten && nWritten < _countof(szBuffer));
             sText += szBuffer;
         }
+        sText += "\n";
 
-        sText += "\n\n\tcpu count:\t\t";
-        sText += to_string(processorTopology._ulProcessorCount);
-        sText += "\n\tcore count:\t\t";
-        sText += to_string(processorTopology._vProcessorCoreInformation.size());
-        sText += "\n\tgroup count:\t\t";
-        sText += to_string(processorTopology._vProcessorGroupInformation.size());
-        sText += "\n\tnode count:\t\t";
-        sText += to_string(processorTopology._vProcessorNumaInformation.size());
-        sText += "\n\tsocket count:\t\t";
-        sText += to_string(processorTopology._vProcessorSocketInformation.size());
-        sText += "\n\theterogeneous cores:\t";
-        sText += processorTopology._ubPerformanceEfficiencyClass ? "y\n" : "n\n";
-
-        sText += "\n\tactive power scheme:\t";
+        sText += sIndent + "  active power scheme:  ";
         sText += sActivePolicyName;
 
         if (!sActivePolicyGuid.empty())
@@ -1122,11 +1561,15 @@ public:
         }
 
         sText += "\n";
+        sText += sIndent + "  page size:            " + Util::GetSizeKMGT(dwPageSize) + "\n";
+
+        sText += "\n";
+        sText += processorTopology.GetText(indent + 2);
 
         return sText;
     }
 
-    string SystemInformation::GetXml(UINT32 indent) const
+    string GetXml(UINT32 indent) const
     {
         char szBuffer[64]; // enough for 64bit mask (17ch) and timestamp
         int nWritten;
@@ -1138,6 +1581,10 @@ public:
         AddXml(sXml, "<ComputerName>");
         sXml += sComputerName;
         sXml += "</ComputerName>\n";
+
+        AddXml(sXml, "<ProcessorName>");
+        sXml += sProcessorName;
+        sXml += "</ProcessorName>\n";
 
         // identify tool version which performed the test
         AddXmlInc(sXml, "<Tool>\n");
@@ -1167,75 +1614,12 @@ public:
         sXml += sActivePolicyGuid;
         sXml += "\"/>\n";
 
-        // processor topology
-        AddXmlInc(sXml, "<ProcessorTopology Heterogeneous=\"");
-        sXml += processorTopology._ubPerformanceEfficiencyClass ? "true\">\n" : "false\">\n";
+        nWritten = sprintf_s(szBuffer, _countof(szBuffer), "<PageSize>%u</PageSize>\n", dwPageSize);
+        assert(nWritten && nWritten < _countof(szBuffer));
+        AddXml(sXml, szBuffer);
 
-        for (const auto& g : processorTopology._vProcessorGroupInformation)
-        {
-            AddXml(sXml, "<Group Group=\"");
-            sXml += to_string(g._groupNumber);
-            sXml += "\" MaximumProcessors=\"";
-            sXml += to_string(g._maximumProcessorCount);
-            sXml += "\" ActiveProcessors=\"";
-            sXml += to_string(g._activeProcessorCount);
-            sXml += "\" ActiveProcessorMask=\"0x";
-            nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g._activeProcessorMask);
-            assert(nWritten && nWritten < _countof(szBuffer));
-            sXml += szBuffer;
-            sXml += "\"/>\n";
+        sXml += processorTopology.GetXml(indent);
 
-        }
-        for (const auto& n : processorTopology._vProcessorNumaInformation)
-        {
-            AddXmlInc(sXml, "<Node Node=\"");
-            sXml += to_string(n._nodeNumber);
-            sXml += "\">\n";
-            for (const auto& g : n._vProcessorMasks)
-            {
-                AddXml(sXml, "<Group Group=\"");
-                sXml += to_string(g.first);
-                sXml += "\" Mask=\"0x";
-                nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g.second);
-                assert(nWritten && nWritten < _countof(szBuffer));
-                sXml += szBuffer;
-                sXml += "\"/>\n";
-            }
-            AddXmlDec(sXml, "</Node>\n");
-        }
-        for (const auto& s : processorTopology._vProcessorSocketInformation)
-        {
-            AddXmlInc(sXml, "<Socket Socket=\"");
-            sXml += to_string(s._ulSocketNumber);
-            sXml += "\">\n";
-            for (const auto& g : s._vProcessorMasks)
-            {
-                AddXml(sXml, "<Group Group=\"");
-                sXml += to_string(g.first);
-                sXml += "\" Mask=\"0x";
-                nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", g.second);
-                assert(nWritten && nWritten < _countof(szBuffer));
-                sXml += szBuffer;
-                sXml += "\"/>\n";
-            }
-            AddXmlDec(sXml, "</Socket>\n");
-        }
-        for (const auto& h : processorTopology._vProcessorCoreInformation)
-        {
-            AddXml(sXml, "<Core Group=\"");
-            sXml += to_string(h._groupNumber);
-            sXml += "\" Core=\"";
-            sXml += to_string(h._groupCoreNumber);
-            sXml += "\" Mask=\"0x";
-            nWritten = sprintf_s(szBuffer, _countof(szBuffer), "%Ix", h._processorMask);
-            assert(nWritten && nWritten < _countof(szBuffer));
-            sXml += szBuffer;
-            sXml += "\" EfficiencyClass=\"";
-            sXml += to_string(h._efficiencyClass);
-            sXml += "\"/>\n";
-        }
-
-        AddXmlDec(sXml, "</ProcessorTopology>\n");
         AddXmlDec(sXml, "</System>\n");
 
         return sXml;
@@ -1295,6 +1679,16 @@ enum class MemoryMappedIoFlushMode {
     ViewOfFile,
     NonVolatileMemory,
     NonVolatileMemoryNoDrain,
+};
+
+// BypassIO modes
+// undefined -> default (not specified, no BypassIO)
+// partial -> bypass file system filters if storage stack cannot be bypassed (-Sy)
+// full -> requires both file system filters and storage stack bypass (-SY)
+enum class BypassIoMode {
+    Undefined = 0,
+    Partial,
+    Full,
 };
 
 enum class IOMode
@@ -1375,8 +1769,26 @@ public:
         _cbRandomDataWriteBuffer(0),
         _sRandomDataWriteBufferSourcePath(),
         _pRandomDataWriteBuffer(nullptr),
-        _distributionType(DistributionType::None)
+        _fOwnsRandomDataWriteBuffer(false),
+        _bypassIoMode(BypassIoMode::Undefined)
     {
+    }
+
+    // Copy constructor: default member-wise copy is correct because ownership
+    // is only set on the original Target AFTER all copies have been distributed
+    // to thread cookies. Copies always have _fOwnsRandomDataWriteBuffer = false.
+    //
+    // IMPORTANT: never copy a Target after _fOwnsRandomDataWriteBuffer has been
+    // set to true -- that would cause double-free on destruction.
+    Target(const Target& other) = default;
+    Target& operator=(const Target&) = delete;
+
+    ~Target()
+    {
+        if (_fOwnsRandomDataWriteBuffer && _pRandomDataWriteBuffer != nullptr)
+        {
+            VirtualFree(_pRandomDataWriteBuffer, 0, MEM_RELEASE);
+        }
     }
 
     IOMode GetIOMode() const
@@ -1463,6 +1875,9 @@ public:
     void SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode memoryMappedIoFlushMode) { _memoryMappedIoFlushMode = memoryMappedIoFlushMode; }
     MemoryMappedIoFlushMode GetMemoryMappedIoFlushMode() const { return _memoryMappedIoFlushMode; }
 
+    void SetBypassIoMode(BypassIoMode bypassIoMode) { _bypassIoMode = bypassIoMode; }
+    BypassIoMode GetBypassIoMode() const { return _bypassIoMode; }
+
     void SetZeroWriteBuffers(bool fBool) { _fZeroWriteBuffers = fBool; }
     bool GetZeroWriteBuffers() const { return _fZeroWriteBuffers; }
 
@@ -1545,46 +1960,29 @@ public:
     DWORD GetThroughputInBytesPerMillisecond() const { return _dwThroughputBytesPerMillisecond; }
 
     string GetXml(UINT32 indent) const;
+    string GetText(UINT32 indent, bool fUseThreadsPerFile, bool fUseRequestsPerFile, bool fCompletionRoutines, bool fUseIoRing = false) const;
 
     bool AllocateAndFillRandomDataWriteBuffer(Random *pRand);
-    void FreeRandomDataWriteBuffer();
-    BYTE* GetRandomDataWriteBuffer(Random *pRand);
+    BYTE* GetRandomDataWriteBuffer(Random *pRand) const;
+    BYTE* GetRandomDataWriteBuffer() const { return _pRandomDataWriteBuffer; }
+
+    // Replace the write source buffer with a new allocation, taking ownership.
+    // Used by worker threads to create per-thread separated copies.
+    void SetRandomDataWriteBuffer(BYTE *pBuffer)
+    {
+        assert(!_fOwnsRandomDataWriteBuffer);
+        _pRandomDataWriteBuffer = pBuffer;
+        _fOwnsRandomDataWriteBuffer = true;
+    }
 
     void SetDistributionRange(const vector<DistributionRange>& v, DistributionType t)
     {
-        _vDistributionRange = v; _distributionType = t;
-
-        // Now place final element if IO% is < 100.
-        // If this is an absolute specification, it will map to zero length here and
-        // conversion will occur at the time of target open to the rest of the target.
-        // For the percent specification we place the final element as-if directly stated,
-        // consuming the tail length.
-        //
-        // This done here so that the stated specification is indeed complete, and not left
-        // for the effective distribution.
-        //
-        // TBD this should be moved to a proper Distribution class.
-
-        const DistributionRange& last = *_vDistributionRange.rbegin();
-
-        UINT32 ioCur = last._src + last._span;
-        if (ioCur < 100)
-        {
-            UINT64 targetCur = last._dst.first + last._dst.second;
-            if (t == DistributionType::Percent && targetCur < 100)
-            {
-                // tail is available
-                // if tail is not available, this will be caught by validation
-                _vDistributionRange.emplace_back(ioCur, 100 - ioCur, make_pair(targetCur, 100 - targetCur));
-            }
-            else
-            {
-                _vDistributionRange.emplace_back(ioCur, 100 - ioCur, make_pair(targetCur, 0));
-            }
-        }
+        _distribution.Set(v, t);
     }
-    auto& GetDistributionRange() const { return _vDistributionRange; }
-    auto GetDistributionType() const { return _distributionType; }
+    auto& GetDistributionRange() const { return _distribution.GetRanges(); }
+    auto GetDistributionType() const { return _distribution.GetType(); }
+    Distribution& GetDistribution() { return _distribution; }
+    const Distribution& GetDistribution() const { return _distribution; }
 
     DWORD GetCreateFlags(bool fAsync)
     {
@@ -1639,6 +2037,7 @@ private:
     MemoryMappedIoMode _memoryMappedIoMode;
     MemoryMappedIoFlushMode _memoryMappedIoFlushMode;
     PVOID _memoryMappedIoNvToken;
+    BypassIoMode _bypassIoMode;
     DWORD _dwThreadsPerFile;
     UINT64 _ullThreadStride;
 
@@ -1666,6 +2065,7 @@ private:
     UINT64 _cbRandomDataWriteBuffer;            // if > 0, then the write buffer should be filled with random data
     string _sRandomDataWriteBufferSourcePath;   // file that should be used for filling the write buffer (if the path is not available, use a crypto provider)
     BYTE *_pRandomDataWriteBuffer;              // a buffer used for write data when _cbWriteBuffer > 0; it's shared by all the threads working on this target
+    bool _fOwnsRandomDataWriteBuffer;           // true if this Target instance owns (allocated) the write buffer and should free it
 
     HANDLE _mappedViewFileHandle;
     BYTE *_mappedView;
@@ -1675,13 +2075,13 @@ private:
     UINT32 _ulWeight;
     vector<ThreadTarget> _vThreadTargets;
 
-    vector<DistributionRange> _vDistributionRange;
-    DistributionType _distributionType;
+    Distribution _distribution;
 
     bool _FillRandomDataWriteBuffer(Random *pRand);
 
     friend class UnitTests::ProfileUnitTests;
     friend class UnitTests::TargetUnitTests;
+    friend class UnitTests::ThreadParametersUnitTests;
 };
 
 class AffinityAssignment
@@ -1689,12 +2089,73 @@ class AffinityAssignment
 public:
     WORD wGroup;
     BYTE bProc;
+    BYTE bEfficiencyClass;
+    WORD wCore;
 
     AffinityAssignment() = delete;
-    AffinityAssignment(WORD p_wGroup, BYTE p_bProc) :
-        wGroup(p_wGroup),
-        bProc(p_bProc)
+    AffinityAssignment(WORD wGroup, BYTE bProc, BYTE bEfficiencyClass = 0, WORD wCore = 0) :
+        wGroup(wGroup),
+        bProc(bProc),
+        bEfficiencyClass(bEfficiencyClass),
+        wCore(wCore)
     {
+    }
+};
+
+// Configuration-level affinity specification: a group and a bitmask of CPUs.
+// A mask with a single bit = one CPU; multiple bits = a set; mask=0 = whole-group
+// effective (resolved at finalization using the system's active processor mask).
+// LSB-MSB expansion of a mask reproduces the specification order.
+
+class AffinityGroupMask
+{
+public:
+    WORD wGroup;
+    KAFFINITY mask;
+
+    AffinityGroupMask() = delete;
+    AffinityGroupMask(WORD p_wGroup, KAFFINITY p_mask) :
+        wGroup(p_wGroup),
+        mask(p_mask)
+    {
+    }
+
+    // Can a new CPU bit merge into this entry?
+    // Merge is allowed only if the new bit is strictly above all current bits,
+    // preserving the invariant that LSB-MSB expansion of the mask reproduces
+    // the original specification order.
+    bool CanMerge(WORD group, BYTE proc) const
+    {
+        if (group != wGroup || mask == 0)
+        {
+            return false;
+        }
+
+        return ((KAFFINITY)1 << proc) > mask;
+    }
+
+    void Merge(BYTE proc)
+    {
+        mask |= ((KAFFINITY)1 << proc);
+    }
+
+    // Compact a vector of per-CPU assignments into group/mask entries,
+    // merging where LSB-MSB ordering allows.
+    static vector<AffinityGroupMask> Compact(const vector<AffinityAssignment>& v)
+    {
+        vector<AffinityGroupMask> result;
+        for (const auto& a : v)
+        {
+            if (!result.empty() && result.back().CanMerge(a.wGroup, a.bProc))
+            {
+                result.back().Merge(a.bProc);
+            }
+            else
+            {
+                result.emplace_back(a.wGroup, (KAFFINITY)1 << a.bProc);
+            }
+        }
+        return result;
     }
 };
 
@@ -1710,22 +2171,49 @@ public:
         _dwRequestCount(0),
         _fRandomWriteData(false),
         _fDisableAffinity(false),
+        _affinityTraversal(AffinityTraversal::Unspecified),
+        _affinityGroupSpan(AffinityGroupSpan::Unspecified),
+        _affinityEfficiencyOrder(AffinityEfficiencyOrder::Unspecified),
         _fCompletionRoutines(false),
         _fMeasureLatency(false),
         _fCalculateIopsStdDev(false),
-        _ulIoBucketDurationInMilliseconds(1000)
+        _ulIoBucketDurationInMilliseconds(1000),
+        _bufferSeparation(BufferSeparation::PDECacheLine),
+        _fBufferSeparationExplicit(false),
+        _pSystem(&g_SystemInformation),
+        _dwEffectiveBufferSeparation(0),
+        _fFinalized(false),
+        _dwCompletionDepth(c_defaultCompletionDepth),
+        _fCompletionDepthExplicit(false),
+        _fUseIoRing(false),
+        _ulIoRingBatchSize(25),
+        _fIoRingBatchSizeIsPercent(true),
+        _fUseRegBuffer(true)
     {
     }
 
-    void ClearAffinityAssignment()
+    // Configuration-level affinity: group/mask pairs preserving specification order.
+    void ClearAffinityGroupMasks()
     {
-        _vAffinity.clear();
+        _vAffinityMasks.clear();
     }
-    void AddAffinityAssignment(WORD wGroup, BYTE bProc)
+    void AddAffinityGroupMask(WORD wGroup, KAFFINITY mask)
     {
-        _vAffinity.emplace_back(wGroup, bProc);
+        _vAffinityMasks.emplace_back(wGroup, mask);
     }
-    const auto& GetAffinityAssignments() const { return _vAffinity; }
+    void AddAffinityGroupMaskCpu(WORD wGroup, BYTE bProc)
+    {
+        KAFFINITY bit = (KAFFINITY)1 << bProc;
+        if (!_vAffinityMasks.empty() && _vAffinityMasks.back().CanMerge(wGroup, bProc))
+        {
+            _vAffinityMasks.back().Merge(bProc);
+        }
+        else
+        {
+            _vAffinityMasks.emplace_back(wGroup, bit);
+        }
+    }
+    const auto& GetAffinityGroupMasks() const { return _vAffinityMasks; }
 
     void AddTarget(const Target& target)
     {
@@ -1758,6 +2246,36 @@ public:
     void SetDisableAffinity(bool fDisableAffinity) { _fDisableAffinity = fDisableAffinity; }
     bool GetDisableAffinity() const { return _fDisableAffinity; }
 
+    void SetAffinityTraversal(AffinityTraversal traversal) { _affinityTraversal = traversal; }
+    AffinityTraversal GetAffinityTraversal(bool fResolve = true) const
+    {
+        if (fResolve && _affinityTraversal == AffinityTraversal::Unspecified)
+        {
+            return AffinityTraversal::Cpu;
+        }
+        return _affinityTraversal;
+    }
+
+    void SetAffinityGroupSpan(AffinityGroupSpan span) { _affinityGroupSpan = span; }
+    AffinityGroupSpan GetAffinityGroupSpan(bool fResolve = true) const
+    {
+        if (fResolve && _affinityGroupSpan == AffinityGroupSpan::Unspecified)
+        {
+            return AffinityGroupSpan::Fill;
+        }
+        return _affinityGroupSpan;
+    }
+
+    void SetAffinityEfficiencyOrder(AffinityEfficiencyOrder order) { _affinityEfficiencyOrder = order; }
+    AffinityEfficiencyOrder GetAffinityEfficiencyOrder(bool fResolve = true) const
+    {
+        if (fResolve && _affinityEfficiencyOrder == AffinityEfficiencyOrder::Unspecified)
+        {
+            return AffinityEfficiencyOrder::PFirst;
+        }
+        return _affinityEfficiencyOrder;
+    }
+
     void SetCompletionRoutines(bool fCompletionRoutines) { _fCompletionRoutines = fCompletionRoutines; }
     bool GetCompletionRoutines() const { return _fCompletionRoutines; }
 
@@ -1770,10 +2288,276 @@ public:
     void SetIoBucketDurationInMilliseconds(UINT32 ulIoBucketDurationInMilliseconds) { _ulIoBucketDurationInMilliseconds = ulIoBucketDurationInMilliseconds; }
     UINT32 GetIoBucketDurationInMilliseconds() const { return _ulIoBucketDurationInMilliseconds; }
 
+    void SetBufferSeparation(BufferSeparation bufferSeparation) { _bufferSeparation = bufferSeparation; }
+    BufferSeparation GetBufferSeparation() const { return _bufferSeparation; }
+
+    void SetBufferSeparationExplicit(bool fExplicit) { _fBufferSeparationExplicit = fExplicit; }
+    bool IsBufferSeparationExplicit() const { return _fBufferSeparationExplicit; }
+
+    void SetSystem(const SystemInformation *pSystem) { _pSystem = pSystem; }
+
+    //
+    // Finalize all effective values from configured policies and system
+    // information. Must be called exactly once before accessing effective
+    // values (e.g., before IO buffer allocation or result reporting).
+    //
+
+    void Finalize() const
+    {
+        assert(!_fFinalized);
+        _FinalizeBufferSeparation();
+        _FinalizeAffinity();
+        _fFinalized = true;
+    }
+
+    DWORD GetEffectiveBufferSeparation() const
+    {
+        assert(_fFinalized);
+        return _dwEffectiveBufferSeparation;
+    }
+
+    // Effective affinity: expanded individual CPU assignments, computed at finalization.
+    const auto& GetEffectiveAffinityAssignments() const
+    {
+        assert(_fFinalized);
+        return _vEffectiveAffinity;
+    }
+
+    // Truncate effective affinity to the number actually used for thread assignment.
+    // When threads < effective entries, the tail was never assigned.
+    void TruncateEffectiveAffinity(size_t cThreads) const
+    {
+        assert(_fFinalized);
+        if (cThreads < _vEffectiveAffinity.size())
+        {
+            _vEffectiveAffinity.erase(
+                _vEffectiveAffinity.begin() + cThreads,
+                _vEffectiveAffinity.end());
+        }
+    }
+
+    bool IsFinalized() const { return _fFinalized; }
+
+    void SetCompletionDepth(DWORD dwCompletionDepth) { _dwCompletionDepth = dwCompletionDepth; }
+    DWORD GetCompletionDepth() const { return _dwCompletionDepth; }
+
+    void SetCompletionDepthExplicit(bool fExplicit) { _fCompletionDepthExplicit = fExplicit; }
+    bool IsCompletionDepthExplicit() const { return _fCompletionDepthExplicit; }
+
+    void SetUseIoRing(bool fUseIoRing) { _fUseIoRing = fUseIoRing; }
+    bool GetUseIoRing() const { return _fUseIoRing; }
+
+    void SetIoRingBatchSize(UINT32 ulIoRingBatchSize) { _ulIoRingBatchSize = ulIoRingBatchSize; }
+    UINT32 GetIoRingBatchSize() const { return _ulIoRingBatchSize; }
+
+    void SetIoRingBatchSizeIsPercent(bool fIsPercent) { _fIoRingBatchSizeIsPercent = fIsPercent; }
+    bool GetIoRingBatchSizeIsPercent() const { return _fIoRingBatchSizeIsPercent; }
+
+    void SetUseRegBuffer(bool fUseRegBuffer) { _fUseRegBuffer = fUseRegBuffer; }
+    bool GetUseRegBuffer() const { return _fUseRegBuffer; }
+
     string GetXml(UINT32 indent) const;
+    string GetText(UINT32 indent) const;
     void MarkFilesAsPrecreated(const vector<string> vFiles);
 
 private:
+
+    void _FinalizeBufferSeparation() const
+    {
+        _dwEffectiveBufferSeparation = Util::GetBufferAlignmentSize(
+            _bufferSeparation,
+            _pSystem->dwPageSize,
+            _pSystem->processorTopology.GetLargestCacheLineSize());
+    }
+
+    void _FinalizeAffinity() const
+    {
+        _vEffectiveAffinity.clear();
+        if (_fDisableAffinity)
+        {
+            return;
+        }
+
+        // If no explicit affinity was specified, synthesize from group topology
+        // and allow policy to determine the final assignment order. Note that
+        // the _vAffinityMasks remains as-specified, empty if empty.
+        vector<AffinityGroupMask> vMasks;
+        if (_vAffinityMasks.empty())
+        {
+            assert(_pSystem != nullptr);
+            for (const auto& g : _pSystem->processorTopology._vProcessorGroupInformation)
+            {
+                vMasks.emplace_back(g._groupNumber, g._activeProcessorMask);
+            }
+        }
+
+        const auto& vSource = _vAffinityMasks.empty() ? vMasks : _vAffinityMasks;
+        assert(_pSystem != nullptr);
+        const auto& vCores = _pSystem->processorTopology._vProcessorCoreInformation;
+
+        // Expand config masks into a flat list of CPUs in LSB-MSB order,
+        // tagging each with its core index & efficiency class from the topology.
+        //
+        // Cores are sorted ascending by group+mask, so as we iterate bits LSB->MSB within
+        // a mask, cores advance in the same direction. A speculative check on the current/next
+        // core avoids the full search in the common case, and no need to build a separate map.
+
+        vector<AffinityAssignment> vExpanded;
+        size_t core = 0;
+
+        for (const auto& gm : vSource)
+        {
+            KAFFINITY m = gm.mask;
+
+            if (m == 0)
+            {
+                assert(gm.wGroup < _pSystem->processorTopology._vProcessorGroupInformation.size());
+                m = _pSystem->processorTopology._vProcessorGroupInformation[gm.wGroup]._activeProcessorMask;
+            }
+
+            BYTE bit = 0;
+            while (m)
+            {
+                if (m & 1)
+                {
+                    KAFFINITY cpuBit = (KAFFINITY)1 << bit;
+
+                    // Speculate: current hint or next core covers this CPU
+                    if (vCores[core]._groupNumber == gm.wGroup &&
+                        (vCores[core]._processorMask & cpuBit))
+                    {
+                        // hit
+                    }
+                    else if (core + 1 < vCores.size() &&
+                             vCores[core + 1]._groupNumber == gm.wGroup &&
+                             (vCores[core + 1]._processorMask & cpuBit))
+                    {
+                        core++;
+                    }
+                    else
+                    {
+                        // Fallback: full search (group change or non-sequential mask).
+                        // Every active CPU appears in some core's mask - assert
+                        size_t ci = 0;
+                        for (; ci < vCores.size(); ci++)
+                        {
+                            if (vCores[ci]._groupNumber == gm.wGroup &&
+                                (vCores[ci]._processorMask & cpuBit))
+                            {
+                                core = ci;
+                                break;
+                            }
+                        }
+                        assert(ci != vCores.size());
+                    }
+
+                    vExpanded.emplace_back(gm.wGroup, bit,
+                        vCores[core]._efficiencyClass,
+                        (WORD)core);
+                }
+                m >>= 1;
+                ++bit;
+            }
+        }
+
+        // Classify each expanded CPU for the unified sort.
+        //
+        // Both Cpu and CoreAware modes use the same ClassifiedCpu struct and sort.
+        // The difference is only in pass assignment:
+        //   Cpu: all entries get pass = 0 (no core pigeon-holing)
+        //   CoreAware: pass assigned via per-core occupancy counter
+        //
+        // The sort key handles all combinations of group span and efficiency
+        // ordering. Original specification order is always the final tiebreaker,
+        // achieving stable-sort semantics across the full integer range of
+        // efficiency classes.
+
+        struct ClassifiedCpu {
+            WORD wGroup;
+            BYTE bProc;
+            BYTE effClass;
+            BYTE pass;      // per-core occupancy: 0 = first in core, 1 = second, ...
+            size_t order;   // original position for stable ordering
+        };
+
+        vector<ClassifiedCpu> vClassified;
+        vClassified.reserve(vExpanded.size());
+
+        if (GetAffinityTraversal() == AffinityTraversal::CoreAware)
+        {
+            // Core-aware: assign passes based on per-core occupancy.
+            // For each core, the Nth CPU from the expanded list goes into pass N.
+            vector<BYTE> vCoreOccupancy(vCores.size(), 0);
+
+            for (size_t i = 0; i < vExpanded.size(); i++)
+            {
+                BYTE pass = vCoreOccupancy[vExpanded[i].wCore]++;
+                vClassified.push_back({ vExpanded[i].wGroup, vExpanded[i].bProc,
+                    vExpanded[i].bEfficiencyClass, pass, i });
+            }
+        }
+        else
+        {
+            // Cpu mode: pass = 0 for all entries (no core pigeon-holing).
+            for (size_t i = 0; i < vExpanded.size(); i++)
+            {
+                vClassified.push_back({ vExpanded[i].wGroup, vExpanded[i].bProc,
+                    vExpanded[i].bEfficiencyClass, 0, i });
+            }
+        }
+
+        // Sort by group span and efficiency ordering.
+        //
+        // Group span determines whether group is outermost (Fill) or
+        // inside pass/efficiency (Span).
+        //
+        // Efficiency ordering determines the relationship between pass and
+        // efficiency class:
+        //   PFirst/EFirst: pass -> effClass -> ...
+        //   FillPFirst/FillEFirst: effClass -> pass -> ...
+        //   Unordered: effClass omitted from sort key
+        //
+        // PFirst/FillPFirst sort effClass descending (higher = P first).
+        // EFirst/FillEFirst sort effClass ascending (lower = E first).
+
+        // Resolved policies (Unspecified -> defaults handled by getters).
+        bool fGroupFirst = (GetAffinityGroupSpan() == AffinityGroupSpan::Fill);
+        bool fEffUnordered = (GetAffinityEfficiencyOrder() == AffinityEfficiencyOrder::Unordered);
+        bool fEffDescending = (GetAffinityEfficiencyOrder() == AffinityEfficiencyOrder::PFirst ||
+                               GetAffinityEfficiencyOrder() == AffinityEfficiencyOrder::FillPFirst);
+        bool fEffBeforePass = (GetAffinityEfficiencyOrder() == AffinityEfficiencyOrder::FillPFirst ||
+                               GetAffinityEfficiencyOrder() == AffinityEfficiencyOrder::FillEFirst);
+
+        sort(vClassified.begin(), vClassified.end(),
+            [fGroupFirst, fEffUnordered, fEffDescending, fEffBeforePass](const ClassifiedCpu& a, const ClassifiedCpu& b)
+            {
+                if (fGroupFirst && a.wGroup != b.wGroup) return a.wGroup < b.wGroup;
+
+                if (fEffUnordered)
+                {
+                    if (a.pass != b.pass) return a.pass < b.pass;
+                }
+                else if (fEffBeforePass)
+                {
+                    if (a.effClass != b.effClass) return fEffDescending ? a.effClass > b.effClass : a.effClass < b.effClass;
+                    if (a.pass != b.pass) return a.pass < b.pass;
+                }
+                else
+                {
+                    if (a.pass != b.pass) return a.pass < b.pass;
+                    if (a.effClass != b.effClass) return fEffDescending ? a.effClass > b.effClass : a.effClass < b.effClass;
+                }
+
+                if (!fGroupFirst && a.wGroup != b.wGroup) return a.wGroup < b.wGroup;
+                return a.order < b.order;
+            });
+
+        for (const auto& cc : vClassified)
+        {
+            _vEffectiveAffinity.emplace_back(cc.wGroup, cc.bProc, cc.effClass);
+        }
+    }
+
     vector<Target> _vTargets;
     UINT32 _ulDuration;
     UINT32 _ulWarmUp;
@@ -1783,11 +2567,33 @@ private:
     DWORD _dwRequestCount;
     bool _fRandomWriteData;
     bool _fDisableAffinity;
-    vector<AffinityAssignment> _vAffinity;
+    AffinityTraversal _affinityTraversal;
+    AffinityGroupSpan _affinityGroupSpan;
+    AffinityEfficiencyOrder _affinityEfficiencyOrder;
+    vector<AffinityGroupMask> _vAffinityMasks;
     bool _fCompletionRoutines;
     bool _fMeasureLatency;
     bool _fCalculateIopsStdDev;
     UINT32 _ulIoBucketDurationInMilliseconds;
+    BufferSeparation _bufferSeparation;
+    bool _fBufferSeparationExplicit;
+    const SystemInformation *_pSystem;
+
+    // Effective buffer separation is computed once during finalization
+    // and then used for both IO buffer allocation and result reporting.
+    mutable DWORD _dwEffectiveBufferSeparation;
+    mutable bool _fFinalized;
+
+    // Effective affinity: expanded individual CPU assignments from config masks.
+    mutable vector<AffinityAssignment> _vEffectiveAffinity;
+
+    DWORD _dwCompletionDepth;
+    bool _fCompletionDepthExplicit;
+
+    bool _fUseIoRing;
+    UINT32 _ulIoRingBatchSize;
+    bool _fIoRingBatchSizeIsPercent;
+    bool _fUseRegBuffer;
 
     friend class UnitTests::ProfileUnitTests;
 };
@@ -1811,6 +2617,7 @@ class Profile
 public:
     Profile() :
         _fProfileOnly(false),
+        _fSystemInformationOnly(false),
         _fVerbose(false),
         _fVerboseStats(false),
         _dwProgress(0),
@@ -1846,6 +2653,9 @@ public:
 
     void SetProfileOnly(bool b) { _fProfileOnly = b; }
     bool GetProfileOnly() const { return _fProfileOnly; }
+
+    void SetSystemInformationOnly(bool b) { _fSystemInformationOnly = b; }
+    bool GetSystemInformationOnly() const { return _fSystemInformationOnly; }
 
     void SetVerbose(bool b) { _fVerbose = b; }
     bool GetVerbose() const { return _fVerbose; }
@@ -1905,6 +2715,7 @@ private:
     bool _fVerbose;
     bool _fVerboseStats;
     bool _fProfileOnly;
+    bool _fSystemInformationOnly;
     DWORD _dwProgress;
     string _sCmdLine;
     ResultsFormat _resultsFormat;
@@ -2028,6 +2839,46 @@ C_ASSERT(sizeof(ACTIVITY_ID) == sizeof(GUID));
 // Forward declaration
 class ThreadTargetState;
 
+class ThreadParameters;
+
+class IoRing
+{
+public:
+    IoRing();
+    HRESULT Initialize(ThreadParameters* pThreadParameters);
+
+    ~IoRing()
+    {
+        if (_hIoRing != NULL)
+        {
+            if (s_pfnCloseIoRing != nullptr)
+            {
+                s_pfnCloseIoRing(_hIoRing);
+            }
+            _hIoRing = NULL;
+        }
+
+        if (_pBufferInfo != NULL)
+        {
+            delete[] _pBufferInfo;
+            _pBufferInfo = NULL;
+        }
+    }
+
+    HIORING GetHandle() const { return _hIoRing; }
+
+    IORING_BUFFER_REF GetReadBufferRef(UINT32 iTarget, UINT32 iRequest);
+    IORING_BUFFER_REF GetWriteBufferRef(UINT32 iTarget, UINT32 iRequest);
+
+private:
+    ThreadParameters *_tp;
+    HIORING _hIoRing;
+    bool _useRegBuffer;
+
+    UINT32 _bufferCount;
+    IORING_BUFFER_INFO* _pBufferInfo;
+};
+
 class ThreadParameters
 {
 public:
@@ -2039,6 +2890,17 @@ public:
         ulThreadNo(0),
         ulRelativeThreadNo(0)
     {
+    }
+
+    ~ThreadParameters()
+    {
+        for (auto pBuffer : vpDataBuffers)
+        {
+            if (pBuffer != nullptr)
+            {
+                VirtualFree(pBuffer, 0, MEM_RELEASE);
+            }
+        }
     }
 
     const Profile *pProfile;
@@ -2080,10 +2942,14 @@ public:
     // TODO: check how it's used
     HANDLE hEndEvent;        //used only in case of completion routines (not for IO Completion Ports)
 
-    bool AllocateAndFillBufferForTarget(const Target& target);
+    IoRing ioRing;
+
+    bool AllocateAndFillBufferForTarget(Target& target);
     BYTE* GetReadBuffer(size_t iTarget, size_t iRequest);
     BYTE* GetWriteBuffer(size_t iTarget, size_t iRequest);
     DWORD GetTotalRequestCount() const;
+    DWORD GetTargetRequestCount(const Target& target) const;
+    size_t GetTargetBufferLength(const Target& target) const;
     bool  InitializeMappedViewForTarget(Target& target, DWORD DesiredAccess);
 
     GUID NextActivityId()
@@ -2120,8 +2986,7 @@ class ThreadTargetState
 
         _nextSeqOffset(0),
         _lastIO(IOOperation::Unknown),
-        _sharedSeqOffset(nullptr),
-        _ioDistributionSpan(100)
+        _sharedSeqOffset(nullptr)
     {
         //
         // Now calculate the maximum base-relative file offset that IO can be issued at.
@@ -2158,253 +3023,11 @@ class ThreadTargetState
 
         // Convert and finalize the random distribution stated in the target using final bounds.
 
-        switch (_target->GetDistributionType())
+        if (!_target->GetDistribution().IsEmpty())
         {
-            case DistributionType::Percent:
-            {
-                UINT32 ioCarry = 0;
-
-                for (auto& r : _target->GetDistributionRange())
-                {
-                    //
-                    // The basic premise is to align the range's bounds to discover whether there are
-                    // any aligned offsets within it. To do this we align DOWN. This moves the adjacent
-                    // end of this range and base of the next in lockstep.
-                    //
-                    // There are two basic branches and three subcases in each:
-                    //
-                    //  * aligned base
-                    //  * unaligned base
-                    //  * and within each
-                    //      * aligned end
-                    //      * unaligned end in same alignment unit
-                    //      * unaligned end in next/following alignment unit
-                    //
-                    //  * aligned/aligned will not move b/e, there will be a positive range
-                    //  * aligned/unaligned-next will move e in step with the following b
-                    //      and there will be a positive range
-                    //  * aligned/unaligned-same will result in b=e after aligning; IO at b is
-                    //      the only possible IO
-                    //
-                    // Unaligned base is more interesting due to degenerate spans, spans where the
-                    // mimimum %range is smaller than the block alignment. For instance, a 100KiB target
-                    // with a 4K alignment has a 1%/1KB minimum and may create these cases.
-                    //
-                    //  * unaligned/aligned aligns base (down) and there is a positive range
-                    //  * unaligned/unaligned-next aligns both down and there is a positive range
-                    //  * unaligned/unaligned-same has no aligned offset in the range; we can detect
-                    //      this by aligning e first and seeing if it is less than unaligned b. there
-                    //      are two subcases:
-                    //      * if the prior range is of zero length, we roll this range's IO% onto it -
-                    //        this combines two or more adjacent degenerate spans
-                    //      * if it was not of zero length, we roll over the IO% to the next/last range
-                    //
-                    //  Now, in the cases where we have a positive range we may still find our aligned
-                    //  base is the same as the prior range - the prior was degenerate and the current
-                    //  is not. In this case we need to round our base up so that we do not share a base.
-                    //  We may then find that our rounded up base makes us degenerate and ... roll over.
-                    //
-                    // Note that this is a closed/open interval. The end offset is NOT a member of this
-                    // range. Consider an 8KiB file divided 50:50 into two 4KB ranges. The first range is
-                    // [0,4KB) and the second is [4KB, 8KB). The IO at offset 4KB belongs to the second
-                    // range, not the first.
-                    //
-
-                    //
-                    // Skip holes. These have the effect of excluding a range of the target by way of
-                    // zero IO will be issued to them; the resulting range is still IO 0-100%.
-                    //
-
-                    if (!r._span) {
-                        continue;
-                    }
-
-                    UINT64 b, e;
-
-                    b = ((r._dst.first * _relTargetSizeAligned) / 100);
-                    // guarantee end (don't lose it in integer math)
-                    if (r._dst.first + r._dst.second == 100)
-                    {
-                        e = _relTargetSizeAligned;
-                    }
-                    else
-                    {
-                        e = b + ((r._dst.second * _relTargetSizeAligned) / 100);
-                    }
-
-                    e = ROUND_DOWN(e, _target->GetBlockAlignmentInBytes());
-
-                    // unaligned/unaligned-same
-                    // carryover IO% to next/last range
-                    if (e < b)
-                    {
-                        // is the prior range degenerate?
-                        // if so, extend its IO%
-                        // note that this cannot happen for the first range, so there
-                        // will always be a range to look at.
-                        if (_vDistributionRange.rbegin()->_dst.first == e)
-                        {
-                            _vDistributionRange.rbegin()->_span += r._span;
-                        }
-                        // carry over to next
-                        else
-                        {
-                            ioCarry = r._span;
-                        }
-
-                        continue;
-                    }
-
-                    b = ROUND_DOWN(b, _target->GetBlockAlignmentInBytes());
-
-                    // Now if b < e (a positive range) we may discover we're adjacent
-                    // to a degenerate range. This is the case of re-aligning b up.
-                    // Note that the degenerate range logically rounds up - this does
-                    // not affect operation, but presents the correct appearance of a
-                    // closed/open interval with respect to the subsequent range.
-                    // Case: -rdpct10/1:10/1
-                    //
-                    // It is possible b == e: this is a case where b was already aligned
-                    // and we're placing a normal degenerate span. No special handling.
-
-                    if (b < e &&
-                        _vDistributionRange.size() &&
-                        _vDistributionRange.rbegin()->_dst.first == b)
-                    {
-
-                        b += _target->GetBlockAlignmentInBytes();
-                        _vDistributionRange.rbegin()->_dst.second += _target->GetBlockAlignmentInBytes();
-
-                        // Now there are two degenerate cases to manage.
-
-                        // if we're dealing with a degenerate at the tail, allow carryover
-                        if (b == _relTargetSizeAligned)
-                        {
-                            ioCarry = r._span;
-                            continue;
-                        }
-
-                        // otherwise, if the range became degenerate in the up-alignment, it must
-                        // combine with the prior degenerate since its logical range is included
-                        // with it.
-                        if (b == e)
-                        {
-                            _vDistributionRange.rbegin()->_span += r._span;
-                            continue;
-                        }
-
-                        // fall through to place re-aligned b/e (non degenerate)
-                    }
-
-                    // prefer to roll IO% to the smaller of prior range/this range
-                    if (ioCarry &&
-                        _vDistributionRange.rbegin()->_span < r._span)
-                    {
-                        _vDistributionRange.rbegin()->_span += ioCarry;
-                        ioCarry = 0;
-                    }
-
-                    _vDistributionRange.emplace_back(
-                        r._src - ioCarry,
-                        r._span + ioCarry,
-                        make_pair(b, e - b));
-
-                    ioCarry = 0;
-                }
-
-                // Apply trailing carryover to final range, extending it.
-                // Guarantee target range extends to aligned size - rollover is always from
-                // a degenerate range we could not place directly. We need to gross up the
-                // actual tail so that the effective correctly spans the open/closed interval
-                // to target size.
-                // -rdpct10/96:10/3:80/1 - the last range is degenerate and needs to roll.
-                if (ioCarry)
-                {
-                    DistributionRange& last = *_vDistributionRange.rbegin();
-
-                    last._span += ioCarry;
-                    last._dst.second = _relTargetSizeAligned - last._dst.first;
-                }
-            }
-            break;
-
-            case DistributionType::Absolute:
-            {
-                UINT32 ioUsed = 0;
-
-                for (auto& r : _target->GetDistributionRange())
-                {
-                    //
-                    // The premise for absolute distributions is similar but without the complication of
-                    // degenerate ranges. The offsets are provided and we only need to push the last to
-                    // the end of the range if it was left open (its length is zero). They do not need to
-                    // be aligned, similar to -T thread stride - this is the caller's dilemma. We already
-                    // know by validation that IO can be issued in the range since any absolute distribution
-                    // with a range < block size would have been rejected.
-                    //
-                    // If the range was not left open we have two cases:
-                    //
-                    //  * the end is within the final range
-                    //  * the end is past it
-                    //
-                    // If the end is within the final range that will again be the caller's dilemma, we'll
-                    // simply trim the length of that range. If it is past it, we will discard the trailing
-                    // ranges and trim the maximum IO% so that they become a proportional specification of the
-                    // IO. For instance, if a 10/10/80 winds up with the 80% not addressable in the file, the
-                    // maximum IO% trims to 20 and it logically becomes a 50:50 split (10:10).
-                    //
-
-                    UINT64 l;
-
-                    //
-                    // Skip holes. These have the effect of excluding a range of the target by way of
-                    // zero IO will be issued to them; the resulting range is still IO 0-100%.
-                    //
-
-                    if (!r._span) {
-                        continue;
-                    }
-
-                    // beyond end? done, with whatever tail IO% not seen
-                    if (r._dst.first >= _relTargetSize)
-                    {
-                        break;
-                    }
-                    // open end or spans end? - set to aligned remainder
-                    else if (r._dst.second == 0 ||
-                             r._dst.first + r._dst.second > _relTargetSize)
-                    {
-                        // ensure tail can accept IO by blocksize - caller has stated this is aligned by
-                        // its specification
-                        l = _relTargetSize - r._dst.first;
-
-                        if (l < _target->GetBlockSizeInBytes())
-                        {
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        l = r._dst.second;
-                    }
-
-                    _vDistributionRange.emplace_back(
-                        r._src,
-                        r._span,
-                        make_pair(r._dst.first, l));
-
-                    ioUsed += r._span;
-                }
-
-                // reduce the IO distribution to that specified by the ranges consumed.
-                // it is still logically 100%, simply over a range of less than 0-100.
-                _ioDistributionSpan = ioUsed;
-            }
-            break;
-
-            // none
-            default:
-            break;
+            _distribution = _target->GetDistribution();
+            _distribution.Finalize(_relTargetSizeAligned, _relTargetSize,
+                                   _target->GetBlockSizeInBytes(), _target->GetBlockAlignmentInBytes());
         }
 
         Reset();
@@ -2539,9 +3162,9 @@ class ThreadTargetState
         // With a distribution we choose by bucket. Note the bucket is already aligned.
         //
 
-        if (_vDistributionRange.size())
+        if (_distribution.HasRanges())
         {
-            auto r = DistributionRange::find(_vDistributionRange, _tp->pRand->Rand64() % _ioDistributionSpan);
+            auto r = DistributionRange::find(_distribution.GetRanges(), _tp->pRand->Rand64() % _distribution.GetIOSpan());
             nextOffset %= r->_dst.second;   // trim to range length (already aligned)
             nextOffset += r->_dst.first;    // bump by range base
         }
@@ -2669,8 +3292,7 @@ public:
     // Random distribution (stated in absolute offsets of target)
     //
 
-    vector<DistributionRange> _vDistributionRange;
-    UINT32 _ioDistributionSpan;
+    Distribution _distribution;
 
     friend class UnitTests::IORequestGeneratorUnitTests;
 };
@@ -2680,6 +3302,7 @@ class IResultParser
 public:
     virtual string ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults) = 0;
     virtual string ParseProfile(const Profile& profile) = 0;
+    virtual string ParseSystemInformation(const SystemInformation& system) = 0;
 };
 
 class EtwResultParser

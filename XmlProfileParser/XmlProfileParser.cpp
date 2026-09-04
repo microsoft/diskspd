@@ -32,6 +32,7 @@ SOFTWARE.
 #include <msxml6.h>
 #include <atlbase.h>
 #include <assert.h>
+#include <errno.h>
 
 HRESULT ReportXmlError(
 	const char *pszName,
@@ -552,6 +553,125 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeS
 
     if (SUCCEEDED(hr))
     {
+        // AffinityTraversal element text = traversal mode, with Group and Efficiency attributes
+        CComPtr<IXMLDOMNode> spTraversalNode = nullptr;
+        CComVariant queryTraversal("AffinityTraversal");
+        hr = pXmlNode->selectSingleNode(queryTraversal.bstrVal, &spTraversalNode);
+        if (SUCCEEDED(hr) && (hr != S_FALSE) && spTraversalNode != nullptr)
+        {
+            BSTR bstrText;
+            hr = spTraversalNode->get_text(&bstrText);
+            if (SUCCEEDED(hr))
+            {
+                string sTraversal;
+                char buf[64] = {};
+                WideCharToMultiByte(CP_UTF8, 0, (wchar_t *)bstrText, -1, buf, sizeof(buf)-1, 0, 0);
+                sTraversal = buf;
+                SysFreeString(bstrText);
+
+                if (sTraversal == "CoreAware")
+                {
+                    pTimeSpan->SetAffinityTraversal(AffinityTraversal::CoreAware);
+                }
+                else if (sTraversal == "Cpu")
+                {
+                    pTimeSpan->SetAffinityTraversal(AffinityTraversal::Cpu);
+                }
+                else
+                {
+                    assert(false);
+                    hr = E_INVALIDARG;
+                }
+            }
+
+            // Read optional Group attribute
+            if (SUCCEEDED(hr))
+            {
+                CComPtr<IXMLDOMNamedNodeMap> spAttrMap = nullptr;
+                hr = spTraversalNode->get_attributes(&spAttrMap);
+                if (SUCCEEDED(hr) && spAttrMap != nullptr)
+                {
+                    CComBSTR groupAttrName("Group");
+                    CComPtr<IXMLDOMNode> spGroupAttrNode = nullptr;
+                    HRESULT hrAttr = spAttrMap->getNamedItem(groupAttrName, &spGroupAttrNode);
+                    if (SUCCEEDED(hrAttr) && hrAttr != S_FALSE && spGroupAttrNode != nullptr)
+                    {
+                        BSTR bstrAttr;
+                        hrAttr = spGroupAttrNode->get_text(&bstrAttr);
+                        if (SUCCEEDED(hrAttr))
+                        {
+                            string sGroup;
+                            char attrBuf[64] = {};
+                            WideCharToMultiByte(CP_UTF8, 0, (wchar_t *)bstrAttr, -1, attrBuf, sizeof(attrBuf)-1, 0, 0);
+                            sGroup = attrBuf;
+                            SysFreeString(bstrAttr);
+
+                            if (sGroup == "Fill")
+                            {
+                                pTimeSpan->SetAffinityGroupSpan(AffinityGroupSpan::Fill);
+                            }
+                            else if (sGroup == "Span")
+                            {
+                                pTimeSpan->SetAffinityGroupSpan(AffinityGroupSpan::Span);
+                            }
+                            else
+                            {
+                                assert(false);
+                                hr = E_INVALIDARG;
+                            }
+                        }
+                    }
+
+                    // Read optional Efficiency attribute
+                    CComBSTR effAttrName("Efficiency");
+                    CComPtr<IXMLDOMNode> spEffAttrNode = nullptr;
+                    hrAttr = spAttrMap->getNamedItem(effAttrName, &spEffAttrNode);
+                    if (SUCCEEDED(hrAttr) && hrAttr != S_FALSE && spEffAttrNode != nullptr)
+                    {
+                        BSTR bstrAttr;
+                        hrAttr = spEffAttrNode->get_text(&bstrAttr);
+                        if (SUCCEEDED(hrAttr))
+                        {
+                            string sEff;
+                            char attrBuf[64] = {};
+                            WideCharToMultiByte(CP_UTF8, 0, (wchar_t *)bstrAttr, -1, attrBuf, sizeof(attrBuf)-1, 0, 0);
+                            sEff = attrBuf;
+                            SysFreeString(bstrAttr);
+
+                            if (sEff == "Unordered")
+                            {
+                                pTimeSpan->SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::Unordered);
+                            }
+                            else if (sEff == "PFirst")
+                            {
+                                pTimeSpan->SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::PFirst);
+                            }
+                            else if (sEff == "EFirst")
+                            {
+                                pTimeSpan->SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::EFirst);
+                            }
+                            else if (sEff == "FillPFirst")
+                            {
+                                pTimeSpan->SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::FillPFirst);
+                            }
+                            else if (sEff == "FillEFirst")
+                            {
+                                pTimeSpan->SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::FillEFirst);
+                            }
+                            else
+                            {
+                                assert(false);
+                                hr = E_INVALIDARG;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
         bool fCompletionRoutines;
         hr = _GetBool(pXmlNode, "CompletionRoutines", &fCompletionRoutines);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
@@ -590,6 +710,52 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeS
         }
     }
 
+    // BufferSeparation
+    if (SUCCEEDED(hr))
+    {
+        string sBufferSeparation;
+        hr = _GetString(pXmlNode, "BufferSeparation", &sBufferSeparation);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            if (sBufferSeparation == "SystemDefault")
+            {
+                pTimeSpan->SetBufferSeparation(BufferSeparation::SystemDefault);
+            }
+            else if (sBufferSeparation == "PDECacheLine")
+            {
+                pTimeSpan->SetBufferSeparation(BufferSeparation::PDECacheLine);
+            }
+            else
+            {
+                // Should be unreachable - XSD schema validation restricts
+                // BufferSeparation to the enumerated values above.
+                assert(false);
+                hr = E_INVALIDARG;
+            }
+            if (SUCCEEDED(hr))
+            {
+                pTimeSpan->SetBufferSeparationExplicit(true);
+            }
+        }
+    }
+
+    // CompletionDepth
+    if (SUCCEEDED(hr))
+    {
+        UINT32 ulCompletionDepth;
+        hr = _GetUINT32(pXmlNode, "CompletionDepth", &ulCompletionDepth);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            pTimeSpan->SetCompletionDepth(ulCompletionDepth);
+            pTimeSpan->SetCompletionDepthExplicit(true);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        hr = _ParseIoRing(pXmlNode, pTimeSpan);
+    }
+
     // Look for downlevel non-group aware assignment
     if (SUCCEEDED(hr))
     {
@@ -600,6 +766,12 @@ HRESULT XmlProfileParser::_ParseTimeSpan(IXMLDOMNode *pXmlNode, TimeSpan *pTimeS
     if (SUCCEEDED(hr))
     {
         hr = _ParseAffinityGroupAssignment(pXmlNode, pTimeSpan);
+    }
+
+    // Look for mask-based group affinity (preferred uplevel form).
+    if (SUCCEEDED(hr))
+    {
+        hr = _ParseAffinityGroup(pXmlNode, pTimeSpan);
     }
 
     if (SUCCEEDED(hr))
@@ -993,6 +1165,27 @@ HRESULT XmlProfileParser::_ParseTarget(IXMLDOMNode *pXmlNode, Target *pTarget)
 
     if (SUCCEEDED(hr))
     {
+        string sBypassIO;
+        hr = _GetString(pXmlNode, "BypassIO", &sBypassIO);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            if (sBypassIO == "Partial")
+            {
+                pTarget->SetBypassIoMode(BypassIoMode::Partial);
+            }
+            else if (sBypassIO == "Full")
+            {
+                pTarget->SetBypassIoMode(BypassIoMode::Full);
+            }
+            else
+            {
+                hr = E_INVALIDARG;
+            }
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
         hr = _ParseWriteBufferContent(pXmlNode, pTarget);
     }
 
@@ -1153,15 +1346,15 @@ HRESULT XmlProfileParser::_ParseThroughput(IXMLDOMNode *pXmlNode, Target *pTarge
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             CComPtr<IXMLDOMNode> spAttrNode = nullptr;
-            HRESULT hr = spNamedNodeMap->getNamedItem(attr, &spAttrNode);
+            hr = spNamedNodeMap->getNamedItem(attr, &spAttrNode);
             if (SUCCEEDED(hr) && (hr != S_FALSE))
             {
-                BSTR bstrText;
-                hr = spAttrNode->get_text(&bstrText);
+                BSTR bstrText2;
+                hr = spAttrNode->get_text(&bstrText2);
                 if (SUCCEEDED(hr))
                 {
-                    isBpms = wcscmp((wchar_t *)bstrText, L"IOPS");
-                    SysFreeString(bstrText);
+                    isBpms = wcscmp((wchar_t *)bstrText2, L"IOPS") != 0;
+                    SysFreeString(bstrText2);
                 }
             }
         }
@@ -1285,7 +1478,7 @@ HRESULT XmlProfileParser::_ParseDistribution(IXMLDOMNode *pXmlNode, Target *pTar
                         if (SUCCEEDED(hr) && (hr != S_FALSE))
                         {
                             CComPtr<IXMLDOMNode> spAttrNode = nullptr;
-                            HRESULT hr = spNamedNodeMap->getNamedItem(attr, &spAttrNode);
+                            hr = spNamedNodeMap->getNamedItem(attr, &spAttrNode);
                             if (SUCCEEDED(hr) && (hr != S_FALSE))
                             {
                                 BSTR bstrText;
@@ -1332,6 +1525,97 @@ HRESULT XmlProfileParser::_ParseDistribution(IXMLDOMNode *pXmlNode, Target *pTar
     return hr;
 }
 
+HRESULT XmlProfileParser::_ParseIoRing(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
+{
+    CComPtr<IXMLDOMNode> spNode = nullptr;
+    CComVariant query("IoRing");
+    HRESULT hr = pXmlNode->selectSingleNode(query.bstrVal, &spNode);
+    if (SUCCEEDED(hr) && (hr != S_FALSE))
+    {
+        // Use IoRing
+        pTimeSpan->SetUseIoRing(true);
+
+        if (SUCCEEDED(hr))
+        {
+            // Parse IoRingBatchSize
+            CComPtr<IXMLDOMNode> spBatchNode = nullptr;
+            CComVariant queryBatch("IoRingBatchSize");
+            hr = spNode->selectSingleNode(queryBatch.bstrVal, &spBatchNode);
+            if (SUCCEEDED(hr) && (hr != S_FALSE) && spBatchNode != nullptr)
+            {
+                // Read batch size value from element text
+                BSTR bstrText;
+                hr = spBatchNode->get_text(&bstrText);
+                if (SUCCEEDED(hr))
+                {
+                    UINT32 ulIoRingBatchSize = _wtoi((wchar_t *)bstrText);
+                    SysFreeString(bstrText);
+
+                    // Read optional Percent attribute (default false)
+                    bool fIsPercent = false;
+                    CComPtr<IXMLDOMNamedNodeMap> spAttrMap = nullptr;
+                    HRESULT hrAttr = spBatchNode->get_attributes(&spAttrMap);
+                    if (SUCCEEDED(hrAttr) && spAttrMap != nullptr)
+                    {
+                        CComBSTR percentAttrName("Percent");
+                        CComPtr<IXMLDOMNode> spPercentNode = nullptr;
+                        hrAttr = spAttrMap->getNamedItem(percentAttrName, &spPercentNode);
+                        if (SUCCEEDED(hrAttr) && hrAttr != S_FALSE && spPercentNode != nullptr)
+                        {
+                            BSTR bstrAttr;
+                            hrAttr = spPercentNode->get_text(&bstrAttr);
+                            if (SUCCEEDED(hrAttr))
+                            {
+                                fIsPercent = (_wcsicmp(L"true", (wchar_t *)bstrAttr) == 0);
+                                SysFreeString(bstrAttr);
+                            }
+                        }
+                    }
+
+                    if (fIsPercent)
+                    {
+                        if (ulIoRingBatchSize > 0 && ulIoRingBatchSize <= 100)
+                        {
+                            pTimeSpan->SetIoRingBatchSize(ulIoRingBatchSize);
+                            pTimeSpan->SetIoRingBatchSizeIsPercent(true);
+                        }
+                        else
+                        {
+                            fprintf(stderr, "ERROR: IoRing BatchSize percentage must be between 1 and 100\n");
+                            hr = E_INVALIDARG;
+                        }
+                    }
+                    else
+                    {
+                        if (ulIoRingBatchSize > 0 && ulIoRingBatchSize <= c_maximumRequestCount)
+                        {
+                            pTimeSpan->SetIoRingBatchSize(ulIoRingBatchSize);
+                            pTimeSpan->SetIoRingBatchSizeIsPercent(false);
+                        }
+                        else
+                        {
+                            fprintf(stderr, "ERROR: IoRing BatchSize must be between 1 and %u\n", c_maximumRequestCount);
+                            hr = E_INVALIDARG;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Parse UseRegBuffer
+        if (SUCCEEDED(hr))
+        {
+            bool fUseRegBuffer;
+            hr = _GetBool(spNode, "UseRegBuffer", &fUseRegBuffer);
+            if (SUCCEEDED(hr) && (hr != S_FALSE))
+            {
+                pTimeSpan->SetUseRegBuffer(fUseRegBuffer);
+            }
+        }
+    }
+    return hr;
+}
+
 // Compatibility with the old, non-group aware affinity assignment. Preserved to allow downlevel XML profiles
 // to run without modification.
 // Any assignment done through this method will only assign within group 0, and is equivalent to the non-group
@@ -1361,7 +1645,34 @@ HRESULT XmlProfileParser::_ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSp
                     hr = spNode->get_text(&bstrText);
                     if (SUCCEEDED(hr))
                     {
-                        pTimeSpan->AddAffinityAssignment((WORD)0, (BYTE)_wtoi((wchar_t *)bstrText));
+                        wchar_t *endptr = nullptr;
+
+                        // reject the +/- signs wcstoul accepts; XML parse trims leading/trailing whitespace
+                        const wchar_t* p = (wchar_t*)bstrText;
+                        if (*p == L'-' || *p == L'+')
+                        {
+                            fprintf(stderr, "ERROR: invalid affinity assignment value '%ls' in profile\n", p);
+                            hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                        }
+                        else
+                        {
+                            unsigned long ulProc = wcstoul(p, &endptr, 10);
+                            if (endptr == p || (endptr != nullptr && *endptr != L'\0'))
+                            {
+                                fprintf(stderr, "ERROR: invalid affinity assignment value '%ls' in profile\n", p);
+                                hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                            }
+                            else if (ulProc > c_maxCpuIndexPerGroup)
+                            {
+                                fprintf(stderr, "ERROR: affinity assignment value %lu in profile exceeds maximum CPU %u\n",
+                                    ulProc, c_maxCpuIndexPerGroup);
+                                hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                            }
+                            else
+                            {
+                                pTimeSpan->AddAffinityGroupMaskCpu((WORD)0, (BYTE)ulProc);
+                            }
+                        }
                         SysFreeString(bstrText);
                     }
                 }
@@ -1399,7 +1710,7 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, T
                     }
                     if (SUCCEEDED(hr))
                     {
-                        if (dwProc > MAXBYTE)
+                        if (dwProc > c_maxCpuIndexPerGroup)
                         {
                             fprintf(stderr, "ERROR: profile specifies group assignment to core %u, out of range\n", dwProc);
                             hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
@@ -1410,10 +1721,58 @@ HRESULT XmlProfileParser::_ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, T
                             hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
                         }
 
-                        if (SUCCEEDED(hr)) {
-                            pTimeSpan->AddAffinityAssignment((WORD)dwGroup, (BYTE)dwProc);
+                        if (SUCCEEDED(hr))
+                        {
+                            pTimeSpan->AddAffinityGroupMaskCpu((WORD)dwGroup, (BYTE)dwProc);
                         }
 
+                    }
+                }
+            }
+        }
+    }
+    return hr;
+}
+
+// Mask-based group affinity assignment. This is the preferred form for uplevel profiles.
+
+HRESULT XmlProfileParser::_ParseAffinityGroup(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan)
+{
+    CComPtr<IXMLDOMNodeList> spNodeList = nullptr;
+    CComVariant query("Affinity/Group");
+
+    HRESULT hr = pXmlNode->selectNodes(query.bstrVal, &spNodeList);
+    if (SUCCEEDED(hr))
+    {
+        long cNodes;
+        hr = spNodeList->get_length(&cNodes);
+        if (SUCCEEDED(hr))
+        {
+            for (int i = 0; i < cNodes; i++)
+            {
+                CComPtr<IXMLDOMNode> spNode = nullptr;
+                hr = spNodeList->get_item(i, &spNode);
+                if (SUCCEEDED(hr))
+                {
+                    UINT32 dwGroup = 0;
+                    KAFFINITY mask = 0;
+                    hr = _GetUINT32Attr(spNode, "Group", &dwGroup);
+                    if (SUCCEEDED(hr) && hr != S_FALSE)
+                    {
+                        hr = _GetKAFFINITYAttr(spNode, "Mask", &mask);
+                    }
+                    if (SUCCEEDED(hr) && hr != S_FALSE)
+                    {
+                        if (dwGroup > MAXWORD)
+                        {
+                            fprintf(stderr, "ERROR: profile specifies group mask for group %u, out of range\n", dwGroup);
+                            hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                        }
+
+                        if (SUCCEEDED(hr))
+                        {
+                            pTimeSpan->AddAffinityGroupMask((WORD)dwGroup, mask);
+                        }
                     }
                 }
             }
@@ -1448,7 +1807,7 @@ HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszA
     if (SUCCEEDED(hr) && (hr != S_FALSE))
     {
         CComPtr<IXMLDOMNode> spNode = nullptr;
-        HRESULT hr = spNamedNodeMap->getNamedItem(attr, &spNode);
+        hr = spNamedNodeMap->getNamedItem(attr, &spNode);
         if (SUCCEEDED(hr) && (hr != S_FALSE))
         {
             BSTR bstrText;
@@ -1456,6 +1815,57 @@ HRESULT XmlProfileParser::_GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszA
             if (SUCCEEDED(hr))
             {
                 *pulValue = _wtoi((wchar_t *)bstrText);  // TODO: make sure it works on large unsigned ints
+                SysFreeString(bstrText);
+            }
+        }
+    }
+    return hr;
+}
+
+HRESULT XmlProfileParser::_GetKAFFINITYAttr(IXMLDOMNode *pXmlNode, const char *pszAttr, KAFFINITY *pMask) const
+{
+    CComPtr<IXMLDOMNamedNodeMap> spNamedNodeMap = nullptr;
+    CComBSTR attr(pszAttr);
+    HRESULT hr = pXmlNode->get_attributes(&spNamedNodeMap);
+    if (SUCCEEDED(hr) && (hr != S_FALSE))
+    {
+        CComPtr<IXMLDOMNode> spNode = nullptr;
+        hr = spNamedNodeMap->getNamedItem(attr, &spNode);
+        if (SUCCEEDED(hr) && (hr != S_FALSE))
+        {
+            BSTR bstrText;
+            hr = spNode->get_text(&bstrText);
+            if (SUCCEEDED(hr))
+            {
+                wchar_t *endptr = nullptr;
+
+                // reject the +/- signs _wcstoui64 accepts
+                const wchar_t* p = (wchar_t*)bstrText;
+                if (*p == L'-' || *p == L'+')
+                {
+                    fprintf(stderr, "ERROR: invalid mask value '%ls' in profile\n", p);
+                    hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                }
+                else
+                {
+                    errno = 0;
+                    unsigned long long ullMask = _wcstoui64(p, &endptr, 0);
+                    if (endptr == p || (endptr != nullptr && *endptr != L'\0'))
+                    {
+                        fprintf(stderr, "ERROR: invalid mask value '%ls' in profile\n", p);
+                        hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                    }
+                    else if (errno == ERANGE || ullMask > (unsigned long long)((KAFFINITY)-1))
+                    {
+                        fprintf(stderr, "ERROR: mask value '%ls' in profile exceeds platform maximum (0x%Ix)\n",
+                            p, (KAFFINITY)-1);
+                        hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                    }
+                    else
+                    {
+                        *pMask = (KAFFINITY)ullMask;
+                    }
+                }
                 SysFreeString(bstrText);
             }
         }

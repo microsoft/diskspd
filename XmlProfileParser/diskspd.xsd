@@ -136,6 +136,16 @@
                                   </xs:simpleType>
                                 </xs:element>
 
+                                <!-- enum BypassIO -->
+                                <xs:element name="BypassIO" minOccurs="0" maxOccurs="1">
+                                  <xs:simpleType>
+                                    <xs:restriction base="xs:string">
+                                      <xs:enumeration value="Partial"/>
+                                      <xs:enumeration value="Full"/>
+                                    </xs:restriction>
+                                  </xs:simpleType>
+                                </xs:element>
+
                                 <xs:element name="WriteBufferContent" minOccurs="0" maxOccurs="1">
                                   <xs:complexType>
                                     <xs:all>
@@ -273,9 +283,6 @@
                        -O<count>          total number of requests per thread - for use with -F -->
                     <xs:element name="RequestCount" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"/>
 
-                    <!-- BOOL fGroupAffinity -->
-                    <xs:element name="GroupAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"/>
-
                     <!-- UINT32 *puAffinity -->
                     <xs:element name="Affinity" minOccurs="0" maxOccurs="1">
                       <xs:complexType>
@@ -283,6 +290,7 @@
                           <xs:choice>
                             <xs:element name="AffinityAssignment" type="xs:unsignedInt" minOccurs="1" maxOccurs="unbounded"/>
                             <xs:element name="AffinityGroupAssignment" type="AffinityGroupAssignment" minOccurs="1" maxOccurs="unbounded"/>
+                            <xs:element name="Group" type="AffinityGroupMask" minOccurs="1" maxOccurs="unbounded"/>
                           </xs:choice>
                         </xs:sequence>
                       </xs:complexType>
@@ -292,6 +300,17 @@
                        -n                 disable affinity (cannot be used with -a) -->
                     <xs:element name="DisableAffinity" type="xs:boolean" minOccurs="0" maxOccurs="1"/>
 
+                    <xs:element name="AffinityTraversal" minOccurs="0" maxOccurs="1">
+                      <xs:complexType>
+                        <xs:simpleContent>
+                          <xs:extension base="AffinityTraversalType">
+                            <xs:attribute name="Group" type="AffinityGroupSpanType"/>
+                            <xs:attribute name="Efficiency" type="AffinityEfficiencyType"/>
+                          </xs:extension>
+                        </xs:simpleContent>
+                      </xs:complexType>
+                    </xs:element>
+
                     <!-- BOOL fCompletionRoutines -->
                     <!-- TODO: this should be decided on a target level -->
                     <xs:element name="CompletionRoutines" type="xs:boolean" minOccurs="0" maxOccurs="1"/>
@@ -300,6 +319,37 @@
 
                     <xs:element name="CalculateIopsStdDev" type="xs:boolean" minOccurs="0" maxOccurs="1"/>
                     <xs:element name="IoBucketDuration" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"/>
+
+                    <xs:element name="BufferSeparation" minOccurs="0" maxOccurs="1">
+                      <xs:simpleType>
+                        <xs:restriction base="xs:string">
+                          <xs:enumeration value="SystemDefault"/>
+                          <xs:enumeration value="PDECacheLine"/>
+                        </xs:restriction>
+                      </xs:simpleType>
+                    </xs:element>
+
+                    <xs:element name="CompletionDepth" type="xs:unsignedInt" minOccurs="0" maxOccurs="1"/>
+
+                    <!-- BOOL _fUseIoRing (use IoRing) -->
+                    <xs:element name="IoRing" minOccurs="0" maxOccurs="1">
+                      <xs:complexType>
+                        <xs:all>
+                          <!-- UINT32 _ulIoRingBatchSize (number of I/O requests per IoRing submission) -->
+                          <xs:element name="IoRingBatchSize" minOccurs="0" maxOccurs="1">
+                            <xs:complexType>
+                              <xs:simpleContent>
+                                <xs:extension base="xs:unsignedInt">
+                                  <xs:attribute name="Percent" type="xs:boolean"/>
+                                </xs:extension>
+                              </xs:simpleContent>
+                            </xs:complexType>
+                          </xs:element>
+                          <!-- BOOL _fUseRegBuffer (use IoRing with registered buffers, default true) -->
+                          <xs:element name="UseRegBuffer" type="xs:boolean" minOccurs="0" maxOccurs="1"/>
+                        </xs:all>
+                      </xs:complexType>
+                    </xs:element>
                   </xs:all>
                 </xs:complexType>
               </xs:element>
@@ -375,9 +425,38 @@
   </xs:element>
 
   <xs:complexType name="AffinityGroupAssignment">
-    <xs:attribute name="Group" type="xs:unsignedInt"/>
-    <xs:attribute name="Processor" type="xs:unsignedInt"/>
+    <xs:attribute name="Group" type="xs:unsignedInt" use="required"/>
+    <xs:attribute name="Processor" type="xs:unsignedInt" use="required"/>
   </xs:complexType>
+
+  <xs:complexType name="AffinityGroupMask">
+    <xs:attribute name="Group" type="xs:unsignedInt" use="required"/>
+    <xs:attribute name="Mask" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:simpleType name="AffinityTraversalType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="CoreAware"/>
+      <xs:enumeration value="Cpu"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="AffinityGroupSpanType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Fill"/>
+      <xs:enumeration value="Span"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="AffinityEfficiencyType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Unordered"/>
+      <xs:enumeration value="PFirst"/>
+      <xs:enumeration value="EFirst"/>
+      <xs:enumeration value="FillPFirst"/>
+      <xs:enumeration value="FillEFirst"/>
+    </xs:restriction>
+  </xs:simpleType>
 
   <xs:simpleType name="Percent">
     <xs:restriction base="xs:unsignedInt">

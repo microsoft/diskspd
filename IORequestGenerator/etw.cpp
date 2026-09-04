@@ -135,7 +135,7 @@ BOOL TraceEvents()
     handles[0] = OpenTrace(&logfile);
     if( (TRACEHANDLE)INVALID_HANDLE_VALUE == handles[0] )
     {
-        PrintError("ETW ERROR: OpenTrace failed (error code: %d)\n", GetLastError());
+        Diagnostics::PrintError("ETW ERROR: OpenTrace failed (error code: %d)\n", GetLastError());
         return false;
     }
     else
@@ -160,7 +160,7 @@ PEVENT_TRACE_PROPERTIES allocateEventTraceProperties()
     pProperties = (PEVENT_TRACE_PROPERTIES)malloc(size);
     if( NULL == pProperties )
     {
-        PrintError("FATAL ERROR: unable to allocate memory (error code: %d)\n", GetLastError());
+        Diagnostics::PrintError("FATAL ERROR: unable to allocate memory (error code: %d)\n", GetLastError());
         return NULL;
     }
 
@@ -459,7 +459,7 @@ TRACEHANDLE StartETWSession(const Profile& profile)
     free(pProperties);
     if (ERROR_SUCCESS != ret)
     {
-        PrintError("Error starting trace session\n");
+        Diagnostics::PrintError("Error starting trace session\n");
         return 0;
     }
 
@@ -484,7 +484,7 @@ PEVENT_TRACE_PROPERTIES StopETWSession(TRACEHANDLE hTraceSession)
     ret = ControlTrace(hTraceSession, NULL, pProperties, EVENT_TRACE_CONTROL_STOP);
     if( ERROR_SUCCESS != ret )
     {
-        PrintError("Error stopping trace session\n");
+        Diagnostics::PrintError("Error stopping trace session\n");
         return NULL;
     }
 

@@ -57,6 +57,7 @@ namespace UnitTests
         TEST_METHOD(Test_ParseDistributionPercent);
         TEST_METHOD(Test_ParseFile);
         TEST_METHOD(Test_ParseFileGlobalRequestCount);
+        TEST_METHOD(Test_ParseFileIoRing);
         TEST_METHOD(Test_ParseFilePrecreateFilesOnlyFilesWithConstantOrZeroSizes);
         TEST_METHOD(Test_ParseFilePrecreateFilesOnlyFilesWithConstantSizes);
         TEST_METHOD(Test_ParseFilePrecreateFilesUseMaxSize);
@@ -67,9 +68,15 @@ namespace UnitTests
         TEST_METHOD(Test_ParseFileWriteBufferContentZero);
         TEST_METHOD(Test_ParseGroupAffinity);
         TEST_METHOD(Test_ParseNonGroupAffinity);
+        TEST_METHOD(Test_ParseGroupMaskAffinity);
+        TEST_METHOD(Test_ParseGroupMaskAffinityInputValidation);
+        TEST_METHOD(Test_ParseNonGroupAffinityInputValidation);
+        TEST_METHOD(Test_ParseAffinityTraversal);
         TEST_METHOD(Test_ParseRandomSequentialMixed);
         TEST_METHOD(Test_ParseTemplateTargets);
         TEST_METHOD(Test_ParseThroughput);
+        TEST_METHOD(Test_ParseBufferSeparation);
+        TEST_METHOD(Test_ParseCompletionDepth);
 
         //
         // Utility wrapping the specification and validation of a given distribution.

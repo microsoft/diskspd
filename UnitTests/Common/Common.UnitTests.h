@@ -36,6 +36,8 @@ namespace UnitTests
         MODULE_PROPERTY(L"Feature", L"Common")
     END_MODULE()
 
+    MODULE_SETUP(ModuleSetup);
+
     class PerfTimerUnitTests : public WEX::TestClass<PerfTimerUnitTests>
     {
     public:
@@ -84,6 +86,16 @@ namespace UnitTests
         TEST_METHOD(Test_MarkFilesAsCreated);
         TEST_METHOD(Test_Validate);
         TEST_METHOD(Test_ValidateSystem);
+        TEST_METHOD(Test_FinalizeAffinity_CoreAware);
+        TEST_METHOD(Test_ValidateBypassIoConflict);
+    };
+
+    class TimeSpanUnitTests : public WEX::TestClass<TimeSpanUnitTests>
+    {
+    public:
+        TEST_CLASS(TimeSpanUnitTests);
+        TEST_METHOD(Test_TimeSpanGetXmlUseIoRing);
+        TEST_METHOD(Test_TimeSpanGetXmlUseIoRingWithBatchSizeAndRegBuffer);
     };
 
     class TargetUnitTests : public WEX::TestClass<TargetUnitTests>
@@ -104,6 +116,8 @@ namespace UnitTests
         TEST_METHOD(Test_TargetGetXmlMemoryMappedIoFlushModeViewOfFile);
         TEST_METHOD(Test_TargetGetXmlMemoryMappedIoFlushModeNonVolatileMemory);
         TEST_METHOD(Test_TargetGetXmlMemoryMappedIoFlushModeNonVolatileMemoryNoDrain);
+        TEST_METHOD(Test_TargetGetXmlBypassIoModePartial);
+        TEST_METHOD(Test_TargetGetXmlBypassIoModeFull);
         TEST_METHOD(Test_TargetGetXmlRandomAccessHint);
         TEST_METHOD(Test_TargetGetXmlSequentialScanHint);
         TEST_METHOD(Test_TargetGetXmlCombinedAccessHint);
@@ -116,6 +130,9 @@ namespace UnitTests
     public:
         TEST_CLASS(ThreadParametersUnitTests);
         TEST_METHOD(Test_AllocateAndFillBufferForTarget);
+        TEST_METHOD(Test_AllocateAndFillBufferForTarget_Aligned);
+        TEST_METHOD(Test_AllocateAndFillBufferForTarget_WriteSourceNoSeparation);
+        TEST_METHOD(Test_AllocateAndFillBufferForTarget_WriteSourceSeparation);
     };
 
     class TopologyUnitTests : public WEX::TestClass<TopologyUnitTests>
@@ -124,7 +141,89 @@ namespace UnitTests
         TEST_CLASS(TopologyUnitTests);
         TEST_METHOD(Test_MaskCount);
     };
+
+    class ProcessorTopologyUnitTests : public WEX::TestClass<ProcessorTopologyUnitTests>
+    {
+    public:
+        TEST_CLASS(ProcessorTopologyUnitTests);
+        TEST_METHOD(Test_GetLargestCacheLineSize_SingleL3);
+        TEST_METHOD(Test_GetLargestCacheLineSize_MultipleL3);
+        TEST_METHOD(Test_GetLargestCacheLineSize_NoL3);
+        TEST_METHOD(Test_GetLargestCacheLineSize_AllLevels);
+        TEST_METHOD(Test_GetLargestCacheLineSize_SpecificLevel);
+        TEST_METHOD(Test_GetXml_CacheTopology);
+        TEST_METHOD(Test_GetCacheText);
+        TEST_METHOD(Test_GetCacheTextMultiGroup);
+        TEST_METHOD(Test_CacheTypeName);
+        TEST_METHOD(Test_CacheTypeAbbreviation);
+        TEST_METHOD(Test_GetText_SectionAll);
+        TEST_METHOD(Test_GetText_SectionTopology);
+        TEST_METHOD(Test_GetXml_SectionAll);
+        TEST_METHOD(Test_GetXml_SectionTopology);
+        TEST_METHOD(Test_GetCacheText_BigSystem);
+        TEST_METHOD(Test_GetCacheText_SmallHeteroSystem);
+        TEST_METHOD(Test_GetCacheText_NoCompaction);
+        TEST_METHOD(Test_GetCacheText_MultiMaskPlain);
+        TEST_METHOD(Test_GetCacheText_SingleGroupSkipsGroupCase);
+        TEST_METHOD(Test_GroupMaskRanges);
+        TEST_METHOD(Test_SameGeometry);
+    };
+
+    class UtilUnitTests : public WEX::TestClass<UtilUnitTests>
+    {
+    public:
+        TEST_CLASS(UtilUnitTests);
+        TEST_METHOD(Test_GetSizeKMGT);
+        TEST_METHOD(Test_GetBufferAlignmentSize);
+        TEST_METHOD(Test_MaskRanges);
+        TEST_METHOD(Test_IntRanges);
+        TEST_METHOD(Test_ShrinkContiguousWhitespace);
+    };
+
+    class DistributionUnitTests : public WEX::TestClass<DistributionUnitTests>
+    {
+    public:
+        TEST_CLASS(DistributionUnitTests);
+        TEST_METHOD(Test_SetPercent);
+        TEST_METHOD(Test_SetAbsolute);
+        TEST_METHOD(Test_SetPercentFullIO);
+        TEST_METHOD(Test_SetPercentTargetFullBeforeIO);
+        TEST_METHOD(Test_ValidatePercentValid);
+        TEST_METHOD(Test_ValidateAbsoluteValid);
+        TEST_METHOD(Test_ValidatePercentIOOverflow);
+        TEST_METHOD(Test_ValidatePercentTargetOverflow);
+        TEST_METHOD(Test_ValidateAbsoluteRangeTooSmall);
+        TEST_METHOD(Test_ValidatePercentTargetCoveredBeforeIO);
+        TEST_METHOD(Test_FinalizePercent);
+        TEST_METHOD(Test_FinalizePercentDegenerate);
+        TEST_METHOD(Test_FinalizeAbsolute);
+        TEST_METHOD(Test_FinalizeAbsoluteTrimmed);
+        TEST_METHOD(Test_FinalizeTypeSetsAbsolute);
+        TEST_METHOD(Test_GetTextPercent);
+        TEST_METHOD(Test_GetTextAbsolute);
+        TEST_METHOD(Test_GetXml);
+        TEST_METHOD(Test_GetXmlWithHoles);
+        TEST_METHOD(Test_EmptyDistribution);
+    };
+
+    class TextDiffUnitTests : public WEX::TestClass<TextDiffUnitTests>
+    {
+    public:
+        TEST_CLASS(TextDiffUnitTests);
+        TEST_METHOD(Test_IdenticalStrings);
+        TEST_METHOD(Test_IdenticalStringsWithTrailingNewlines);
+        TEST_METHOD(Test_EmptyStrings);
+        TEST_METHOD(Test_DifferentFirstLine);
+        TEST_METHOD(Test_DifferentMiddleLine);
+        TEST_METHOD(Test_ExpectedLonger);
+        TEST_METHOD(Test_ActualLonger);
+        TEST_METHOD(Test_SingleLineDifference);
+        TEST_METHOD(Test_TrailingNewline);
+        TEST_METHOD(Test_CaseSensitive);
+        TEST_METHOD(Test_VerifyMultilineEqualCharPointers);
+    };
 }
 
 // TODO: ThreadParameters::GetWriteBuffer
 // TODO: Target::GetRandomDataWriteBuffer();
+

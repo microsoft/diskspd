@@ -1,0 +1,63 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Imported AFTER Microsoft.Cpp.props by every DiskSpd .vcxproj.
+
+    ClCompile/Link items only exist after Microsoft.Cpp.props chains in the
+    toolset chain, so metadata for them must be set here, not earlier.  The
+    inherited $(IncludePath) likewise picks up the SDK/toolset entries only
+    after that chain runs.
+
+    Also imported after the per-user Microsoft.Cpp.$(Platform).user.props
+    PropertySheets ImportGroup so project-mandated build invariants (C++17,
+    warning level, deprecation silencing, string pooling, etc.) override any
+    user customization.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <IncludePath>$(MSBuildThisFileDirectory)..\Common;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <PreprocessorDefinitions>_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <StringPooling>true</StringPooling>
+      <!-- DiskSpd does not use dynamic_cast or typeid; disable RTTI (/GR-) to match Razzle. -->
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <!--
+        /Gw places each global data item in its own COMDAT so the linker can strip
+        unreferenced ones (data analogue of /Gy for functions).  Pairs with /OPT:REF
+        below.  No direct MSBuild property; must go through AdditionalOptions.
+      -->
+      <AdditionalOptions>/Gw %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <!--
+        /Brepro produces deterministic outputs: no embedded build timestamps in the
+        PE header or PDB.  Restricted to Release because incremental linking and
+        reproducible builds don't combine; Debug uses incremental link.
+      -->
+      <AdditionalOptions>/Brepro %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalOptions>/Brepro %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>

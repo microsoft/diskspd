@@ -31,6 +31,7 @@ SOFTWARE.
 #include "Common.h"
 #include "XmlProfileParser.h"
 #include <assert.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -171,16 +172,30 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "  -:<flags>             experimental behaviors, as a bitmask of flags. current:\n"
         "                          1 - allow throughput rate limit sleeps >1ms if indicated by rate\n"
         "  -ag                   group affinity - threads assigned round-robin to CPUs by processor groups, 0 - n.\n"
-        "                          Groups are filled from lowest to highest processor before moving to the next.\n"
-        "                          [default; use -n to disable default affinity]\n"
-        "  -a[g#,]#[,#,...]>     advanced CPU affinity -  threads assigned round-robin to the CPUs stated, in order of\n"
-        "                          specification; g# is the processor group for the following CPUs. If no group is\n"
-        "                          stated, 0 is default. Additional groups/processors can be added, comma separated,\n"
-        "                          on the same or separate -a parameters.\n"
+        "                          By default, P-cores are ordered before E-cores within each group (BIG.little-aware).\n"
+        "                          Groups are fully consumed before moving to the next.\n"
+        "                          [default; use -n to fully disable affinity]\n"
+        "  -ac                   SMT/core-aware assignment - 1st thread per core placed before 2nd (opt-in)\n"
+        "  -as                   span groups - interleave across all groups before filling each\n"
+        "  -ap/-aP/-ae/-aE       efficiency class ordering on heterogeneous BIG.little (P/E core) systems:\n"
+        "                          p : P-cores first within each pass [default]\n"
+        "                          P : fill all P-core passes before any E-core\n"
+        "                          e : E-cores first within each pass\n"
+        "                          E : fill all E-core passes before any P-core\n"
+        "                          Composes with -ac and -as (e.g. -acsE, -aPc).\n"
+        "  -aup                  unset P/E ordering default (no efficiency class reordering)\n"
+        "  -a#[,#,...]           explicit CPU affinity masks - threads assigned by the effective ordering\n"
+        "  -ag#,#[,#,...]...       policies; g# is processor group for the following CPUs. If no group stated, 0 is default.\n"
+        "  -ag#                    CPU ranges can be specified with N-M syntax.\n"
+        "                          Use -ag# for whole-group. -a#[,#,...] short format specifies CPUs within group 0.\n"
+        "                          Multiple masks combine in order to form the final CPU affinity mask/ordering.\n"
         "                          Examples: -a0,1,2 and -ag0,0,1,2 are equivalent.\n"
-        "                                    -ag0,0,1,2,g1,0,1,2 specifies the first three CPUs in groups 0 and 1.\n"
-        "                                    -ag0,0,1,2,g1,0,1,2 and -ag0,0,1,2 -ag1,0,1,2 are equivalent.\n"
+        "                                    -ag0,0-10,15-20 specifies CPUs 0-10 and 15-20 in group 0.\n"
+        "                                    -ag1 -ag0 specifies whole group 1 then whole group 0.\n"
         "  -b<size>              IO size, defines the block \'b\' for sizes stated in units of blocks [default=64K]\n"
+        "  -bs<flag>             buffer separation strategy for thread IO buffers [default=p]\n"
+        "                          n : no separation (system default allocation)\n"
+        "                          p : thread optimized (pde cache line separation)\n"
         "  -B<base>[:length]     bounds; specify range of target to issue IO to - base offset and length\n"
         "                          (default: IO is issued across the entire target)\n"
         "  -c<size>              create file targets of the given size. Conflicts with non-file target specifications.\n"
@@ -215,7 +230,15 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "                          [default: none]\n"
         "  -o<count>             number of outstanding I/O requests per target per thread\n"
         "                          (1=synchronous I/O, unless more than 1 thread is specified with -F)\n"
-        "                          [default=2]\n"
+        "                          [default=2]\n");
+
+    printf(
+        "  -oc<count>            completion port IO batch depth (1-%u) [default=%u]\n"
+        "                          controls the maximum number of IO completions dequeued per batch;\n"
+        "                          only applies to IO Completion Port mode (conflicts with -x)\n",
+        c_maximumCompletionDepth, c_defaultCompletionDepth);
+
+    printf(
         "  -O<count>             number of outstanding I/O requests per thread - for use with -F\n"
         "                          (1=synchronous I/O)\n"
         "  -p                    start parallel sequential I/O operations with the same offset\n"
@@ -243,9 +266,10 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "  -rs<percentage>       percentage of requests which should be issued randomly; -r is used to specify IO alignment.\n"
         "                          Sequential IO runs are homogeneous when a mixed r/w ratio is specified (-w) and their lengths\n"
         "                          follow a geometric distribution based on the percentage (chance of next IO being sequential).\n"
-        "  -R[p]<text|xml>       output format. With the p prefix, the input profile (command line or XML) is validated and\n"
-        "                          re-output in the specified format without running load, useful for checking or building\n"
-        "                          complex profiles.\n"
+        "  -R[p|s]<text|xml>     output format\n"
+        "                          p prefix: input profile (command line or XML) is validated and re-output without running\n"
+        "                            load, useful for checking or building complex profiles\n"
+        "                          s prefix: output system information only, and exit\n"
         "                          [default: text]\n"
         "  -s[i][align]          stride size of [align] bytes, alignment & offset between operations\n"
         "                          [default=non-interlocked, default alignment=block size (-b)]\n"
@@ -256,26 +280,35 @@ void CmdLineParser::_DisplayUsageInfo(const char *pszFilename) const
         "                          Interlocked operations may introduce overhead but make it possible to issue a single\n"
         "                          sequential stream to a target which responds faster than one thread can drive.\n"
         "                          (ignored if -r specified, -si conflicts with -p, -rs and -T)\n"
-        "  -S[bhmruw]            control caching behavior [default: caching is enabled, no writethrough]\n"
+        "  -S[bhmruwyY]          control caching and I/O path behavior (caching, writethrough, memory mapped I/O, BypassIO)\n"
+        "                          [default: caching is enabled, no writethrough, no BypassIO]\n"
         "                          non-conflicting flags may be combined in any order; ex: -Sbw, -Suw, -Swu\n"
         "  -S                    equivalent to -Su\n"
         "  -Sb                   enable caching (default, explicitly stated)\n"
         "  -Sh                   equivalent -Suw\n"
         "  -Sm                   enable memory mapped I/O\n"
-        "  -Su                   disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n"
         "  -Sr                   disable local caching, with remote sw caching enabled; only valid for remote filesystems\n"
+        "  -Su                   disable software caching, equivalent to FILE_FLAG_NO_BUFFERING\n"
         "  -Sw                   enable writethrough (no hardware write caching), equivalent to FILE_FLAG_WRITE_THROUGH or\n"
         "                          non-temporal writes for memory mapped I/O (-Sm)\n"
+        "  -Sy                   use BypassIO to bypass file system, volume and storage stack filters; allows the test to continue with\n"
+        "                          partial bypass if volume and storage stack filters cannot be bypassed but file system filters can be bypassed\n"
+        "  -SY                   use BypassIO to bypass file system, volume and storage stack filters; test fails if both stacks cannot be bypassed\n"
         "  -t<count>             number of threads per target (conflicts with -F)\n"
         "  -T<offs>              starting separation between I/O operations performed on the same target by different threads\n"
         "                          [default=0] (starting offset = base target offset + (thread number * <offs>)\n"
         "                          only applies to -s sequential IO with #threads > 1, conflicts with -r and -si\n"
+        "  -u[n]<batchsize>[p]   use IoRing for submitting I/O requests with registered buffers and batch size\n"
+        "                          [default: 25%% batch size, registered buffers enabled]\n"
+        "                          With n, opt out of registered buffers with IoRing (use unregistered buffer references)\n"
+        "                          <batchsize> specifies the number of I/O requests to be queued before submitting\n"
+        "                          With p suffix, <batchsize> is a percentage of outstanding I/O requests\n"
         "  -v[s]                 verbose mode - with s, only provide additional summary statistics\n"
         "  -w<percentage>        percentage of write requests (-w and -w0 are equivalent and result in a read-only workload).\n"
         "                        absence of this switch indicates 100%% reads\n"
         "                          IMPORTANT: a write test will destroy existing data without a warning\n"
         "  -W<seconds>           warm up time - duration of the test before measurements start [default=5s]\n"
-        "  -x                    use completion routines instead of I/O Completion Ports\n"
+        "  -x                    use completion routines instead of IO Completion Ports\n"
         "  -X<filepath>          use an XML file to configure the workload. Profile defaults for -W/d/C (durations) and -R/v/z\n"
         "                          (output format, verbosity and random seed) may be overriden by direct specification.\n"
         "                          Targets can be defined in XML profiles as template paths of the form *<integer> (*1, *2, ...).\n"
@@ -406,148 +439,343 @@ bool CmdLineParser::_ParseETWParameter(const char *arg, Profile *pProfile)
     return fOk;
 }
 
+// Parse affinity specification.
+//
+// Forms:
+//   -a            default group affinity (no-op)
+//   -ag           default group affinity (no-op)
+//   -ag<num>      whole-group effective (mask=0)
+//   -a[g<num>,]<cpuspec>[,<cpuspec>...][,g<num>,<cpuspec>...]
+//
+// Grammar for CPU-specified form: item (',' item)*
+//   item: 'g' <number> ',' cpuspec   (group switch; must be followed by CPU)
+//       | cpuspec                     (CPU in current group)
+//   cpuspec: <number> '-' <number>    (range, inclusive)
+//          | <number>                 (single CPU)
+
 bool CmdLineParser::_ParseAffinity(const char *arg, TimeSpan *pTimeSpan)
 {
-    bool fOk = true;
-
     assert(nullptr != arg);
     assert('\0' != *arg);
 
     const char *c = arg + 1;
+    DWORD nGroup = 0;
+    DWORD n = 2; // count of characters consumed into the switch; so far '-a'
 
-    // -a and -ag are functionally equivalent; group-aware affinity.
-    // Note that group-aware affinity is default.
+    //
+    // Parse lambda for consuming character at current position
+    //
 
-    // look for the -a simple case
+    auto consumeChar = [&](void) -> void
+    {
+        // advance parser and total characters consumed
+        c++; n++;
+        return;
+    };
+
+    //
+    // Parse lambda for consuming number from current position
+    //
+
+    auto consumeNumber = [&](DWORD* pVal) -> bool
+    {
+        DWORD last = 0;
+        DWORD v = 0;
+
+        if (!isdigit((unsigned char)*c))
+        {
+            return false;
+        }
+
+        while (isdigit((unsigned char)*c))
+        {
+            v = 10 * v + (*c - '0');
+            if (v < last)
+            {
+                return false; // defensive check for overflow
+            }
+            last = v;
+            consumeChar();
+        }
+
+        *pVal = v;
+        return true;
+    };
+
+    //
+    // Parse lambda for consuming parsed cpu#
+    //
+
+    auto emitCpu = [&](DWORD cpu) -> bool
+    {
+        if (cpu > c_maxCpuIndexPerGroup)
+        {
+            fprintf(stderr, "ERROR: CPU %u is out of range\n", cpu);
+            return false;
+        }
+        pTimeSpan->AddAffinityGroupMaskCpu((WORD)nGroup, (BYTE)cpu);
+        return true;
+    };
+
+    //
+    // Parse lambda for consuming parsed cpu# range
+    //
+
+    auto emitRange = [&](DWORD first, DWORD last) -> bool {
+        if (last < first)
+        {
+            fprintf(stderr, "ERROR: CPU range %u-%u is inverted\n", first, last);
+            return false;
+        }
+        if (last > c_maxCpuIndexPerGroup)
+        {
+            fprintf(stderr, "ERROR: CPU range %u-%u is out of range\n", first, last);
+            return false;
+        }
+        for (DWORD cpu = first; cpu <= last; cpu++)
+        {
+            pTimeSpan->AddAffinityGroupMaskCpu((WORD)nGroup, (BYTE)cpu);
+        }
+        return true;
+    };
+
+    // -a or -ag with no further specification: default affinity; no-ops
     if (*c == '\0')
     {
         return true;
     }
-
-    // look for the -ag simple case
-    if (*c == 'g')
+    if (*c == 'g' && *(c + 1) == '\0')
     {
-        // peek ahead, done?
-        if (*(c + 1) == '\0')
+        return true;
+    }
+
+    // -au prefix: standalone switch for unsetting defaults (e.g., -aup for unordered efficiency)
+    if (*c == 'u')
+    {
+        consumeChar();
+        switch (*c)
+        {
+        case 'p':
+            consumeChar();
+            if (*c != '\0')
+            {
+                fprintf(stderr, "ERROR: unexpected character '%c' after -aup\n", *c);
+                return false;
+            }
+            if (pTimeSpan->GetAffinityEfficiencyOrder(false) != AffinityEfficiencyOrder::Unspecified)
+            {
+                fprintf(stderr, "ERROR: -aup conflicts with explicit efficiency ordering\n");
+                return false;
+            }
+            pTimeSpan->SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::Unordered);
+            return true;
+        case '\0':
+            fprintf(stderr, "ERROR: -au requires an option (e.g., -aup)\n");
+            return false;
+        default:
+            fprintf(stderr, "ERROR: unknown -au option '%c'\n", *c);
+            return false;
+        }
+    }
+
+    // Composing affinity modifiers: c (CoreAware), s (Span), p/P/e/E (efficiency order)
+    // c and s compose freely and are idempotent. Efficiency modifiers are mutually exclusive.
+    if (*c == 'c' || *c == 's' ||
+        *c == 'p' || *c == 'P' ||
+        *c == 'e' || *c == 'E')
+    {
+        AffinityEfficiencyOrder order = AffinityEfficiencyOrder::Unspecified;
+
+        while (*c != '\0')
+        {
+            switch (*c)
+            {
+            case 'c':
+                pTimeSpan->SetAffinityTraversal(AffinityTraversal::CoreAware);
+                consumeChar();
+                break;
+            case 's':
+                pTimeSpan->SetAffinityGroupSpan(AffinityGroupSpan::Span);
+                consumeChar();
+                break;
+            case 'p':
+                if (order != AffinityEfficiencyOrder::Unspecified)
+                {
+                    goto error_multiple_efficiency;
+                }
+                order = AffinityEfficiencyOrder::PFirst;
+                consumeChar();
+                break;
+            case 'P':
+                if (order != AffinityEfficiencyOrder::Unspecified)
+                {
+                    goto error_multiple_efficiency;
+                }
+                order = AffinityEfficiencyOrder::FillPFirst;
+                consumeChar();
+                break;
+            case 'e':
+                if (order != AffinityEfficiencyOrder::Unspecified)
+                {
+                    goto error_multiple_efficiency;
+                }
+                order = AffinityEfficiencyOrder::EFirst;
+                consumeChar();
+                break;
+            case 'E':
+                if (order != AffinityEfficiencyOrder::Unspecified)
+                {
+                    goto error_multiple_efficiency;
+                }
+                order = AffinityEfficiencyOrder::FillEFirst;
+                consumeChar();
+                break;
+
+            default:
+                fprintf(stderr, "ERROR: unexpected character '%c' in affinity modifier\n", *c);
+                goto error_at_c;
+            }
+        }
+
+        if (order != AffinityEfficiencyOrder::Unspecified)
+        {
+            // Conflict with prior -aup or prior explicit efficiency (from a separate -a switch)
+            if (pTimeSpan->GetAffinityEfficiencyOrder(false) != AffinityEfficiencyOrder::Unspecified)
+            {
+                if (pTimeSpan->GetAffinityEfficiencyOrder() == AffinityEfficiencyOrder::Unordered)
+                {
+                    fprintf(stderr, "ERROR: explicit efficiency ordering conflicts with -aup\n");
+                }
+                else
+                {
+                    fprintf(stderr, "ERROR: multiple efficiency order specifiers are not allowed\n");
+                }
+                return false;
+            }
+            pTimeSpan->SetAffinityEfficiencyOrder(order);
+        }
+
+        return true;
+
+error_multiple_efficiency:
+
+        fprintf(stderr, "ERROR: multiple efficiency order specifiers are not allowed\n");
+        return false;
+
+    }
+
+    // Main parse loop: item (',' item)*
+    bool fFirstItem = true;
+    for (;;)
+    {
+        // Group switch: 'g' <number>
+        if (*c == 'g')
+        {
+            consumeChar();
+            DWORD g;
+            if (!consumeNumber(&g))
+            {
+                goto error_at_c;
+            }
+            if (g > MAXWORD)
+            {
+                fprintf(stderr, "ERROR: group %u is out of range\n", g);
+                return false;
+            }
+            nGroup = g;
+
+            // g<num> at EOL: whole-group if this is the only item, error otherwise
+            if (*c == '\0')
+            {
+                if (fFirstItem)
+                {
+                    pTimeSpan->AddAffinityGroupMask((WORD)nGroup, (KAFFINITY)0);
+                    return true;
+                }
+                fprintf(stderr, "ERROR: group %u specified without CPU numbers; use separate -ag%u for whole-group\n", g, g);
+                return false;
+            }
+
+            // CPU-specified form: group must be followed by comma then CPU spec
+            if (*c != ',')
+            {
+                goto error_at_c;
+            }
+            consumeChar();
+            fFirstItem = false;
+
+            if (*c == '\0')
+            {
+                goto error_incomplete;
+            }
+            if (*c == 'g')
+            {
+                continue;
+            }
+        }
+
+        // CPU spec: <number> ['-' <number>]
+        DWORD cpu;
+        if (!consumeNumber(&cpu))
+        {
+            goto error_at_c;
+        }
+
+        if (*c == '-')
+        {
+            consumeChar();
+            DWORD cpuEnd;
+            if (!consumeNumber(&cpuEnd))
+            {
+                goto error_at_c;
+            }
+            if (!emitRange(cpu, cpuEnd))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if (!emitCpu(cpu))
+            {
+                return false;
+            }
+        }
+
+        fFirstItem = false;
+
+        // After item: comma continues, EOL terminates, anything else is error
+        if (*c == '\0')
         {
             return true;
         }
+        if (*c != ',')
+        {
+            goto error_at_c;
+        }
+        consumeChar();
 
-        // leave the parser at the g; this is the start of a group number
+        if (*c == '\0')
+        {
+            goto error_incomplete;
+        }
     }
 
-    // more complex affinity -ag0,0,1,2,g1,0,1,2,... OR -a0,1,2,..
-    // n counts the -a prefix, the first parsed character is string index 2
-    DWORD nGroup = 0, nNum = 0, n = 2;
-    bool fGroup = false, fNum = false;
-    while (*c != '\0')
+error_at_c:
+    fprintf(stderr, "ERROR: syntax error parsing affinity at highlighted character\n-%s\n", arg);
     {
-        if ((*c >= '0') && (*c <= '9'))
+        DWORD pos = n;
+        while (pos-- > 0)
         {
-            // accumulating a number
-            fNum = true;
-            nNum = 10 * nNum + (*c - '0');
-        }
-        else if (*c == 'g')
-        {
-            // bad: ggggg
-            if (fGroup)
-            {
-                fOk = false;
-            }
-
-            // now parsing a group number
-            fGroup = true;
-        }
-        else if (*c == ',')
-        {
-            // separator; if parsing group and have a number, now have the group
-            if (fGroup && fNum)
-            {
-                if (nNum > MAXWORD)
-                {
-                    fprintf(stderr, "ERROR: group %u is out of range\n", nNum);
-                    fOk = false;
-                }
-                else
-                {
-                    nGroup = nNum;
-                    nNum = 0;
-                    fGroup = false;
-                }
-            }
-            // at a split but don't have a parsed number, error
-            else if (!fNum)
-            {
-                fOk = false;
-            }
-            // have a parsed CPU number
-            else
-            {
-                if (nNum > MAXBYTE)
-                {
-                    fprintf(stderr, "ERROR: CPU %u is out of range\n", nNum);
-                    fOk = false;
-                }
-                else
-                {
-                    pTimeSpan->AddAffinityAssignment((WORD)nGroup, (BYTE)nNum);
-                    nNum = 0;
-                    fNum = false;
-                }
-            }
-        }
-        else
-        {
-            fOk = false;
-        }
-
-        // bail out to error pretty print on error
-        if (!fOk)
-        {
-            break;
-        }
-
-        c++;
-        n++;
-    }
-
-    // if parsing a group or don't have a final number, error
-    if (fGroup || !fNum)
-    {
-        fOk = false;
-    }
-
-    if (fOk && nNum > MAXBYTE)
-    {
-        fprintf(stderr, "ERROR: CPU %u is out of range\n", nNum);
-        fOk = false;
-    }
-
-    if (!fOk)
-    {
-        // mid-parse error, show the point at which it occured
-        if (*c != '\0') {
-            fprintf(stderr, "ERROR: syntax error parsing affinity at highlighted character\n-%s\n", arg);
-            while (n-- > 0)
-            {
-                fprintf(stderr, " ");
-            }
-            fprintf(stderr, "^\n");
-        }
-        else
-        {
-            fprintf(stderr, "ERROR: incomplete affinity specification\n");
+            fprintf(stderr, " ");
         }
     }
+    fprintf(stderr, "^\n");
+    return false;
 
-    if (fOk)
-    {
-        // fprintf(stderr, "FINAL parsed group %d CPU %d\n", nGroup, nNum);
-        pTimeSpan->AddAffinityAssignment((WORD)nGroup, (BYTE)nNum);
-    }
-
-    return fOk;
+error_incomplete:
+    fprintf(stderr, "ERROR: incomplete affinity specification\n");
+    return false;
 }
 
 bool CmdLineParser::_ParseFlushParameter(const char *arg, MemoryMappedIoFlushMode *FlushMode)
@@ -559,15 +787,15 @@ bool CmdLineParser::_ParseFlushParameter(const char *arg, MemoryMappedIoFlushMod
     if (*(arg + 1) != '\0')
     {
         const char *c = arg + 1;
-        if (_stricmp(c, "v") == 0)
+        if (strcmp(c, "v") == 0)
         {
             *FlushMode = MemoryMappedIoFlushMode::ViewOfFile;
         }
-        else if (_stricmp(c, "n") == 0)
+        else if (strcmp(c, "n") == 0)
         {
             *FlushMode = MemoryMappedIoFlushMode::NonVolatileMemory;
         }
-        else if (_stricmp(c, "i") == 0)
+        else if (strcmp(c, "i") == 0)
         {
             *FlushMode = MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain;
         }
@@ -737,6 +965,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
     ParseState isXMLResultFormat = ParseState::Unknown;
     ParseState isProfileOnly = ParseState::Unknown;
+    ParseState isSystemInfoOnly = ParseState::Unknown;
     ParseState isVerbose = ParseState::Unknown;
     ParseState isVerboseStats = ParseState::Unknown;
     ParseState isRandomSeed = ParseState::Unknown;
@@ -798,8 +1027,40 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
 
             case 'b':
 
+                if (arg[0] == 's')
+                {
+                    // Buffer separation sub-option: -bs<flag>
+                    if (arg[1] == '\0')
+                    {
+                        fprintf(stderr, "ERROR: -bs requires a flag character (n or p)\n");
+                        return false;
+                    }
+
+                    BufferSeparation bs;
+                    switch (arg[1])
+                    {
+                    case 'n':
+                        bs = BufferSeparation::SystemDefault;
+                        break;
+                    case 'p':
+                        bs = BufferSeparation::PDECacheLine;
+                        break;
+                    default:
+                        fprintf(stderr, "ERROR: invalid buffer separation flag '%c' passed to -bs (expected n or p)\n", arg[1]);
+                        return false;
+                    }
+
+                    if (arg[2] != '\0')
+                    {
+                        fprintf(stderr, "ERROR: unexpected characters after -bs%c\n", arg[1]);
+                        return false;
+                    }
+
+                    timeSpan.SetBufferSeparation(bs);
+                    timeSpan.SetBufferSeparationExplicit(true);
+                }
                 // Block size does not compose with XML profile spec
-                if (isXMLSet == ParseState::True)
+                else if (isXMLSet == ParseState::True)
                 {
                     fprintf(stderr, "ERROR: -b is not compatible with -X XML profile specification\n");
                     return false;
@@ -809,9 +1070,9 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     UINT64 ullBlockSize;
                     if (_GetSizeInBytes(arg, ullBlockSize, nullptr) && ullBlockSize < MAXUINT32)
                     {
-                        for (auto &i : vTargets)
+                        for (auto &j : vTargets)
                         {
-                            i.SetBlockSizeInBytes((DWORD)ullBlockSize);
+                            j.SetBlockSizeInBytes((DWORD)ullBlockSize);
                         }
                     }
                     else
@@ -882,6 +1143,13 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     ++arg;
                 }
 
+                // system information only (no run)
+                if ('s' == *arg)
+                {
+                    isSystemInfoOnly = ParseState::True;
+                    ++arg;
+                }
+
                 if ('\0' != *arg)
                 {
                     // Explicit results format
@@ -901,10 +1169,11 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                 }
                 else
                 {
-                    // allow for -Rp shorthand for default profile-only format
-                    if (isProfileOnly != ParseState::True)
+                    // allow for -Rp/-Rs shorthand for default format
+                    if (isProfileOnly != ParseState::True &&
+                        isSystemInfoOnly != ParseState::True)
                     {
-                        fprintf(stderr, "ERROR: unspecified results format -R: use [p]<text|xml>\n");
+                        fprintf(stderr, "ERROR: unspecified results format -R: use [p|s]<text|xml>\n");
                         return false;
                     }
                 }
@@ -1007,6 +1276,19 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         pProfile->SetProfileOnly(true);
     }
 
+    if (isSystemInfoOnly == ParseState::True)
+    {
+        // -Rs is standalone: it must be the only argument
+        if (argc != 2)
+        {
+            fprintf(stderr, "ERROR: -Rs must be the only parameter\n");
+            return false;
+        }
+
+        pProfile->SetSystemInformationOnly(true);
+        return true;
+    }
+
     if (isVerbose == ParseState::True)
     {
         pProfile->SetVerbose(true);
@@ -1062,6 +1344,7 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
     WriteThroughMode w = WriteThroughMode::Undefined;
     MemoryMappedIoMode m = MemoryMappedIoMode::Undefined;
     MemoryMappedIoFlushMode f = MemoryMappedIoFlushMode::Undefined;
+    BypassIoMode b = BypassIoMode::Undefined;
 
     // seen base/max target offset specification yet?
     ParseState isMaxTargetOffset = ParseState::Unknown;
@@ -1439,19 +1722,36 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
             }
             break;
 
-        case 'o':    //request count (1==synchronous)
+        case 'o':    //request count (1==synchronous) or -oc<count> completion depth
             {
-                int c = atoi(arg + 1);
-                if (c > 0)
+                if (arg[1] == 'c')
                 {
-                    for (auto &i : vTargets)
+                    int c = atoi(arg + 2);
+                    if (c >= 1 && c <= (int)c_maximumCompletionDepth)
                     {
-                        i.SetRequestCount(c);
+                        timeSpan.SetCompletionDepth(c);
+                        timeSpan.SetCompletionDepthExplicit(true);
+                    }
+                    else
+                    {
+                        fprintf(stderr, "ERROR: completion depth (-oc) must be between 1 and %u\n", c_maximumCompletionDepth);
+                        fError = true;
                     }
                 }
                 else
                 {
-                    fError = true;
+                    int c = atoi(arg + 1);
+                    if (c > 0)
+                    {
+                        for (auto &i : vTargets)
+                        {
+                            i.SetRequestCount(c);
+                        }
+                    }
+                    else
+                    {
+                        fError = true;
+                    }
                 }
             }
             break;
@@ -1759,6 +2059,28 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                             fError = true;
                         }
                         break;
+                    case 'y':
+                        if (b == BypassIoMode::Undefined)
+                        {
+                            b = BypassIoMode::Partial;
+                        }
+                        else
+                        {
+                            fprintf(stderr, "ERROR: -Sy conflicts with earlier specification of BypassIO mode\n");
+                            fError = true;
+                        }
+                        break;
+                    case 'Y':
+                        if (b == BypassIoMode::Undefined)
+                        {
+                            b = BypassIoMode::Full;
+                        }
+                        else
+                        {
+                            fprintf(stderr, "ERROR: -SY conflicts with earlier specification of BypassIO mode\n");
+                            fError = true;
+                        }
+                        break;
                     default:
                         fprintf(stderr, "ERROR: unrecognized option provided to -S\n");
                         fError = true;
@@ -1815,6 +2137,81 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
                     fprintf(stderr, "ERROR: invalid offset passed to -T\n");
                     fError = true;
                 }
+            }
+            break;
+
+        case 'u':    //IoRing
+            {
+                // Parse IoRing -u[n]<batchsize>[p] format
+                const char *c = arg + 1;
+                bool useRegisteredBuffers = true;
+
+                // Check for optional 'n' qualifier to opt out of registered buffers
+                if (*c == 'n')
+                {
+                    useRegisteredBuffers = false;
+                    c++;
+                }
+
+                // Parse batch size value if provided
+                if (*c != '\0')
+                {
+                    char *end = nullptr;
+                    unsigned long value = strtoul(c, &end, 10);
+
+                    if (end == c || value == 0)
+                    {
+                        fprintf(stderr, "ERROR: invalid IoRing batch size\n");
+                        fError = true;
+                        break;
+                    }
+
+                    // Check for 'p' suffix indicating percentage mode
+                    if (*end == 'p')
+                    {
+                        end++;
+                        if (*end != '\0')
+                        {
+                            fprintf(stderr, "ERROR: invalid IoRing batch size\n");
+                            fError = true;
+                            break;
+                        }
+
+                        if (value > 100)
+                        {
+                            fprintf(stderr, "ERROR: IoRing batch size percentage must be between 1 and 100\n");
+                            fError = true;
+                            break;
+                        }
+
+                        timeSpan.SetIoRingBatchSize(static_cast<UINT32>(value));
+                        timeSpan.SetIoRingBatchSizeIsPercent(true);
+                    }
+                    else if (*end != '\0')
+                    {
+                        fprintf(stderr, "ERROR: invalid IoRing batch size\n");
+                        fError = true;
+                        break;
+                    }
+                    else
+                    {
+                        // Integer mode (number of IOs), capped at maximum request count
+                        if (value > c_maximumRequestCount)
+                        {
+                            fprintf(stderr, "ERROR: IoRing batch size of %lu exceeds maximum of %u\n",
+                                value, c_maximumRequestCount);
+                            fError = true;
+                            break;
+                        }
+
+                        timeSpan.SetIoRingBatchSize(static_cast<UINT32>(value));
+                        timeSpan.SetIoRingBatchSizeIsPercent(false);
+                    }
+                }
+
+                // Set IoRing parameters
+                timeSpan.SetUseIoRing(true);
+                timeSpan.SetUseRegBuffer(useRegisteredBuffers);
             }
             break;
 
@@ -2007,6 +2404,10 @@ bool CmdLineParser::_ReadParametersFromCmdLine(const int argc, const char *argv[
         {
             i.SetMemoryMappedIoFlushMode(f);
         }
+        if (b != BypassIoMode::Undefined)
+        {
+            i.SetBypassIoMode(b);
+        }
     }
 
     // ... and apply targets to the timespan
@@ -2061,7 +2462,7 @@ bool CmdLineParser::ParseCmdLine(const int argc, const char *argv[], Profile *pP
     // system consistency in profile-only operation (this is only required at
     // execution time).
 
-    if (fOk)
+    if (fOk && !pProfile->GetSystemInformationOnly())
     {
         fOk = pProfile->Validate(!fXMLProfile, pProfile->GetProfileOnly() ? nullptr : pSystem);
     }

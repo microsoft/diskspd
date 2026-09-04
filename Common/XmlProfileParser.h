@@ -47,8 +47,10 @@ private:
     HRESULT _ParseThreadTargets(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _ParseThroughput(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _ParseThreadTarget(IXMLDOMNode *pXmlNode, ThreadTarget *pThreadTarget);
+    HRESULT _ParseIoRing(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
     HRESULT _ParseAffinityAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
     HRESULT _ParseAffinityGroupAssignment(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
+    HRESULT _ParseAffinityGroup(IXMLDOMNode *pXmlNode, TimeSpan *pTimeSpan);
     HRESULT _ParseDistribution(IXMLDOMNode *pXmlNode, Target *pTarget);
     HRESULT _SubstTarget(Target *pTarget, vector<pair<string, bool>>& vSubsts);
 
@@ -59,6 +61,7 @@ private:
     HRESULT _GetBool(IXMLDOMNode *pXmlNode, const char *pszQuery, bool *pfValue) const;
 
     HRESULT _GetUINT32Attr(IXMLDOMNode *pXmlNode, const char *pszAttr, UINT32 *pulValue) const;
+    HRESULT _GetKAFFINITYAttr(IXMLDOMNode *pXmlNode, const char *pszAttr, KAFFINITY *pMask) const;
     
     HRESULT _GetVerbose(IXMLDOMDocument2 *pXmlDoc, bool *pfVerbose);
     HRESULT _GetProgress(IXMLDOMDocument2 *pXmlDoc, DWORD *pdwProgress);

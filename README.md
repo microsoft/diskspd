@@ -17,6 +17,25 @@ What's New?
 
 ## DISKSPD
 
+# DISKSPD 2.3 9/3/2026
+
+**NOTE:** two default changes may require rebaselining. Thread affinity now orders P-cores before E-cores within each group by default (`-aup` restores unordered assignment), which changes placement on heterogeneous systems. I/O buffers are now separated by PDE cache line by default (`-bsp`; use `-bsn` for the prior system-default allocation).
+
+* New IoRing I/O path (`-u[n]<batchsize>[p]`) with registered buffers by default and configurable submission batching.
+* New BypassIO modes: `-Sy` allows partial bypass and `-SY` requires full bypass.
+* New topology-aware affinity controls:
+  * `-ac` assigns one thread per physical core before using SMT siblings.
+  * `-as` spans processor groups before filling each group.
+  * `-ap`, `-aP`, `-ae`, and `-aE` control P-core/E-core ordering; `-aup` disables efficiency ordering.
+  * Explicit affinity supports CPU ranges and whole-group selection.
+* New processor name and cache topology reporting in text and XML results.
+* New controls for I/O buffer separation (`-bs`) and completion-port dequeue depth (`-oc`).
+* New system-information-only output (`-Rs`).
+* XML profiles and results support the new I/O, affinity, buffer, and completion settings.
+* Visual Studio projects now share common settings, can build Win32, x64, and ARM64, and integrate TAEF tests with Test Explorer.
+
+The binary release contains amd64 and arm64 builds. The minimum supported operating system is Windows 10, version 1803 (RS4). IoRing and BypassIO require Windows 11 or later; BypassIO also requires NTFS.
+
 # DISKSPD 2.2 6/3/2024
 
 **NOTE:** changes to the asynchronous IO loop will require rebaselining results with queue depths greater than 1.

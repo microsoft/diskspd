@@ -35,6 +35,7 @@ class XmlResultParser: public IResultParser
 public:
     string ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults);
     string ParseProfile(const Profile& profile);
+    string ParseSystemInformation(const SystemInformation& system);
 
 private:
     void _PrintCpuUtilization(const Results& results, const SystemInformation& system);

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Imported BEFORE Microsoft.Cpp.props by DiskSpd TAEF unit-test .vcxproj
+    files.  Microsoft.Cpp.props reads ConfigurationType to decide which
+    Microsoft.Cpp.*.props (StaticLibrary, DynamicLibrary, etc.) to chain in.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Configuration-level defaults shared by DiskSpd TAEF unit-test DLL projects. -->
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+</Project>

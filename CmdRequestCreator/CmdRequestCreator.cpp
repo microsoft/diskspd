@@ -100,12 +100,21 @@ int __cdecl main(int argc, const char* argv[])
     synch.hStopEvent = NULL;
     synch.hStartEvent = NULL;
 
+    // Initialize diagnostics early so that CmdLineParser (and anything it
+    // calls) can use Diagnostics::PrintError. Verbose mode is set after
+    // parsing completes -- verbose output during parsing is not supported,
+    // but avoiding the chicken-and-egg of enabling -v mid-parse is not
+    // worth the complexity.
+    Diagnostics::Initialize();
+
     CmdLineParser cmdLineParser;
     Profile profile;
     if (!cmdLineParser.ParseCmdLine(argc, argv, &profile, &synch, &g_SystemInformation))
     {
         return ERROR_PARSE_CMD_LINE;
     }
+
+    Diagnostics::SetVerbose(profile.GetVerbose());
 
     // Instantiate parsers
     ResultParser resultParser;
@@ -120,9 +129,21 @@ int __cdecl main(int argc, const char* argv[])
         pResultParser = &resultParser;
     }
 
-    // Profile only? If so, complete now.
+    // System information only? Output and exit - no IO run needed.
+    if (profile.GetSystemInformationOnly())
+    {
+        string s = pResultParser->ParseSystemInformation(g_SystemInformation);
+        printf("%s", s.c_str());
+        return 0;
+    }
+
+    // Profile only? If so, finalize timespans for display and complete now.
     if (profile.GetProfileOnly())
     {
+        for (const auto& timeSpan : profile.GetTimeSpans())
+        {
+            timeSpan.Finalize();
+        }
         string s = pResultParser->ParseProfile(profile);
         printf("%s", s.c_str());
         return 0;

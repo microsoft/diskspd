@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Imported BEFORE Microsoft.Cpp.props by every DiskSpd .vcxproj.
+
+    Sets Configuration-labeled properties (PlatformToolset, UseDebugLibraries,
+    WholeProgramOptimization) that Microsoft.Cpp.props reads to select the
+    toolset and configure runtime/optimization defaults, plus OutDir/IntDir,
+    which Microsoft.Cpp.MSVC.Toolset.Common.props only sets when they are
+    still empty.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Keep Visual Studio configuration properties aligned across DiskSpd projects. -->
+  <PropertyGroup Label="Configuration">
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='Debug'">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='Release'">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <!--
+    Use a uniform $(Configuration)\$(Platform)\ output layout for every platform
+    (e.g. Debug\Win32\, Debug\x64\, Debug\ARM64\).  Overrides Microsoft.Cpp's
+    historical Win32-special-case default of $(Configuration)\ (no platform
+    subdir) defined in Microsoft.Cpp.MSVC.Toolset.Common.props.
+  -->
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)$(Configuration)\$(Platform)\</OutDir>
+    <IntDir>$(Configuration)\$(Platform)\</IntDir>
+  </PropertyGroup>
+</Project>

@@ -40,15 +40,19 @@ class ResultParser : public IResultParser
 public:
     string ParseResults(const Profile& profile, const SystemInformation& system, vector<Results> vResults);
     string ParseProfile(const Profile& profile);
+    string ParseSystemInformation(const SystemInformation& system);
 
 private:
-    void _DisplayFileSize(UINT64 fsize, UINT32 align = 0);
+    void _PrintFileSize(UINT64 fsize, UINT32 align = 0);
     void _DisplayETWSessionInfo(struct ETWSessionInfo sessionInfo);
     void _DisplayETW(struct ETWMask ETWMask, struct ETWEventCounters EtwEventCounters);
     void _Print(const char *format, ...);
     void _PrintProfile(const Profile& profile);
     void _PrintSystemInfo(const SystemInformation& system);
     void _PrintCpuUtilization(const Results& results, const SystemInformation& system);
+    void _PrintEffectiveAffinity(const TimeSpan& timeSpan, const SystemInformation& system);
+    void _PrintHeterogeneousAffinityWarning(const TimeSpan& timeSpan, const SystemInformation& system);
+    void _PrintCompactAffinity(const vector<AffinityAssignment>& v, bool fMultiGroup);
     enum class _SectionEnum {TOTAL, READ, WRITE};
     void _PrintSectionFieldNames(const TimeSpan& timeSpan);
     void _PrintSectionBorderLine(const TimeSpan& timeSpan);
@@ -57,11 +61,11 @@ private:
     void _PrintLatencyChart(const Histogram<float>& readLatencyHistogram,
         const Histogram<float>& writeLatencyHistogram,
         const Histogram<float>& totalLatencyHistogram);
-    void _PrintTimeSpan(const TimeSpan &timeSpan);
-    void _PrintTarget(const Target &target, bool fUseThreadsPerFile, bool fUseRequestsPerFile, bool fCompletionRoutines);
-    void _PrintDistribution(DistributionType dT, const vector<DistributionRange>& v, char* spc);
     void _PrintEffectiveDistributions(const Results& results);
-    void _PrintWaitStats(const Results& result);
+    void _PrintWaitStats(const Results& result, const TimeSpan& timeSpan);
+    void _PrintIoRingStatsFieldNames();
+    void _PrintIoRingStatsBorderLine();
+    void _PrintIoRingStats(const TimeSpan& timeSpan, const Results& results);
 
     string _sResult;
 

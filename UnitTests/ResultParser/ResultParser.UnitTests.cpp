@@ -31,6 +31,7 @@ SOFTWARE.
 #include "ResultParser.UnitTests.h"
 #include "Common.h"
 #include "resultparser.h"
+#include "TextDiff.h"
 #include <stdlib.h>
 #include <vector>
 
@@ -73,6 +74,9 @@ namespace UnitTests
         // TODO: IoBucketizer writeBucketizer;
 
         timeSpan.SetCalculateIopsStdDev(true);
+        timeSpan.SetUseIoRing(true);
+        timeSpan.SetUseRegBuffer(true);
+
         targetResults.readBucketizer.Initialize(1000, timeSpan.GetDuration());
         for (size_t i = 0; i < timeSpan.GetDuration(); i++)
         {
@@ -81,6 +85,7 @@ namespace UnitTests
         }
 
         ThreadResults threadResults;
+        threadResults.ullSubmitCount = 1200;
         threadResults.vTargetResults.push_back(targetResults);
         results.vThreadResults.push_back(threadResults);
 
@@ -91,11 +96,14 @@ namespace UnitTests
         // to verify a static null as anything else.
         SystemInformation system;
         system.sComputerName.clear();
+        system.sProcessorName.clear();
         system.ResetTime();
 
         // and power plan
         system.sActivePolicyName.clear();
         system.sActivePolicyGuid.clear();
+
+        system.dwPageSize = 4096;
 
         system.processorTopology._ulProcessorCount = 1;
         system.processorTopology._ubPerformanceEfficiencyClass = 0;
@@ -118,6 +126,19 @@ namespace UnitTests
         system.processorTopology._vProcessorCoreInformation.clear();
         system.processorTopology._vProcessorCoreInformation.emplace_back((WORD)0, (KAFFINITY)0x1, (BYTE)0);
 
+        system.processorTopology._vProcessorCacheInformation.clear();
+        {
+            ProcessorCacheInformation l3(3, 16, 64, 8 * 1024 * 1024, CacheUnified);
+            l3._processorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+            system.processorTopology._vProcessorCacheInformation.push_back(l3);
+        }
+
+        // Point timespan at the mock system for deterministic output
+        timeSpan.SetSystem(&system);
+
+        // Finalize effective buffer separation before adding to profile
+        timeSpan.Finalize();
+
         // finally, add the timespan to the profile and dump.
         profile.AddTimeSpan(timeSpan);
 
@@ -126,37 +147,48 @@ namespace UnitTests
         // stringify random text, quoting "'s and adding newline/preserving tabs
         // gc some.txt |% { write-host $("`"{0}\n`"" -f $($_ -replace "`"","\`"" -replace "`t","\t")) }
 
-        const char *pcszExpectedOutput = "\n"
+        const char *pcszExpected = "\n"
             "Command Line: \n"
             "\n"
             "Input parameters:\n"
             "\n"
-            "\ttimespan:   1\n"
-            "\t-------------\n"
-            "\tduration: 10s\n"
-            "\twarm up time: 5s\n"
-            "\tcool down time: 0s\n"
-            "\tgathering IOPS at intervals of 1000ms\n"
-            "\trandom seed: 0\n"
+            "  timespan:   1\n"
+            "  -------------\n"
+            "    duration: 10s\n"
+            "    warm up time: 5s\n"
+            "    cool down time: 0s\n"
+            "    gathering IOPS at intervals of 1000ms\n"
+            "    random seed: 0\n"
+            "    using IoRing (batch size: 25%) with registered buffers\n"
+            "    affinity assignment: cpu order, fill groups, P-cores first\n"
+            "    buffer separation: thread optimized (16MiB)\n"
             "\n"
             "System information:\n\n"
-            "\tcomputer name: \n"
-            "\tstart time: \n"
+            "  computer name:        \n"
+            "  processor name:       \n"
+            "  start time:           \n"
+            "  active power scheme:  \n"
+            "  page size:            4KiB\n"
             "\n"
-            "\tcpu count:\t\t1\n"
-            "\tcore count:\t\t1\n"
-            "\tgroup count:\t\t1\n"
-            "\tnode count:\t\t1\n"
-            "\tsocket count:\t\t1\n"
-            "\theterogeneous cores:\tn\n"
+            "  cpu count:            1\n"
+            "  core count:           1\n"
+            "  group count:          1\n"
+            "  node count:           1\n"
+            "  socket count:         1\n"
+            "  heterogeneous cores:  n\n"
             "\n"
-            "\tactive power scheme:\t\n"
+            "  cache information:\n\n"
+            "    Cache |   Size   | Line  | Assoc  | CPU\n"
+            "    -------------------------------------------------------\n"
+            "    L3    |     8MiB |   64B | 16-way | 0\n"
             "\n"
             "Results for timespan 1:\n"
             "*******************************************************************************\n"
             "\n"
             "actual test time:\t120.00s\n"
             "thread count:\t\t1\n"
+            "\n"
+            "effective affinity (cpu): 0\n"
             "\n"
             "CPU |  Usage |  User  | Kernel |  Idle\n"
             "----------------------------------------\n"
@@ -183,8 +215,16 @@ namespace UnitTests
             "-------------------------------------------------------------------------------------------\n"
             "     0 |         2097152 |           10 |       0.02 |       0.08 |       0.00 | testfile1.dat (10MiB)\n"
             "-------------------------------------------------------------------------------------------\n"
-            "total:           2097152 |           10 |       0.02 |       0.08 |       0.00\n";
-        VERIFY_ARE_EQUAL(sResults, pcszExpectedOutput);
+            "total:           2097152 |           10 |       0.02 |       0.08 |       0.00\n"
+            "\n"
+            "\n"
+            "IoRing Statistics\n"
+            "thread |  Submits/s \n"
+            "--------------------\n"
+            "     0 |       10.00\n"
+            "--------------------\n"
+            "total: |       10.00\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResults);
     }
 
     void ResultParserUnitTests::Test_ParseProfile()
@@ -194,379 +234,406 @@ namespace UnitTests
         TimeSpan timeSpan;
         Target target;
 
+        // Mock system for deterministic buffer separation output
+        SystemInformation mockSystem;
+        mockSystem.ResetTime();
+        mockSystem.sComputerName.clear();
+        mockSystem.sProcessorName.clear();
+        mockSystem.sActivePolicyName.clear();
+        mockSystem.sActivePolicyGuid.clear();
+        mockSystem.dwPageSize = 4096;
+        mockSystem.processorTopology._vProcessorCacheInformation.clear();
+        ProcessorCacheInformation l3(3, 16, 64, 8 * 1024 * 1024, CacheUnified);
+        l3._processorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        mockSystem.processorTopology._vProcessorCacheInformation.push_back(l3);
+
+        timeSpan.SetSystem(&mockSystem);
+        timeSpan.Finalize();
         timeSpan.AddTarget(target);
         profile.AddTimeSpan(timeSpan);
 
         string s = parser.ParseProfile(profile);
-        const char *pszExpectedResult = "\nCommand Line: \n"
+        const char *pcszExpected = "\nCommand Line: \n"
             "\n"
             "Input parameters:\n"
             "\n"
-            "\ttimespan:   1\n"
-            "\t-------------\n"
-            "\tduration: 10s\n"
-            "\twarm up time: 5s\n"
-            "\tcool down time: 0s\n"
-            "\trandom seed: 0\n"
-            "\tpath: ''\n"
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tthreads per file: 1\n"
-            "\t\tusing I/O Completion Ports\n"
-            "\t\tIO priority: normal\n\n";
+            "  timespan:   1\n"
+            "  -------------\n"
+            "    duration: 10s\n"
+            "    warm up time: 5s\n"
+            "    cool down time: 0s\n"
+            "    random seed: 0\n"
+            "    affinity assignment: cpu order, fill groups, P-cores first\n"
+            "    buffer separation: thread optimized (16MiB)\n"
+            "    path: ''\n"
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      threads per file: 1\n"
+            "      using I/O Completion Ports\n"
+            "      IO priority: normal\n\n";
 
-        VERIFY_ARE_EQUAL(strlen(pszExpectedResult), s.length());
-        VERIFY_IS_TRUE(!strcmp(pszExpectedResult, s.c_str()));
+        VERIFY_MULTILINE_EQUAL(pcszExpected, s);
     }
 
     void ResultParserUnitTests::Test_PrintTarget()
     {
-        ResultParser parser;
         Target target;
 
-        parser._PrintTarget(target, false, true, false);
-        const char *pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        string sResult = target.GetText(4, false, true, false);
+        const char *pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetThreadStrideInBytes(100 * 1024);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tthread stride size: 100KiB\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      thread stride size: 100KiB\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         target.SetThreadStrideInBytes(0);
 
-        parser._sResult.clear();
         target.SetMaxFileSize(2000 * 1024);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tmax file size: 1.95MiB\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      max file size: 1.95MiB\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         target.SetMaxFileSize(0);
 
-        parser._sResult.clear();
         target.SetBaseFileOffsetInBytes(2 * 1024 * 1024);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tbase file offset: 2MiB\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      base file offset: 2MiB\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         target.SetBaseFileOffsetInBytes(0);
 
-        parser._sResult.clear();
         target.SetThroughput(1000);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n"
-            "\t\tthroughput rate-limited to 1000 B/ms\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n"
+            "      throughput rate-limited to 1000 B/ms\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         target.SetThroughput(0);
 
-        parser._sResult.clear();
         target.SetThroughputIOPS(1000);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n"
-            "\t\tthroughput rate-limited to 1000 IOPS\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n"
+            "      throughput rate-limited to 1000 IOPS\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         target.SetThroughputIOPS(0);
 
-        parser._sResult.clear();
         target.SetWriteRatio(30);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming mix test (read/write ratio: 70/30)\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing mix test (read/write ratio: 70/30)\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         target.SetWriteRatio(0);
 
-        parser._sResult.clear();
         target.SetRandomDataWriteBufferSize(12341234);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\twrite buffer size: 11.77MiB\n"
-            "\t\twrite buffer source: random fill\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      write buffer size: 11.77MiB\n"
+            "      write buffer source: random fill\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetRandomDataWriteBufferSourcePath("x:\\foo\\bar.dat");
         target.SetRandomRatio(100);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\twrite buffer size: 11.77MiB\n"
-            "\t\twrite buffer source: 'x:\\foo\\bar.dat'\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      write buffer size: 11.77MiB\n"
+            "      write buffer source: 'x:\\foo\\bar.dat'\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         target.SetRandomDataWriteBufferSize(0);
         target.SetRandomDataWriteBufferSourcePath("");
 
-        parser._sResult.clear();
         target.SetCacheMode(TargetCacheMode::DisableOSCache);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tsoftware cache disabled\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      software cache disabled\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetCacheMode(TargetCacheMode::DisableOSCache);
         target.SetWriteThroughMode(WriteThroughMode::On);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tsoftware cache disabled\n"
-            "\t\thardware write cache disabled, writethrough on\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      software cache disabled\n"
+            "      hardware write cache disabled, writethrough on\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetCacheMode(TargetCacheMode::Cached);
         target.SetWriteThroughMode(WriteThroughMode::On);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\thardware and software write caches disabled, writethrough on\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      hardware and software write caches disabled, writethrough on\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         target.SetWriteThroughMode(WriteThroughMode::Undefined);
 
-        parser._sResult.clear();
         target.SetCacheMode(TargetCacheMode::DisableLocalCache);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tlocal software cache disabled, remote cache enabled\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      local software cache disabled, remote cache enabled\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetCacheMode(TargetCacheMode::Cached);
         target.SetMemoryMappedIoMode(MemoryMappedIoMode::On);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tmemory mapped I/O enabled\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      memory mapped I/O enabled\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::ViewOfFile);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tmemory mapped I/O enabled, flush mode: FlushViewOfFile\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      memory mapped I/O enabled, flush mode: FlushViewOfFile\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::NonVolatileMemory);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tmemory mapped I/O enabled, flush mode: FlushNonVolatileMemory\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      memory mapped I/O enabled, flush mode: FlushNonVolatileMemory\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::NonVolatileMemoryNoDrain);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tmemory mapped I/O enabled, flush mode: FlushNonVolatileMemory with no drain\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      memory mapped I/O enabled, flush mode: FlushNonVolatileMemory with no drain\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetMemoryMappedIoMode(MemoryMappedIoMode::Off);
         target.SetMemoryMappedIoFlushMode(MemoryMappedIoFlushMode::Undefined);
+        target.SetCacheMode(TargetCacheMode::DisableOSCache);
+        target.SetBypassIoMode(BypassIoMode::Partial);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      software cache disabled\n"
+            "      using hardware write cache, writethrough off\n"
+            "      using BypassIO (allow partial)\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
+
+        target.SetBypassIoMode(BypassIoMode::Full);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      software cache disabled\n"
+            "      using hardware write cache, writethrough off\n"
+            "      using BypassIO (full bypass)\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
+
+        target.SetBypassIoMode(BypassIoMode::Undefined);
         target.SetCacheMode(TargetCacheMode::DisableLocalCache);
         target.SetTemporaryFileHint(true);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tlocal software cache disabled, remote cache enabled\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tusing FILE_ATTRIBUTE_TEMPORARY hint\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      local software cache disabled, remote cache enabled\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      using FILE_ATTRIBUTE_TEMPORARY hint\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetRandomAccessHint(true);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tlocal software cache disabled, remote cache enabled\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tusing FILE_FLAG_RANDOM_ACCESS hint\n"
-            "\t\tusing FILE_ATTRIBUTE_TEMPORARY hint\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      local software cache disabled, remote cache enabled\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      using FILE_FLAG_RANDOM_ACCESS hint\n"
+            "      using FILE_ATTRIBUTE_TEMPORARY hint\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
 
-        parser._sResult.clear();
         target.SetRandomAccessHint(false);
         target.SetTemporaryFileHint(false);
         target.SetSequentialScanHint(true);
-        parser._PrintTarget(target, false, true, false);
-        pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tlocal software cache disabled, remote cache enabled\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing random I/O (alignment: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tusing FILE_FLAG_SEQUENTIAL_SCAN hint\n"
-            "\t\tIO priority: normal\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        sResult = target.GetText(4, false, true, false);
+        pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      local software cache disabled, remote cache enabled\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using random I/O (alignment: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      using FILE_FLAG_SEQUENTIAL_SCAN hint\n"
+            "      IO priority: normal\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
     }
 
     void ResultParserUnitTests::Test_PrintTargetDistributionPct()
     {
-        ResultParser parser;
         Target target;
 
         vector<DistributionRange> v;
@@ -580,30 +647,28 @@ namespace UnitTests
         v.emplace_back(20, 80, make_pair(30, 70));
         target.SetDistributionRange(v, DistributionType::Percent);
 
-        parser._PrintTarget(target, false, true, false);
-        const char *pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n"
-            "\t\tIO Distribution:\n"
-            "\t\t    10% of IO => [ 0% -  10%) of target\n"
-            "\t\t    10% of IO => [10% -  20%) of target\n"
-            "\t\t     0% of IO => [20% -  30%) of target\n"
-            "\t\t    80% of IO => [30% - 100%) of target\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        string sResult = target.GetText(4, false, true, false);
+        const char *pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n"
+            "      IO Distribution:\n"
+            "          10% of IO => [ 0% -  10%) of target\n"
+            "          10% of IO => [10% -  20%) of target\n"
+            "           0% of IO => [20% -  30%) of target\n"
+            "          80% of IO => [30% - 100%) of target\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         v.clear();
-        parser._sResult.clear();
     }
 
     void ResultParserUnitTests::Test_PrintTargetDistributionAbs()
     {
-        ResultParser parser;
         Target target;
 
         vector<DistributionRange> v;
@@ -617,25 +682,24 @@ namespace UnitTests
         v.emplace_back(20,80, make_pair(102*GB, 0));
         target.SetDistributionRange(v, DistributionType::Absolute);
 
-        parser._PrintTarget(target, false, true, false);
-        const char *pszExpectedResult = "\tpath: ''\n" \
-            "\t\tthink time: 0ms\n"
-            "\t\tburst size: 0\n"
-            "\t\tusing software cache\n"
-            "\t\tusing hardware write cache, writethrough off\n"
-            "\t\tperforming read test\n"
-            "\t\tblock size: 64KiB\n"
-            "\t\tusing sequential I/O (stride: 64KiB)\n"
-            "\t\tnumber of outstanding I/O operations per thread: 2\n"
-            "\t\tIO priority: normal\n"
-            "\t\tIO Distribution:\n"
-            "\t\t    10% of IO => [     0    -      1GiB)\n"
-            "\t\t    10% of IO => [     1GiB -      2GiB)\n"
-            "\t\t     0% of IO => [     2GiB -    102GiB)\n"
-            "\t\t    80% of IO => [   102GiB -       end)\n";
-        VERIFY_ARE_EQUAL(parser._sResult, pszExpectedResult);
+        string sResult = target.GetText(4, false, true, false);
+        const char *pcszExpected = "    path: ''\n" \
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      IO priority: normal\n"
+            "      IO Distribution:\n"
+            "          10% of IO => [     0    -      1GiB)\n"
+            "          10% of IO => [     1GiB -      2GiB)\n"
+            "           0% of IO => [     2GiB -    102GiB)\n"
+            "          80% of IO => [   102GiB -       end)\n";
+        VERIFY_MULTILINE_EQUAL(pcszExpected, sResult);
         v.clear();
-        parser._sResult.clear();
     }
 
     void ResultParserUnitTests::Test_PrintEffectiveDistributionPct()
@@ -670,20 +734,20 @@ namespace UnitTests
             TargetResults targetResults;
 
             targetResults.sPath = "testfile.dat";
-            targetResults.vDistributionRange = tts._vDistributionRange;
+            targetResults.distribution = tts._distribution;
 
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
 
             parser._PrintEffectiveDistributions(results);
 
-            const char* pcszResults = "\nEffective IO Distributions\n" \
+            const char* pcszExpected = "\nEffective IO Distributions\n" \
                 "--------------------------\n"
                 "target: testfile.dat [thread: 0]\n"
                 "    10% of IO => [     0    -      8KiB)\n"
                 "    10% of IO => [     8KiB -     20KiB)\n"
                 "    80% of IO => [    28KiB -    100KiB)\n";
-            VERIFY_ARE_EQUAL(pcszResults, parser._sResult);
+            VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
 
             parser._sResult.clear();
         }
@@ -702,7 +766,7 @@ namespace UnitTests
             TargetResults targetResults;
 
             targetResults.sPath = "testfile.dat";
-            targetResults.vDistributionRange = tts._vDistributionRange;
+            targetResults.distribution = tts._distribution;
 
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
@@ -710,13 +774,13 @@ namespace UnitTests
 
             parser._PrintEffectiveDistributions(results);
 
-            const char* pcszResults = "\nEffective IO Distributions\n" \
+            const char* pcszExpected = "\nEffective IO Distributions\n" \
                 "--------------------------\n"
                 "target: testfile.dat [thread: 0 1]\n"
                 "    10% of IO => [     0    -      8KiB)\n"
                 "    10% of IO => [     8KiB -     20KiB)\n"
                 "    80% of IO => [    28KiB -    100KiB)\n";
-            VERIFY_ARE_EQUAL(pcszResults, parser._sResult);
+            VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
 
             parser._sResult.clear();
         }
@@ -731,7 +795,7 @@ namespace UnitTests
             TargetResults targetResults;
 
             targetResults.sPath = "testfile.dat";
-            targetResults.vDistributionRange = tts._vDistributionRange;
+            targetResults.distribution = tts._distribution;
 
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
@@ -740,13 +804,13 @@ namespace UnitTests
 
             parser._PrintEffectiveDistributions(results);
 
-            const char* pcszResults = "\nEffective IO Distributions\n" \
+            const char* pcszExpected = "\nEffective IO Distributions\n" \
                 "--------------------------\n"
                 "target: testfile.dat [thread: 0 - 2]\n"
                 "    10% of IO => [     0    -      8KiB)\n"
                 "    10% of IO => [     8KiB -     20KiB)\n"
                 "    80% of IO => [    28KiB -    100KiB)\n";
-            VERIFY_ARE_EQUAL(pcszResults, parser._sResult);
+            VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
 
             parser._sResult.clear();
         }
@@ -760,7 +824,7 @@ namespace UnitTests
             ThreadResults threadResults;
             TargetResults targetResults;
 
-            targetResults.vDistributionRange = tts._vDistributionRange;
+            targetResults.distribution = tts._distribution;
 
             targetResults.sPath = "testfile.dat";
             threadResults.vTargetResults.push_back(targetResults);
@@ -774,14 +838,14 @@ namespace UnitTests
 
             parser._PrintEffectiveDistributions(results);
 
-            const char* pcszResults = "\nEffective IO Distributions\n" \
+            const char* pcszExpected = "\nEffective IO Distributions\n" \
                 "--------------------------\n"
                 "target: testfile.dat [thread: 0 1]\n"
                 "target: testfile2.dat [thread: 2]\n"
                 "    10% of IO => [     0    -      8KiB)\n"
                 "    10% of IO => [     8KiB -     20KiB)\n"
                 "    80% of IO => [    28KiB -    100KiB)\n";
-            VERIFY_ARE_EQUAL(pcszResults, parser._sResult);
+            VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
 
             parser._sResult.clear();
         }
@@ -797,7 +861,7 @@ namespace UnitTests
             ThreadResults threadResults;
             TargetResults targetResults;
 
-            targetResults.vDistributionRange = tts._vDistributionRange;
+            targetResults.distribution = tts._distribution;
 
             targetResults.sPath = "testfile.dat";
             threadResults.vTargetResults.push_back(targetResults);
@@ -817,14 +881,14 @@ namespace UnitTests
 
             parser._PrintEffectiveDistributions(results);
 
-            const char* pcszResults = "\nEffective IO Distributions\n" \
+            const char* pcszExpected = "\nEffective IO Distributions\n" \
                 "--------------------------\n"
                 "target: testfile.dat [thread: 0 - 2 4]\n"
                 "target: testfile2.dat [thread: 3]\n"
                 "    10% of IO => [     0    -      8KiB)\n"
                 "    10% of IO => [     8KiB -     20KiB)\n"
                 "    80% of IO => [    28KiB -    100KiB)\n";
-            VERIFY_ARE_EQUAL(pcszResults, parser._sResult);
+            VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
 
             parser._sResult.clear();
         }
@@ -839,21 +903,21 @@ namespace UnitTests
             ThreadResults threadResults;
             TargetResults targetResults;
 
-            targetResults.vDistributionRange = tts1._vDistributionRange;
+            targetResults.distribution = tts1._distribution;
             targetResults.sPath = "testfile.dat";
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
 
             threadResults.vTargetResults.clear();
 
-            targetResults.vDistributionRange = tts2._vDistributionRange;
+            targetResults.distribution = tts2._distribution;
             targetResults.sPath = "testfile2.dat";
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
 
             parser._PrintEffectiveDistributions(results);
 
-            const char* pcszResults = "\nEffective IO Distributions\n" \
+            const char* pcszExpected = "\nEffective IO Distributions\n" \
                 "--------------------------\n"
                 "target: testfile.dat [thread: 0]\n"
                 "    10% of IO => [     0    -      8KiB)\n"
@@ -863,7 +927,7 @@ namespace UnitTests
                 "    10% of IO => [     0    -    100KiB)\n"
                 "    10% of IO => [   100KiB -    204KiB)\n"
                 "    80% of IO => [   304KiB -      1MiB)\n";
-            VERIFY_ARE_EQUAL(pcszResults, parser._sResult);
+            VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
 
             parser._sResult.clear();
         }
@@ -904,20 +968,20 @@ namespace UnitTests
             TargetResults targetResults;
 
             targetResults.sPath = "testfile.dat";
-            targetResults.vDistributionRange = tts._vDistributionRange;
+            targetResults.distribution = tts._distribution;
 
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
 
             parser._PrintEffectiveDistributions(results);
 
-            const char* pcszResults = "\nEffective IO Distributions\n" \
+            const char* pcszExpected = "\nEffective IO Distributions\n" \
                 "--------------------------\n"
                 "target: testfile.dat [thread: 0]\n"
                 "    10% of IO => [     0    -      1GiB)\n"
                 "    10% of IO => [     1GiB -      2GiB)\n"
                 "    80% of IO => [   102GiB -    200GiB)\n";
-            VERIFY_ARE_EQUAL(pcszResults, parser._sResult);
+            VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
 
             tp.vTargets.clear();
             v.clear();
@@ -942,24 +1006,395 @@ namespace UnitTests
             TargetResults targetResults;
 
             targetResults.sPath = "testfile.dat";
-            targetResults.vDistributionRange = tts._vDistributionRange;
+            targetResults.distribution = tts._distribution;
 
             threadResults.vTargetResults.push_back(targetResults);
             results.vThreadResults.push_back(threadResults);
 
             parser._PrintEffectiveDistributions(results);
 
-            const char* pcszResults = "\nEffective IO Distributions\n" \
+            const char* pcszExpected = "\nEffective IO Distributions\n" \
                 "--------------------------\n"
                 "target: testfile.dat [thread: 0]\n"
                 "    16.7% of IO => [     0    -     50KiB)\n"
                 "    33.3% of IO => [    50KiB -     60KiB)\n"
                 "    50.0% of IO => [    60KiB -    100KiB)\n";
-            VERIFY_ARE_EQUAL(pcszResults, parser._sResult);
+            VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
 
             tp.vTargets.clear();
             v.clear();
             parser._sResult.clear();
+        }
+    }
+
+    void ResultParserUnitTests::Test_PrintProfileBufferSeparationSystemDefault()
+    {
+        Profile profile;
+        ResultParser parser;
+        TimeSpan timeSpan;
+        Target target;
+
+        SystemInformation mockSystem;
+        mockSystem.ResetTime();
+        mockSystem.sComputerName.clear();
+        mockSystem.sProcessorName.clear();
+        mockSystem.sActivePolicyName.clear();
+        mockSystem.sActivePolicyGuid.clear();
+        mockSystem.dwPageSize = 4096;
+        mockSystem.processorTopology._vProcessorCacheInformation.clear();
+
+        timeSpan.SetBufferSeparation(BufferSeparation::SystemDefault);
+        timeSpan.SetSystem(&mockSystem);
+        timeSpan.Finalize();
+        timeSpan.AddTarget(target);
+        profile.AddTimeSpan(timeSpan);
+
+        string s = parser.ParseProfile(profile);
+        const char *pcszExpected = "\nCommand Line: \n"
+            "\n"
+            "Input parameters:\n"
+            "\n"
+            "  timespan:   1\n"
+            "  -------------\n"
+            "    duration: 10s\n"
+            "    warm up time: 5s\n"
+            "    cool down time: 0s\n"
+            "    random seed: 0\n"
+            "    affinity assignment: cpu order, fill groups, P-cores first\n"
+            "    buffer separation: system default\n"
+            "    path: ''\n"
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      threads per file: 1\n"
+            "      using I/O Completion Ports\n"
+            "      IO priority: normal\n\n";
+
+        VERIFY_MULTILINE_EQUAL(pcszExpected, s);
+    }
+
+    void ResultParserUnitTests::Test_PrintProfileBufferSeparation8KPage128BLine()
+    {
+        Profile profile;
+        ResultParser parser;
+        TimeSpan timeSpan;
+        Target target;
+
+        // 8K pages, 128B cache line => 128MiB effective separation
+        // This verifies the mock system is actually being used (not the real system)
+        SystemInformation mockSystem;
+        mockSystem.ResetTime();
+        mockSystem.sComputerName.clear();
+        mockSystem.sProcessorName.clear();
+        mockSystem.sActivePolicyName.clear();
+        mockSystem.sActivePolicyGuid.clear();
+        mockSystem.dwPageSize = 8192;
+        mockSystem.processorTopology._vProcessorCacheInformation.clear();
+        ProcessorCacheInformation l3(3, 16, 128, 32 * 1024 * 1024, CacheUnified);
+        l3._processorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        mockSystem.processorTopology._vProcessorCacheInformation.push_back(l3);
+
+        timeSpan.SetSystem(&mockSystem);
+        timeSpan.Finalize();
+        timeSpan.AddTarget(target);
+        profile.AddTimeSpan(timeSpan);
+
+        string s = parser.ParseProfile(profile);
+        const char *pcszExpected = "\nCommand Line: \n"
+            "\n"
+            "Input parameters:\n"
+            "\n"
+            "  timespan:   1\n"
+            "  -------------\n"
+            "    duration: 10s\n"
+            "    warm up time: 5s\n"
+            "    cool down time: 0s\n"
+            "    random seed: 0\n"
+            "    affinity assignment: cpu order, fill groups, P-cores first\n"
+            "    buffer separation: thread optimized (128MiB)\n"
+            "    path: ''\n"
+            "      think time: 0ms\n"
+            "      burst size: 0\n"
+            "      using software cache\n"
+            "      using hardware write cache, writethrough off\n"
+            "      performing read test\n"
+            "      block size: 64KiB\n"
+            "      using sequential I/O (stride: 64KiB)\n"
+            "      number of outstanding I/O operations per thread: 2\n"
+            "      threads per file: 1\n"
+            "      using I/O Completion Ports\n"
+            "      IO priority: normal\n\n";
+
+        VERIFY_MULTILINE_EQUAL(pcszExpected, s);
+    }
+
+    void ResultParserUnitTests::Test_PrintResultsBufferSeparation8KPage128BLine()
+    {
+        //
+        // Verify that the text result output uses the mock system's 8K/128B
+        // values (128MiB effective separation), not the real system.
+        //
+
+        Profile profile;
+        TimeSpan timeSpan;
+        ResultParser parser;
+        Target target;
+
+        Results results;
+        results.fUseETW = false;
+        results.ullTimeCount = PerfTimer::SecondsToPerfTime(10.0);
+
+        SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION spi = {};
+        results.vSystemProcessorPerfInfo.push_back(spi);
+
+        TargetResults targetResults;
+        targetResults.sPath = "testfile.dat";
+        targetResults.ullFileSize = 1024 * 1024;
+
+        ThreadResults threadResults;
+        threadResults.vTargetResults.push_back(targetResults);
+        results.vThreadResults.push_back(threadResults);
+
+        vector<Results> vResults;
+        vResults.push_back(results);
+
+        SystemInformation system;
+        system.sComputerName.clear();
+        system.sProcessorName.clear();
+        system.ResetTime();
+        system.sActivePolicyName.clear();
+        system.sActivePolicyGuid.clear();
+        system.dwPageSize = 8192;
+        system.processorTopology._ulProcessorCount = 1;
+        system.processorTopology._ubPerformanceEfficiencyClass = 0;
+        system.processorTopology._fSMT = false;
+        system.processorTopology._vProcessorGroupInformation.clear();
+        system.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)1, (BYTE)1, (KAFFINITY)0x1);
+        ProcessorNumaInformation node;
+        node._nodeNumber = 0;
+        node._ulProcCount = 0;
+        node._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorNumaInformation.clear();
+        system.processorTopology._vProcessorNumaInformation.push_back(node);
+        ProcessorSocketInformation socket;
+        socket._ulSocketNumber = 0;
+        socket._ulProcCount = 0;
+        socket._vProcessorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorSocketInformation.clear();
+        system.processorTopology._vProcessorSocketInformation.push_back(socket);
+        system.processorTopology._vProcessorCoreInformation.clear();
+        system.processorTopology._vProcessorCoreInformation.emplace_back((WORD)0, (KAFFINITY)0x1, (BYTE)0);
+        system.processorTopology._vProcessorCacheInformation.clear();
+        ProcessorCacheInformation l3(3, 16, 128, 32 * 1024 * 1024, CacheUnified);
+        l3._processorMasks.emplace_back((WORD)0, (KAFFINITY)0x1);
+        system.processorTopology._vProcessorCacheInformation.push_back(l3);
+
+        timeSpan.SetSystem(&system);
+        timeSpan.Finalize();
+        timeSpan.AddTarget(target);
+        profile.AddTimeSpan(timeSpan);
+
+        string sResults = parser.ParseResults(profile, system, vResults);
+
+        // Verify the 8K/128B effective separation appears in text output
+        VERIFY_IS_TRUE(sResults.find("buffer separation: thread optimized (128MiB)") != string::npos);
+    }
+
+    void ResultParserUnitTests::Test_PrintWaitStatsNoThrottleNoLookaside()
+    {
+        ResultParser parser;
+        TimeSpan timeSpan;
+
+        Results results;
+        ThreadResults tr;
+        tr.WaitStats = {};
+        tr.WaitStats.Wait = 100;
+        tr.WaitStats.fThrottled = false;
+        tr.WaitStats.WaitCompletion[0] = 10;
+        tr.WaitStats.WaitCompletion[1] = 20;
+        tr.WaitStats.WaitCompletion[2] = 30;
+        tr.WaitStats.WaitCompletion[3] = 40;
+        results.vThreadResults.push_back(tr);
+
+        parser._PrintWaitStats(results, timeSpan);
+
+        const char *pcszExpected =
+            "Wait Statistics - Completion Wait\n"
+            "thread |         wait | 0 - 7+ complete per wait\n"
+            "------------------------------------------------\n"
+            "     0 |          100 | 10 20 30 40 0 0 0 0\n";
+
+        VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
+    }
+
+    void ResultParserUnitTests::Test_PrintWaitStatsWithThrottle()
+    {
+        ResultParser parser;
+        TimeSpan timeSpan;
+
+        Results results;
+
+        // Thread 0: throttled
+        ThreadResults tr0;
+        tr0.WaitStats = {};
+        tr0.WaitStats.Wait = 100;
+        tr0.WaitStats.ThrottleWait = 50;
+        tr0.WaitStats.ThrottleSleep = 5;
+        tr0.WaitStats.fThrottled = true;
+        tr0.WaitStats.WaitCompletion[1] = 90;
+        results.vThreadResults.push_back(tr0);
+
+        // Thread 1: not throttled
+        ThreadResults tr1;
+        tr1.WaitStats = {};
+        tr1.WaitStats.Wait = 200;
+        tr1.WaitStats.fThrottled = false;
+        tr1.WaitStats.WaitCompletion[2] = 180;
+        results.vThreadResults.push_back(tr1);
+
+        parser._PrintWaitStats(results, timeSpan);
+
+        const char *pcszExpected =
+            "Wait Statistics - Completion Wait\n"
+            "thread |         wait | throttle wait  -  sleep | 0 - 7+ complete per wait\n"
+            "--------------------------------------------------------------------------\n"
+            "     0 |          100 |            50  -      5 | 0 90 0 0 0 0 0 0\n"
+            "     1 |          200 |               ---       | 0 0 180 0 0 0 0 0\n";
+
+        VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
+    }
+
+    void ResultParserUnitTests::Test_PrintWaitStatsWithLookaside()
+    {
+        ResultParser parser;
+        TimeSpan timeSpan;
+        timeSpan.SetMeasureLatency(true);
+
+        Results results;
+        ThreadResults tr;
+        tr.WaitStats = {};
+        tr.WaitStats.Wait = 100;
+        tr.WaitStats.Lookaside = 500;
+        tr.WaitStats.fThrottled = false;
+        tr.WaitStats.WaitCompletion[1] = 90;
+        tr.WaitStats.LookasideCompletion[0] = 11;
+        tr.WaitStats.LookasideCompletion[1] = 22;
+        tr.WaitStats.LookasideCompletion[2] = 33;
+        results.vThreadResults.push_back(tr);
+
+        parser._PrintWaitStats(results, timeSpan);
+
+        const char *pcszExpected =
+            "Wait Statistics - Completion Wait\n"
+            "thread |         wait | 0 - 7+ complete per wait\n"
+            "------------------------------------------------\n"
+            "     0 |          100 | 0 90 0 0 0 0 0 0\n"
+            "\n"
+            "Wait Statistics - Lookaside\n"
+            "thread |    lookaside | 0 - 7+ complete per lookaside\n"
+            "-----------------------------------------------------\n"
+            "     0 |          500 | 11 22 33 0 0 0 0 0\n";
+
+        VERIFY_MULTILINE_EQUAL(pcszExpected, parser._sResult);
+    }
+
+    void ResultParserUnitTests::Test_PrintAffinityPolicy()
+    {
+        SystemInformation mockSystem;
+        mockSystem.processorTopology._vProcessorGroupInformation.clear();
+        mockSystem.processorTopology._vProcessorGroupInformation.emplace_back((WORD)0, (BYTE)4, (BYTE)4, (KAFFINITY)0xF);
+        mockSystem.processorTopology._vProcessorCoreInformation.clear();
+        mockSystem.processorTopology._vProcessorCoreInformation.emplace_back((WORD)0, (KAFFINITY)0x3, (BYTE)0);
+        mockSystem.processorTopology._vProcessorCoreInformation.emplace_back((WORD)0, (KAFFINITY)0xC, (BYTE)0);
+        mockSystem.processorTopology._ubPerformanceEfficiencyClass = 0;
+        mockSystem.processorTopology._fSMT = true;
+
+        // Default (Cpu, Fill, Unspecified resolves to PFirst)
+        {
+            TimeSpan ts;
+            ts.SetSystem(&mockSystem);
+            ts.Finalize();
+            string s = ts.GetText(0);
+            VERIFY_IS_TRUE(s.find("affinity assignment: cpu order, fill groups, P-cores first\n") != string::npos);
+        }
+
+        // PFirst explicitly set - same display as default
+        {
+            TimeSpan ts;
+            ts.SetSystem(&mockSystem);
+            ts.SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::PFirst);
+            ts.Finalize();
+            string s = ts.GetText(0);
+            VERIFY_IS_TRUE(s.find("affinity assignment: cpu order, fill groups, P-cores first\n") != string::npos);
+        }
+
+        // EFirst (default Cpu traversal)
+        {
+            TimeSpan ts;
+            ts.SetSystem(&mockSystem);
+            ts.SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::EFirst);
+            ts.Finalize();
+            string s = ts.GetText(0);
+            VERIFY_IS_TRUE(s.find("affinity assignment: cpu order, fill groups, E-cores first\n") != string::npos);
+        }
+
+        // FillPFirst (default Cpu traversal)
+        {
+            TimeSpan ts;
+            ts.SetSystem(&mockSystem);
+            ts.SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::FillPFirst);
+            ts.Finalize();
+            string s = ts.GetText(0);
+            VERIFY_IS_TRUE(s.find("affinity assignment: cpu order, fill groups, fill P-cores first\n") != string::npos);
+        }
+
+        // FillEFirst (default Cpu traversal)
+        {
+            TimeSpan ts;
+            ts.SetSystem(&mockSystem);
+            ts.SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::FillEFirst);
+            ts.Finalize();
+            string s = ts.GetText(0);
+            VERIFY_IS_TRUE(s.find("affinity assignment: cpu order, fill groups, fill E-cores first\n") != string::npos);
+        }
+
+        // Cpu + FillEFirst (explicit Cpu, same as default)
+        {
+            TimeSpan ts;
+            ts.SetSystem(&mockSystem);
+            ts.SetAffinityTraversal(AffinityTraversal::Cpu);
+            ts.SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::FillEFirst);
+            ts.Finalize();
+            string s = ts.GetText(0);
+            VERIFY_IS_TRUE(s.find("affinity assignment: cpu order, fill groups, fill E-cores first\n") != string::npos);
+        }
+
+        // CoreAware + Span + EFirst
+        {
+            TimeSpan ts;
+            ts.SetSystem(&mockSystem);
+            ts.SetAffinityTraversal(AffinityTraversal::CoreAware);
+            ts.SetAffinityGroupSpan(AffinityGroupSpan::Span);
+            ts.SetAffinityEfficiencyOrder(AffinityEfficiencyOrder::EFirst);
+            ts.Finalize();
+            string s = ts.GetText(0);
+            VERIFY_IS_TRUE(s.find("affinity assignment: core-aware, span groups, E-cores first\n") != string::npos);
+        }
+
+        // Disabled - no affinity assignment line at all
+        {
+            TimeSpan ts;
+            ts.SetSystem(&mockSystem);
+            ts.SetDisableAffinity(true);
+            ts.Finalize();
+            string s = ts.GetText(0);
+            VERIFY_IS_TRUE(s.find("affinity disabled\n") != string::npos);
+            VERIFY_IS_TRUE(s.find("affinity assignment") == string::npos);
         }
     }
 }
